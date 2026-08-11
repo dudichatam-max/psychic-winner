@@ -12,7 +12,6 @@ import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -29,7 +28,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,7 +35,6 @@ import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentHashMap
@@ -62,8 +59,10 @@ class SynthEngine(private val context: Context) {
     private val sampleRate = 44100
     @Volatile private var isRunning = true
     private val activeNotes = ConcurrentHashMap<Float, NoteState>()
+    
     var volume = 0.5f
     var waveformType = 0 // 0=Sine, 1=Square, 2=Triangle
+    var releaseTimeVal = 50 // ערך ברירת מחדל בין 1 ל-100
 
     val visualizerBuffer = FloatArray(256)
 
@@ -143,8 +142,8 @@ class SynthEngine(private val context: Context) {
         buffer.putInt(totalDataLen)
         buffer.put("WAVE".toByteArray())
         buffer.put("fmt ".toByteArray())
-        buffer.putInt(16) // Subchunk1Size (16 for PCM)
-        buffer.putShort(1.toShort()) // AudioFormat (1 for PCM)
+        buffer.putInt(16)
+        buffer.putShort(1.toShort())
         buffer.putShort(channels.toShort())
         buffer.putInt(sampleRate)
         buffer.putInt(byteRate)
@@ -185,6 +184,11 @@ class SynthEngine(private val context: Context) {
 
             while (isRunning) {
                 byteBuffer.clear()
+                
+                // חישוב מקדם דעיכה מעריכי לפי ה-Release שנבחר בסליידר (1-100)
+                // ערך 1 = דעיכה מהירה מאד, ערך 100 = דעיכה ארוכה ורכה מאוד
+                val releaseFactor = 1.0f - (0.0001f + (101 - releaseTimeVal) * 0.0002f)
+
                 for (i in buffer.indices) {
                     var sample = 0.0
                     val iterator = activeNotes.entries.iterator()
@@ -197,9 +201,10 @@ class SynthEngine(private val context: Context) {
 
                         state.phase = (state.phase + (2.0 * Math.PI * freq / sampleRate) % (2.0 * Math.PI)).toFloat()
 
+                        // דעיכה מעריכית הרמונית
                         if (state.isReleasing) {
-                            state.releaseVolume -= 0.02f
-                            if (state.releaseVolume <= 0f) {
+                            state.releaseVolume *= releaseFactor
+                            if (state.releaseVolume <= 0.001f) {
                                 iterator.remove()
                                 activeCount--
                                 continue
@@ -238,6 +243,9 @@ class SynthEngine(private val context: Context) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynthAppUI(engine: SynthEngine) {
+    val defaultFrequencies = remember {
+        listOf(261.63f, 293.66f, 329.63f, 349.23f, 392.00f, 440.00f, 493.88f, 523.25f)
+    }
     val frequencies = remember {
         mutableStateListOf(261.63f, 293.66f, 329.63f, 349.23f, 392.00f, 440.00f, 493.88f, 523.25f)
     }
@@ -245,6 +253,7 @@ fun SynthAppUI(engine: SynthEngine) {
 
     var currentWave by remember { mutableIntStateOf(0) }
     var vol by remember { mutableFloatStateOf(0.5f) }
+    var releaseVal by remember { mutableFloatStateOf(50f) } // ערך הסליידר 1-100
     var isRec by remember { mutableStateOf(false) }
 
     var renderTrigger by remember { mutableLongStateOf(0L) }
@@ -269,7 +278,6 @@ fun SynthAppUI(engine: SynthEngine) {
         ) {
             Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-            // כפתור הקלטה ושמירה
             Button(
                 onClick = {
                     if (isRec) {
@@ -295,7 +303,7 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
 
         // בורר גלים
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
@@ -308,22 +316,34 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // סליידר עוצמה
-        Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
+        // סליידר עוצמה (Volume)
+        Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 11.sp)
         Slider(
             value = vol,
             onValueChange = { vol = it; engine.volume = it },
             modifier = Modifier.fillMaxWidth(0.9f)
         )
 
-        Spacer(Modifier.height(8.dp))
+        // סליידר דעיכה (Release: 1 - 100)
+        Text("Release (Fade-out): ${releaseVal.toInt()}", color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Slider(
+            value = releaseVal,
+            valueRange = 1f..100f,
+            onValueChange = { 
+                releaseVal = it
+                engine.releaseTimeVal = it.toInt()
+            },
+            modifier = Modifier.fillMaxWidth(0.9f)
+        )
+
+        Spacer(Modifier.height(4.dp))
 
         // צג ויזואליזר ירוק
-        Text("Waveform Monitor", color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("Waveform Monitor", color = Color.Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(90.dp)
+                .height(80.dp)
                 .background(Color.Black, shape = RoundedCornerShape(8.dp))
                 .padding(4.dp)
         ) {
@@ -340,13 +360,13 @@ fun SynthAppUI(engine: SynthEngine) {
             drawPath(path, Color(0xFF00FF66), style = Stroke(width = 3f))
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
 
         // תיבות כיוון תדרים
-        Text("כיוון תדרים (Hz):", color = Color(0xFFFFD700), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("כיוון תדרים (Hz):", color = Color(0xFFFFD700), fontSize = 11.sp, fontWeight = FontWeight.Bold)
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.padding(vertical = 4.dp)
+            modifier = Modifier.padding(vertical = 2.dp)
         ) {
             itemsIndexed(frequencies) { index, freq ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -364,13 +384,24 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
+        // כפתור איפוס תדרים לברירת המחדל
+        OutlinedButton(
+            onClick = {
+                defaultFrequencies.forEachIndexed { i, f -> frequencies[i] = f }
+            },
+            modifier = Modifier.padding(top = 2.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("איפוס תדרים (Reset)", color = Color(0xFFFFD700), fontSize = 10.sp)
+        }
+
         Spacer(Modifier.weight(1f))
 
         // מקלדת
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(150.dp),
+                .height(140.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             frequencies.forEachIndexed { index, freq ->
@@ -400,8 +431,8 @@ fun SynthAppUI(engine: SynthEngine) {
                             text = "${noteNames[index]}\n${freq.toInt()}Hz",
                             color = if (isPressed) Color.Black else Color.DarkGray,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(bottom = 8.dp)
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(bottom = 6.dp)
                         )
                     }
                 }
