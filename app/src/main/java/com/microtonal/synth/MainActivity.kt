@@ -14,6 +14,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -62,12 +63,10 @@ class SynthEngine(private val context: Context) {
     var volume = 0.5f
     var waveformType = 0 // 0=Sine, 1=Square, 2=Triangle
 
-    // מעטפת צליל (Envelope Params)
     var attackMs = 15f      // 5ms - 500ms
-    var sustainLevel = 0.8f // 0.0 - 1.0 (עוצמת החזקה)
+    var sustainLevel = 0.8f // 0.0 - 1.0
     var releaseMs = 200f    // 20ms - 2000ms
 
-    // אוקטבה נוכחית (-2 עד +2)
     var octaveShift = 0
 
     val visualizerBuffer = FloatArray(256)
@@ -252,7 +251,6 @@ class SynthEngine(private val context: Context) {
                         sample = (sample / activeCount) * volume
                     }
 
-                    // Low-Pass Filter לעידון תדרים חדים
                     sample = lastSampleFilter + 0.25 * (sample - lastSampleFilter)
                     lastSampleFilter = sample
 
@@ -340,7 +338,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // בורר גלים ואוקטבות
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -356,7 +353,6 @@ fun SynthAppUI(engine: SynthEngine) {
                 }
             }
 
-            // כפתורי אוקטבה
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(
                     onClick = {
@@ -382,7 +378,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // סליידרים
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 10.sp)
@@ -407,7 +402,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // ויזואליזר
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
@@ -430,7 +424,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // כיוון תדרים
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("כיוון תדרים (Hz):", color = Color(0xFFFFD700), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             OutlinedButton(
@@ -461,7 +454,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.weight(1f))
 
-        // מקלדת
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -479,7 +471,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         .weight(1f)
                         .fillMaxHeight()
                         .pointerInput(freq) {
-                            androidx.compose.foundation.gestures.detectTapGestures(
+                            detectTapGestures(
                                 onPress = {
                                     isPressed = true
                                     engine.noteOn(freq)
