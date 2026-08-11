@@ -1,17 +1,25 @@
 package com.microtonal.synth
 
+import android.content.ContentValues
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,10 +29,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 import kotlin.math.sin
@@ -32,34 +47,113 @@ import kotlin.math.sin
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val engine = SynthEngine()
+        val engine = SynthEngine(this)
         engine.start()
         setContent { SynthAppUI(engine) }
     }
 }
 
-// מחלקה לניהול מצב התו (שלב הגל והדעיכה)
 class NoteState(var phase: Float) {
     var isReleasing = false
     var releaseVolume = 1.0f
 }
 
-// מנוע סאונד רציף עם מעטפת מעבר רכה (Release Envelope) למניעת קליקים וקטיעת צלילים
-class SynthEngine {
+class SynthEngine(private val context: Context) {
     private val sampleRate = 44100
     @Volatile private var isRunning = true
     private val activeNotes = ConcurrentHashMap<Float, NoteState>()
     var volume = 0.5f
     var waveformType = 0 // 0=Sine, 1=Square, 2=Triangle
-    
+
     val visualizerBuffer = FloatArray(256)
 
-    fun noteOn(freq: Float) { 
-        activeNotes[freq] = NoteState(0f) 
+    // משתני הקלטה
+    @Volatile var isRecording = false
+        private set
+    private var recordedAudioStream: ByteArrayOutputStream? = null
+
+    fun noteOn(freq: Float) {
+        activeNotes[freq] = NoteState(0f)
     }
-    
-    fun noteOff(freq: Float) { 
-        activeNotes[freq]?.isReleasing = true 
+
+    fun noteOff(freq: Float) {
+        activeNotes[freq]?.isReleasing = true
+    }
+
+    fun startRecording() {
+        recordedAudioStream = ByteArrayOutputStream()
+        isRecording = true
+    }
+
+    fun stopAndSaveRecording() {
+        if (!isRecording) return
+        isRecording = false
+
+        thread {
+            val audioBytes = recordedAudioStream?.toByteArray() ?: return@thread
+            saveWavFile(audioBytes)
+        }
+    }
+
+    private fun saveWavFile(pcmData: ByteArray) {
+        val fileName = "Synth_Rec_${System.currentTimeMillis()}.wav"
+        val header = createWavHeader(pcmData.size, sampleRate, 1, 16)
+        
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val resolver = context.contentResolver
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/MicroSynth")
+                }
+                val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, contentValues)
+                uri?.let {
+                    resolver.openOutputStream(it)?.use { os ->
+                        os.write(header)
+                        os.write(pcmData)
+                    }
+                }
+            } else {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val file = File(downloadsDir, fileName)
+                FileOutputStream(file).use { os ->
+                    os.write(header)
+                    os.write(pcmData)
+                }
+            }
+            
+            thread {
+                context.getMainExecutor().execute {
+                    Toast.makeText(context, "ההקלטה שנשמרה: $fileName", Toast.LENGTH_LONG).show()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun createWavHeader(pcmDataLen: Int, sampleRate: Int, channels: Int, bitsPerSample: Int): ByteArray {
+        val totalDataLen = pcmDataLen + 36
+        val byteRate = sampleRate * channels * bitsPerSample / 8
+        val header = ByteArray(44)
+        
+        val buffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
+        buffer.put("RIFF".toByteArray())
+        buffer.putInt(totalDataLen)
+        buffer.put("WAVE".toByteArray())
+        buffer.put("fmt ".toByteArray())
+        buffer.putInt(16) // Subchunk1Size (16 for PCM)
+        buffer.putShort(1.toShort()) // AudioFormat (1 for PCM)
+        buffer.putShort(channels.toShort())
+        buffer.putInt(sampleRate)
+        buffer.putInt(byteRate)
+        buffer.putShort((channels * bitsPerSample / 8).toShort())
+        buffer.putShort(bitsPerSample.toShort())
+        buffer.put("data".toByteArray())
+        buffer.putInt(pcmDataLen)
+        
+        return header
     }
 
     fun start() {
@@ -87,8 +181,10 @@ class SynthEngine {
 
             audioTrack.play()
             val buffer = ShortArray(256)
-            
+            val byteBuffer = ByteBuffer.allocate(512).order(ByteOrder.LITTLE_ENDIAN)
+
             while (isRunning) {
+                byteBuffer.clear()
                 for (i in buffer.indices) {
                     var sample = 0.0
                     val iterator = activeNotes.entries.iterator()
@@ -98,37 +194,41 @@ class SynthEngine {
                         val entry = iterator.next()
                         val freq = entry.key
                         val state = entry.value
-                        
-                        // חישוב פאזת הגל
+
                         state.phase = (state.phase + (2.0 * Math.PI * freq / sampleRate) % (2.0 * Math.PI)).toFloat()
-                        
-                        // תהליך הדעיכה הרכה בעת עזיבת המקש
+
                         if (state.isReleasing) {
-                            state.releaseVolume -= 0.02f // קצב הדעיכה
+                            state.releaseVolume -= 0.02f
                             if (state.releaseVolume <= 0f) {
-                                iterator.remove() // מחיקת התו מהמנוע לאחר שהשתתק לגמרי
+                                iterator.remove()
                                 activeCount--
                                 continue
                             }
                         }
 
-                        val raw = when(waveformType) {
+                        val raw = when (waveformType) {
                             0 -> sin(state.phase.toDouble())
                             1 -> if (sin(state.phase.toDouble()) >= 0) 0.5 else -0.5
                             else -> (2.0 / Math.PI) * Math.asin(sin(state.phase.toDouble()))
                         }
-                        
+
                         sample += raw * state.releaseVolume
                     }
-                    
+
                     if (activeCount > 0) {
                         sample = (sample / activeCount) * volume
                     }
-                    
+
                     val shortVal = (sample * Short.MAX_VALUE).toInt().coerceIn(-32768, 32767).toShort()
                     buffer[i] = shortVal
                     visualizerBuffer[i] = sample.toFloat()
+                    byteBuffer.putShort(shortVal)
                 }
+
+                if (isRecording) {
+                    recordedAudioStream?.write(byteBuffer.array())
+                }
+
                 audioTrack.write(buffer, 0, buffer.size)
             }
         }
@@ -142,14 +242,14 @@ fun SynthAppUI(engine: SynthEngine) {
         mutableStateListOf(261.63f, 293.66f, 329.63f, 349.23f, 392.00f, 440.00f, 493.88f, 523.25f)
     }
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
-    
+
     var currentWave by remember { mutableIntStateOf(0) }
     var vol by remember { mutableFloatStateOf(0.5f) }
-    
-    // רענון צג הויזואליזר
+    var isRec by remember { mutableStateOf(false) }
+
     var renderTrigger by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
-        while(true) {
+        while (true) {
             delay(30)
             renderTrigger = System.currentTimeMillis()
         }
@@ -162,8 +262,39 @@ fun SynthAppUI(engine: SynthEngine) {
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+
+            // כפתור הקלטה ושמירה
+            Button(
+                onClick = {
+                    if (isRec) {
+                        engine.stopAndSaveRecording()
+                        isRec = false
+                    } else {
+                        engine.startRecording()
+                        isRec = true
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isRec) Color(0xFFFF1744) else Color(0xFF333333)
+                ),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(if (isRec) Color.White else Color.Red, shape = CircleShape)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(if (isRec) "שמור הקלטה" else "הקלט", color = Color.White, fontSize = 12.sp)
+            }
+        }
+
         Spacer(Modifier.height(8.dp))
 
         // בורר גלים
@@ -176,8 +307,8 @@ fun SynthAppUI(engine: SynthEngine) {
                 )
             }
         }
-        
-        // סליידר עוצמת שמע
+
+        // סליידר עוצמה
         Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
         Slider(
             value = vol,
@@ -187,12 +318,12 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(8.dp))
 
-        // צג ויזואליזר ירוק לגל הקול
+        // צג ויזואליזר ירוק
         Text("Waveform Monitor", color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(100.dp)
+                .height(90.dp)
                 .background(Color.Black, shape = RoundedCornerShape(8.dp))
                 .padding(4.dp)
         ) {
@@ -200,7 +331,7 @@ fun SynthAppUI(engine: SynthEngine) {
             val path = Path()
             val centerY = size.height / 2
             val step = size.width / engine.visualizerBuffer.size
-            
+
             engine.visualizerBuffer.forEachIndexed { i, sample ->
                 val x = i * step
                 val y = centerY + (sample * centerY * 0.9f)
@@ -235,11 +366,11 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.weight(1f))
 
-        // מקלדת מולטי-טאץ'
+        // מקלדת
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(160.dp),
+                .height(150.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             frequencies.forEachIndexed { index, freq ->
