@@ -14,7 +14,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -50,32 +49,50 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-class NoteState(var phase: Float) {
+class NoteState(var phase: Double) {
+    var envelopeVolume = 0.0
     var isReleasing = false
-    var releaseVolume = 1.0f
 }
 
 class SynthEngine(private val context: Context) {
     private val sampleRate = 44100
     @Volatile private var isRunning = true
     private val activeNotes = ConcurrentHashMap<Float, NoteState>()
-    
+
     var volume = 0.5f
     var waveformType = 0 // 0=Sine, 1=Square, 2=Triangle
-    var releaseTimeVal = 50 // ערך ברירת מחדל בין 1 ל-100
+
+    // מעטפת צליל (Envelope Params)
+    var attackMs = 15f      // 5ms - 500ms
+    var sustainLevel = 0.8f // 0.0 - 1.0 (עוצמת החזקה)
+    var releaseMs = 200f    // 20ms - 2000ms
+
+    // אוקטבה נוכחית (-2 עד +2)
+    var octaveShift = 0
 
     val visualizerBuffer = FloatArray(256)
 
-    // משתני הקלטה
     @Volatile var isRecording = false
         private set
     private var recordedAudioStream: ByteArrayOutputStream? = null
 
-    fun noteOn(freq: Float) {
-        activeNotes[freq] = NoteState(0f)
+    fun getEffectiveFrequency(baseFreq: Float): Float {
+        val multiplier = Math.pow(2.0, octaveShift.toDouble()).toFloat()
+        return baseFreq * multiplier
     }
 
-    fun noteOff(freq: Float) {
+    fun noteOn(baseFreq: Float) {
+        val freq = getEffectiveFrequency(baseFreq)
+        val existing = activeNotes[freq]
+        if (existing != null) {
+            existing.isReleasing = false
+        } else {
+            activeNotes[freq] = NoteState(0.0)
+        }
+    }
+
+    fun noteOff(baseFreq: Float) {
+        val freq = getEffectiveFrequency(baseFreq)
         activeNotes[freq]?.isReleasing = true
     }
 
@@ -97,7 +114,7 @@ class SynthEngine(private val context: Context) {
     private fun saveWavFile(pcmData: ByteArray) {
         val fileName = "Synth_Rec_${System.currentTimeMillis()}.wav"
         val header = createWavHeader(pcmData.size, sampleRate, 1, 16)
-        
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val resolver = context.contentResolver
@@ -121,7 +138,7 @@ class SynthEngine(private val context: Context) {
                     os.write(pcmData)
                 }
             }
-            
+
             thread {
                 context.getMainExecutor().execute {
                     Toast.makeText(context, "ההקלטה שנשמרה: $fileName", Toast.LENGTH_LONG).show()
@@ -136,7 +153,7 @@ class SynthEngine(private val context: Context) {
         val totalDataLen = pcmDataLen + 36
         val byteRate = sampleRate * channels * bitsPerSample / 8
         val header = ByteArray(44)
-        
+
         val buffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
         buffer.put("RIFF".toByteArray())
         buffer.putInt(totalDataLen)
@@ -151,7 +168,7 @@ class SynthEngine(private val context: Context) {
         buffer.putShort(bitsPerSample.toShort())
         buffer.put("data".toByteArray())
         buffer.putInt(pcmDataLen)
-        
+
         return header
     }
 
@@ -181,13 +198,13 @@ class SynthEngine(private val context: Context) {
             audioTrack.play()
             val buffer = ShortArray(256)
             val byteBuffer = ByteBuffer.allocate(512).order(ByteOrder.LITTLE_ENDIAN)
+            var lastSampleFilter = 0.0
 
             while (isRunning) {
                 byteBuffer.clear()
-                
-                // חישוב מקדם דעיכה מעריכי לפי ה-Release שנבחר בסליידר (1-100)
-                // ערך 1 = דעיכה מהירה מאד, ערך 100 = דעיכה ארוכה ורכה מאוד
-                val releaseFactor = 1.0f - (0.0001f + (101 - releaseTimeVal) * 0.0002f)
+
+                val attackStep = 1.0 / (sampleRate * (attackMs / 1000.0))
+                val releaseStep = 1.0 / (sampleRate * (releaseMs / 1000.0))
 
                 for (i in buffer.indices) {
                     var sample = 0.0
@@ -199,12 +216,23 @@ class SynthEngine(private val context: Context) {
                         val freq = entry.key
                         val state = entry.value
 
-                        state.phase = (state.phase + (2.0 * Math.PI * freq / sampleRate) % (2.0 * Math.PI)).toFloat()
+                        state.phase += (2.0 * Math.PI * freq / sampleRate)
+                        if (state.phase >= 2.0 * Math.PI) {
+                            state.phase %= (2.0 * Math.PI)
+                        }
 
-                        // דעיכה מעריכית הרמונית
-                        if (state.isReleasing) {
-                            state.releaseVolume *= releaseFactor
-                            if (state.releaseVolume <= 0.001f) {
+                        if (!state.isReleasing) {
+                            if (state.envelopeVolume < sustainLevel) {
+                                state.envelopeVolume += attackStep
+                                if (state.envelopeVolume > sustainLevel) state.envelopeVolume = sustainLevel.toDouble()
+                            } else if (state.envelopeVolume > sustainLevel) {
+                                state.envelopeVolume -= attackStep
+                                if (state.envelopeVolume < sustainLevel) state.envelopeVolume = sustainLevel.toDouble()
+                            }
+                        } else {
+                            state.envelopeVolume -= releaseStep
+                            if (state.envelopeVolume <= 0.0) {
+                                state.envelopeVolume = 0.0
                                 iterator.remove()
                                 activeCount--
                                 continue
@@ -212,17 +240,21 @@ class SynthEngine(private val context: Context) {
                         }
 
                         val raw = when (waveformType) {
-                            0 -> sin(state.phase.toDouble())
-                            1 -> if (sin(state.phase.toDouble()) >= 0) 0.5 else -0.5
-                            else -> (2.0 / Math.PI) * Math.asin(sin(state.phase.toDouble()))
+                            0 -> sin(state.phase)
+                            1 -> if (sin(state.phase) >= 0) 0.4 else -0.4
+                            else -> (2.0 / Math.PI) * Math.asin(sin(state.phase))
                         }
 
-                        sample += raw * state.releaseVolume
+                        sample += raw * state.envelopeVolume
                     }
 
                     if (activeCount > 0) {
                         sample = (sample / activeCount) * volume
                     }
+
+                    // Low-Pass Filter לעידון תדרים חדים
+                    sample = lastSampleFilter + 0.25 * (sample - lastSampleFilter)
+                    lastSampleFilter = sample
 
                     val shortVal = (sample * Short.MAX_VALUE).toInt().coerceIn(-32768, 32767).toShort()
                     buffer[i] = shortVal
@@ -253,7 +285,10 @@ fun SynthAppUI(engine: SynthEngine) {
 
     var currentWave by remember { mutableIntStateOf(0) }
     var vol by remember { mutableFloatStateOf(0.5f) }
-    var releaseVal by remember { mutableFloatStateOf(50f) } // ערך הסליידר 1-100
+    var attackVal by remember { mutableFloatStateOf(15f) }
+    var sustainVal by remember { mutableFloatStateOf(0.8f) }
+    var releaseVal by remember { mutableFloatStateOf(200f) }
+    var currentOctave by remember { mutableIntStateOf(0) }
     var isRec by remember { mutableStateOf(false) }
 
     var renderTrigger by remember { mutableLongStateOf(0L) }
@@ -268,7 +303,7 @@ fun SynthAppUI(engine: SynthEngine) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF121212))
-            .padding(16.dp),
+            .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(
@@ -276,7 +311,7 @@ fun SynthAppUI(engine: SynthEngine) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
             Button(
                 onClick = {
@@ -295,55 +330,88 @@ fun SynthAppUI(engine: SynthEngine) {
             ) {
                 Box(
                     modifier = Modifier
-                        .size(10.dp)
+                        .size(8.dp)
                         .background(if (isRec) Color.White else Color.Red, shape = CircleShape)
                 )
                 Spacer(Modifier.width(6.dp))
-                Text(if (isRec) "שמור הקלטה" else "הקלט", color = Color.White, fontSize = 12.sp)
+                Text(if (isRec) "שמור הקלטה" else "הקלט", color = Color.White, fontSize = 11.sp)
             }
         }
 
         Spacer(Modifier.height(4.dp))
 
-        // בורר גלים
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
-            listOf("Sine", "Square", "Triangle").forEachIndexed { i, name ->
-                FilterChip(
-                    selected = currentWave == i,
-                    onClick = { currentWave = i; engine.waveformType = i },
-                    label = { Text(name) }
-                )
+        // בורר גלים ואוקטבות
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("Sine", "Square", "Triangle").forEachIndexed { i, name ->
+                    FilterChip(
+                        selected = currentWave == i,
+                        onClick = { currentWave = i; engine.waveformType = i },
+                        label = { Text(name, fontSize = 10.sp) }
+                    )
+                }
+            }
+
+            // כפתורי אוקטבה
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = {
+                        if (currentOctave > -2) {
+                            currentOctave--
+                            engine.octaveShift = currentOctave
+                        }
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) { Text("-1 Oct", fontSize = 10.sp, color = Color.White) }
+
+                Text(" Oct: $currentOctave ", color = Color.Yellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+                OutlinedButton(
+                    onClick = {
+                        if (currentOctave < 2) {
+                            currentOctave++
+                            engine.octaveShift = currentOctave
+                        }
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) { Text("+1 Oct", fontSize = 10.sp, color = Color.White) }
             }
         }
 
-        // סליידר עוצמה (Volume)
-        Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 11.sp)
-        Slider(
-            value = vol,
-            onValueChange = { vol = it; engine.volume = it },
-            modifier = Modifier.fillMaxWidth(0.9f)
-        )
+        // סליידרים
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 10.sp)
+                Slider(value = vol, onValueChange = { vol = it; engine.volume = it })
+            }
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Attack: ${attackVal.toInt()}ms", color = Color(0xFF00E5FF), fontSize = 10.sp)
+                Slider(value = attackVal, valueRange = 5f..500f, onValueChange = { attackVal = it; engine.attackMs = it })
+            }
+        }
 
-        // סליידר דעיכה (Release: 1 - 100)
-        Text("Release (Fade-out): ${releaseVal.toInt()}", color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Slider(
-            value = releaseVal,
-            valueRange = 1f..100f,
-            onValueChange = { 
-                releaseVal = it
-                engine.releaseTimeVal = it.toInt()
-            },
-            modifier = Modifier.fillMaxWidth(0.9f)
-        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("Sustain: ${(sustainVal * 100).toInt()}%", color = Color(0xFF00FF66), fontSize = 10.sp)
+                Slider(value = sustainVal, valueRange = 0f..1f, onValueChange = { sustainVal = it; engine.sustainLevel = it })
+            }
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Release: ${releaseVal.toInt()}ms", color = Color(0xFFFFD700), fontSize = 10.sp)
+                Slider(value = releaseVal, valueRange = 20f..2000f, onValueChange = { releaseVal = it; engine.releaseMs = it })
+            }
+        }
 
-        Spacer(Modifier.height(4.dp))
-
-        // צג ויזואליזר ירוק
-        Text("Waveform Monitor", color = Color.Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        // ויזואליזר
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(80.dp)
+                .height(55.dp)
                 .background(Color.Black, shape = RoundedCornerShape(8.dp))
                 .padding(4.dp)
         ) {
@@ -357,42 +425,38 @@ fun SynthAppUI(engine: SynthEngine) {
                 val y = centerY + (sample * centerY * 0.9f)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, Color(0xFF00FF66), style = Stroke(width = 3f))
+            drawPath(path, Color(0xFF00FF66), style = Stroke(width = 2.5f))
         }
 
         Spacer(Modifier.height(4.dp))
 
-        // תיבות כיוון תדרים
-        Text("כיוון תדרים (Hz):", color = Color(0xFFFFD700), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        // כיוון תדרים
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("כיוון תדרים (Hz):", color = Color(0xFFFFD700), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            OutlinedButton(
+                onClick = { defaultFrequencies.forEachIndexed { i, f -> frequencies[i] = f } },
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+            ) { Text("איפוס", color = Color(0xFFFFD700), fontSize = 9.sp) }
+        }
+
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.padding(vertical = 2.dp)
         ) {
             itemsIndexed(frequencies) { index, freq ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(noteNames[index], color = Color.White, fontSize = 10.sp)
+                    Text(noteNames[index], color = Color.White, fontSize = 9.sp)
                     OutlinedTextField(
                         value = freq.toString(),
                         onValueChange = { newValue ->
                             newValue.toFloatOrNull()?.let { frequencies[index] = it }
                         },
-                        modifier = Modifier.width(66.dp),
+                        modifier = Modifier.width(62.dp),
                         singleLine = true,
-                        textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = Color.White)
+                        textStyle = LocalTextStyle.current.copy(fontSize = 9.sp, color = Color.White)
                     )
                 }
             }
-        }
-
-        // כפתור איפוס תדרים לברירת המחדל
-        OutlinedButton(
-            onClick = {
-                defaultFrequencies.forEachIndexed { i, f -> frequencies[i] = f }
-            },
-            modifier = Modifier.padding(top = 2.dp),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Text("איפוס תדרים (Reset)", color = Color(0xFFFFD700), fontSize = 10.sp)
         }
 
         Spacer(Modifier.weight(1f))
@@ -401,7 +465,7 @@ fun SynthAppUI(engine: SynthEngine) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(140.dp),
+                .height(120.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             frequencies.forEachIndexed { index, freq ->
@@ -415,7 +479,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         .weight(1f)
                         .fillMaxHeight()
                         .pointerInput(freq) {
-                            detectTapGestures(
+                            androidx.compose.foundation.gestures.detectTapGestures(
                                 onPress = {
                                     isPressed = true
                                     engine.noteOn(freq)
@@ -428,11 +492,11 @@ fun SynthAppUI(engine: SynthEngine) {
                 ) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         Text(
-                            text = "${noteNames[index]}\n${freq.toInt()}Hz",
+                            text = "${noteNames[index]}\n${engine.getEffectiveFrequency(freq).toInt()}Hz",
                             color = if (isPressed) Color.Black else Color.DarkGray,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            modifier = Modifier.padding(bottom = 6.dp)
+                            fontSize = 9.sp,
+                            modifier = Modifier.padding(bottom = 4.dp)
                         )
                     }
                 }
