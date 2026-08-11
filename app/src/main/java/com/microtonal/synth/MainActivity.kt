@@ -50,7 +50,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-class NoteState(var phase: Double) {
+class NoteState(var targetFreq: Float, var currentFreq: Float = targetFreq) {
+    var phase: Double = 0.0
     var envelopeVolume = 0.0
     var isReleasing = false
 }
@@ -61,15 +62,25 @@ class SynthEngine(private val context: Context) {
     private val activeNotes = ConcurrentHashMap<Float, NoteState>()
 
     var volume = 0.5f
-    var waveformType = 0 // 0=Sine, 1=Square, 2=Triangle
+    var waveformType = 0 // 0=Sine, 1=Square, 2=Triangle, 3=Sawtooth, 4=Noise
 
-    var attackMs = 15f      // 5ms - 500ms
-    var sustainLevel = 0.8f // 0.0 - 1.0
-    var releaseMs = 200f    // 20ms - 2000ms
+    // ADSR
+    var attackMs = 15f
+    var sustainLevel = 0.8f
+    var releaseMs = 200f
+
+    // DSP Effects
+    var cutoffFreq = 5000f  // Low-pass Filter Cutoff (Hz)
+    var echoMix = 0.25f      // Echo Dry/Wet (0.0 - 0.7)
+    var glideMs = 30f       // Portamento / Glide time in ms
 
     var octaveShift = 0
 
     val visualizerBuffer = FloatArray(256)
+
+    // Delay Buffer (1 second capacity)
+    private val delayBuffer = FloatArray(44100)
+    private var delayWritePos = 0
 
     @Volatile var isRecording = false
         private set
@@ -85,8 +96,11 @@ class SynthEngine(private val context: Context) {
         val existing = activeNotes[freq]
         if (existing != null) {
             existing.isReleasing = false
+            existing.targetFreq = freq
         } else {
-            activeNotes[freq] = NoteState(0.0)
+            // Apply Glide from the last active frequency if available
+            val lastFreq = activeNotes.values.lastOrNull()?.currentFreq ?: freq
+            activeNotes[freq] = NoteState(targetFreq = freq, currentFreq = if (glideMs > 0) lastFreq else freq)
         }
     }
 
@@ -171,6 +185,11 @@ class SynthEngine(private val context: Context) {
         return header
     }
 
+    // Soft Clipper למניעת עיוותים בפוליפוניה
+    private fun softClip(sample: Double): Double {
+        return Math.tanh(sample)
+    }
+
     fun start() {
         thread {
             val minBufferSize = AudioTrack.getMinBufferSize(
@@ -197,25 +216,33 @@ class SynthEngine(private val context: Context) {
             audioTrack.play()
             val buffer = ShortArray(256)
             val byteBuffer = ByteBuffer.allocate(512).order(ByteOrder.LITTLE_ENDIAN)
-            var lastSampleFilter = 0.0
+
+            var filterState = 0.0
+            val delaySamples = (sampleRate * 0.25).toInt() // 250ms delay time
 
             while (isRunning) {
                 byteBuffer.clear()
 
                 val attackStep = 1.0 / (sampleRate * (attackMs / 1000.0))
                 val releaseStep = 1.0 / (sampleRate * (releaseMs / 1000.0))
+                val glideFactor = if (glideMs > 0) (1.0 / (sampleRate * (glideMs / 1000.0))).coerceIn(0.001, 1.0) else 1.0
 
                 for (i in buffer.indices) {
                     var sample = 0.0
                     val iterator = activeNotes.entries.iterator()
-                    var activeCount = activeNotes.size
 
                     while (iterator.hasNext()) {
                         val entry = iterator.next()
-                        val freq = entry.key
                         val state = entry.value
 
-                        state.phase += (2.0 * Math.PI * freq / sampleRate)
+                        // Glide / Portamento Interpolation
+                        if (glideMs > 0 && Math.abs(state.currentFreq - state.targetFreq) > 0.05f) {
+                            state.currentFreq += ((state.targetFreq - state.currentFreq) * glideFactor).toFloat()
+                        } else {
+                            state.currentFreq = state.targetFreq
+                        }
+
+                        state.phase += (2.0 * Math.PI * state.currentFreq / sampleRate)
                         if (state.phase >= 2.0 * Math.PI) {
                             state.phase %= (2.0 * Math.PI)
                         }
@@ -233,26 +260,36 @@ class SynthEngine(private val context: Context) {
                             if (state.envelopeVolume <= 0.0) {
                                 state.envelopeVolume = 0.0
                                 iterator.remove()
-                                activeCount--
                                 continue
                             }
                         }
 
                         val raw = when (waveformType) {
-                            0 -> sin(state.phase)
-                            1 -> if (sin(state.phase) >= 0) 0.4 else -0.4
-                            else -> (2.0 / Math.PI) * Math.asin(sin(state.phase))
+                            0 -> sin(state.phase) // Sine
+                            1 -> if (sin(state.phase) >= 0) 0.3 else -0.3 // Square
+                            2 -> (2.0 / Math.PI) * Math.asin(sin(state.phase)) // Triangle
+                            3 -> (1.0 - (state.phase / Math.PI)) * 0.4 // Sawtooth
+                            else -> (Math.random() * 2.0 - 1.0) * 0.2 // Noise
                         }
 
                         sample += raw * state.envelopeVolume
                     }
 
-                    if (activeCount > 0) {
-                        sample = (sample / activeCount) * volume
-                    }
+                    // Low-Pass Filter (Cutoff)
+                    val filterAlpha = (2.0 * Math.PI * cutoffFreq / sampleRate).coerceIn(0.01, 1.0)
+                    filterState += filterAlpha * (sample - filterState)
+                    sample = filterState
 
-                    sample = lastSampleFilter + 0.25 * (sample - lastSampleFilter)
-                    lastSampleFilter = sample
+                    // Echo / Delay Effect
+                    val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
+                    val echoSample = delayBuffer[delayReadPos]
+                    delayBuffer[delayWritePos] = (sample + echoSample * 0.4).toFloat()
+                    delayWritePos = (delayWritePos + 1) % delayBuffer.size
+
+                    sample += echoSample * echoMix
+
+                    // Soft Clipping & Master Volume
+                    sample = softClip(sample * volume * 0.7)
 
                     val shortVal = (sample * Short.MAX_VALUE).toInt().coerceIn(-32768, 32767).toShort()
                     buffer[i] = shortVal
@@ -286,6 +323,12 @@ fun SynthAppUI(engine: SynthEngine) {
     var attackVal by remember { mutableFloatStateOf(15f) }
     var sustainVal by remember { mutableFloatStateOf(0.8f) }
     var releaseVal by remember { mutableFloatStateOf(200f) }
+    
+    // New Controls State
+    var cutoffVal by remember { mutableFloatStateOf(5000f) }
+    var echoVal by remember { mutableFloatStateOf(0.2f) }
+    var glideVal by remember { mutableFloatStateOf(30f) }
+
     var currentOctave by remember { mutableIntStateOf(0) }
     var isRec by remember { mutableStateOf(false) }
 
@@ -301,7 +344,7 @@ fun SynthAppUI(engine: SynthEngine) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF121212))
-            .padding(12.dp),
+            .padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(
@@ -336,23 +379,28 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
+
+        // Waveforms selection (Updated with Saw & Noise)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
+            itemsIndexed(waves) { index, name ->
+                FilterChip(
+                    selected = currentWave == index,
+                    onClick = { currentWave = index; engine.waveformType = index },
+                    label = { Text(name, fontSize = 9.sp) }
+                )
+            }
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("Sine", "Square", "Triangle").forEachIndexed { i, name ->
-                    FilterChip(
-                        selected = currentWave == i,
-                        onClick = { currentWave = i; engine.waveformType = i },
-                        label = { Text(name, fontSize = 10.sp) }
-                    )
-                }
-            }
-
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(
                     onClick = {
@@ -361,10 +409,10 @@ fun SynthAppUI(engine: SynthEngine) {
                             engine.octaveShift = currentOctave
                         }
                     },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                ) { Text("-1 Oct", fontSize = 10.sp, color = Color.White) }
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                ) { Text("-1 Oct", fontSize = 9.sp, color = Color.White) }
 
-                Text(" Oct: $currentOctave ", color = Color.Yellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(" Oct: $currentOctave ", color = Color.Yellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 
                 OutlinedButton(
                     onClick = {
@@ -373,39 +421,60 @@ fun SynthAppUI(engine: SynthEngine) {
                             engine.octaveShift = currentOctave
                         }
                     },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                ) { Text("+1 Oct", fontSize = 10.sp, color = Color.White) }
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                ) { Text("+1 Oct", fontSize = 9.sp, color = Color.White) }
             }
         }
 
+        // Sliders: Vol / Attack / Sustain / Release
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
-                Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 10.sp)
+                Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 9.sp)
                 Slider(value = vol, onValueChange = { vol = it; engine.volume = it })
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
             Column(Modifier.weight(1f)) {
-                Text("Attack: ${attackVal.toInt()}ms", color = Color(0xFF00E5FF), fontSize = 10.sp)
+                Text("Attack: ${attackVal.toInt()}ms", color = Color(0xFF00E5FF), fontSize = 9.sp)
                 Slider(value = attackVal, valueRange = 5f..500f, onValueChange = { attackVal = it; engine.attackMs = it })
             }
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
-                Text("Sustain: ${(sustainVal * 100).toInt()}%", color = Color(0xFF00FF66), fontSize = 10.sp)
+                Text("Sustain: ${(sustainVal * 100).toInt()}%", color = Color(0xFF00FF66), fontSize = 9.sp)
                 Slider(value = sustainVal, valueRange = 0f..1f, onValueChange = { sustainVal = it; engine.sustainLevel = it })
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
             Column(Modifier.weight(1f)) {
-                Text("Release: ${releaseVal.toInt()}ms", color = Color(0xFFFFD700), fontSize = 10.sp)
+                Text("Release: ${releaseVal.toInt()}ms", color = Color(0xFFFFD700), fontSize = 9.sp)
                 Slider(value = releaseVal, valueRange = 20f..2000f, onValueChange = { releaseVal = it; engine.releaseMs = it })
+            }
+        }
+
+        // Sliders: Cutoff Filter / Echo / Glide
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("Filter Cutoff: ${cutoffVal.toInt()}Hz", color = Color(0xFFFF7043), fontSize = 9.sp)
+                Slider(value = cutoffVal, valueRange = 200f..12000f, onValueChange = { cutoffVal = it; engine.cutoffFreq = it })
+            }
+            Spacer(Modifier.width(6.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Echo: ${(echoVal * 100).toInt()}%", color = Color(0xFFAB47BC), fontSize = 9.sp)
+                Slider(value = echoVal, valueRange = 0f..0.6f, onValueChange = { echoVal = it; engine.echoMix = it })
+            }
+        }
+
+        Row(Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(0.5f)) {
+                Text("Glide / Portamento: ${glideVal.toInt()}ms", color = Color(0xFF26C6DA), fontSize = 9.sp)
+                Slider(value = glideVal, valueRange = 0f..200f, onValueChange = { glideVal = it; engine.glideMs = it })
             }
         }
 
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(55.dp)
+                .height(45.dp)
                 .background(Color.Black, shape = RoundedCornerShape(8.dp))
                 .padding(4.dp)
         ) {
@@ -419,10 +488,10 @@ fun SynthAppUI(engine: SynthEngine) {
                 val y = centerY + (sample * centerY * 0.9f)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, Color(0xFF00FF66), style = Stroke(width = 2.5f))
+            drawPath(path, Color(0xFF00FF66), style = Stroke(width = 2f))
         }
 
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("כיוון תדרים (Hz):", color = Color(0xFFFFD700), fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -457,7 +526,7 @@ fun SynthAppUI(engine: SynthEngine) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(120.dp),
+                .height(110.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             frequencies.forEachIndexed { index, freq ->
