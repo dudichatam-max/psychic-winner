@@ -38,19 +38,29 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// מנוע סאונד רציף למניעת קליקים וקריסות + תמיכה בריבוי צלילים (Polyphony)
+// מחלקה לניהול מצב התו (שלב הגל והדעיכה)
+class NoteState(var phase: Float) {
+    var isReleasing = false
+    var releaseVolume = 1.0f
+}
+
+// מנוע סאונד רציף עם מעטפת מעבר רכה (Release Envelope) למניעת קליקים וקטיעת צלילים
 class SynthEngine {
     private val sampleRate = 44100
     @Volatile private var isRunning = true
-    private val activeNotes = ConcurrentHashMap<Float, Float>() // Freq -> Phase
+    private val activeNotes = ConcurrentHashMap<Float, NoteState>()
     var volume = 0.5f
     var waveformType = 0 // 0=Sine, 1=Square, 2=Triangle
     
-    // בופר שמזין את הצג הויזואלי
     val visualizerBuffer = FloatArray(256)
 
-    fun noteOn(freq: Float) { activeNotes[freq] = 0f }
-    fun noteOff(freq: Float) { activeNotes.remove(freq) }
+    fun noteOn(freq: Float) { 
+        activeNotes[freq] = NoteState(0f) 
+    }
+    
+    fun noteOff(freq: Float) { 
+        activeNotes[freq]?.isReleasing = true 
+    }
 
     fun start() {
         thread {
@@ -81,21 +91,37 @@ class SynthEngine {
             while (isRunning) {
                 for (i in buffer.indices) {
                     var sample = 0.0
-                    val activeCount = activeNotes.size
+                    val iterator = activeNotes.entries.iterator()
+                    var activeCount = activeNotes.size
+
+                    while (iterator.hasNext()) {
+                        val entry = iterator.next()
+                        val freq = entry.key
+                        val state = entry.value
+                        
+                        // חישוב פאזת הגל
+                        state.phase = (state.phase + (2.0 * Math.PI * freq / sampleRate) % (2.0 * Math.PI)).toFloat()
+                        
+                        // תהליך הדעיכה הרכה בעת עזיבת המקש
+                        if (state.isReleasing) {
+                            state.releaseVolume -= 0.02f // קצב הדעיכה
+                            if (state.releaseVolume <= 0f) {
+                                iterator.remove() // מחיקת התו מהמנוע לאחר שהשתתק לגמרי
+                                activeCount--
+                                continue
+                            }
+                        }
+
+                        val raw = when(waveformType) {
+                            0 -> sin(state.phase.toDouble())
+                            1 -> if (sin(state.phase.toDouble()) >= 0) 0.5 else -0.5
+                            else -> (2.0 / Math.PI) * Math.asin(sin(state.phase.toDouble()))
+                        }
+                        
+                        sample += raw * state.releaseVolume
+                    }
                     
                     if (activeCount > 0) {
-                        for ((freq, phase) in activeNotes) {
-                            val newPhase = phase + (2.0 * Math.PI * freq / sampleRate)
-                            activeNotes[freq] = (newPhase % (2.0 * Math.PI)).toFloat()
-                            
-                            val raw = when(waveformType) {
-                                0 -> sin(newPhase)
-                                1 -> if (sin(newPhase) >= 0) 0.5 else -0.5
-                                else -> (2.0 / Math.PI) * Math.asin(sin(newPhase))
-                            }
-                            sample += raw
-                        }
-                        // סכימה ומניעת עיוות סאונד (Distortion) כשיש כמה צלילים במקביל
                         sample = (sample / activeCount) * volume
                     }
                     
@@ -120,7 +146,7 @@ fun SynthAppUI(engine: SynthEngine) {
     var currentWave by remember { mutableIntStateOf(0) }
     var vol by remember { mutableFloatStateOf(0.5f) }
     
-    // רענון הצג הויזואלי
+    // רענון צג הויזואליזר
     var renderTrigger by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
         while(true) {
@@ -151,7 +177,7 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
         
-        // סליידר ווליום
+        // סליידר עוצמת שמע
         Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
         Slider(
             value = vol,
@@ -170,7 +196,6 @@ fun SynthAppUI(engine: SynthEngine) {
                 .background(Color.Black, shape = RoundedCornerShape(8.dp))
                 .padding(4.dp)
         ) {
-            // שימוש ב-renderTrigger כדי להכריח רענון ציור
             val dummy = renderTrigger
             val path = Path()
             val centerY = size.height / 2
