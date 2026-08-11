@@ -21,251 +21,176 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.concurrent.thread
 import kotlin.math.sin
 
 enum class Waveform { SINE, SQUARE, TRIANGLE }
 
 class MainActivity : ComponentActivity() {
-    private val defaultFrequencies = mutableStateListOf(
-        261.63f, 293.66f, 329.63f, 349.23f,
-        392.00f, 440.00f, 493.88f, 523.25f
-    )
-
+    private val defaultFrequencies = mutableStateListOf(261.63f, 293.66f, 329.63f, 349.23f, 392.00f, 440.00f, 493.88f, 523.25f)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            SynthAppUI(frequencies = defaultFrequencies)
-        }
+        setContent { SynthAppUI(defaultFrequencies) }
     }
 }
 
-// מנוע סאונד משופר עם החלקת קצוות (Fade In / Fade Out) למניעת זמזומים
 class SoundGenerator {
     private var audioTrack: AudioTrack? = null
     @Volatile private var isPlaying = false
     private val sampleRate = 44100
+    
+    val recordingBuffer = ByteArrayOutputStream()
+    var isRecording = false
 
     fun startTone(freq: Float, wave: Waveform, volume: Float) {
         stopTone()
         isPlaying = true
-
-        val minBufferSize = AudioTrack.getMinBufferSize(
-            sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
-        )
-
+        
+        val minBufferSize = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         audioTrack = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
             .setBufferSizeInBytes(minBufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
-
         audioTrack?.play()
 
         thread {
-            val bufferSize = 1024
-            val buffer = ShortArray(bufferSize)
             var sampleIndex = 0
-            val fadeSamples = 220 // כ-5 מילי-שניות של החלקה למניעת "קליקים"
-
+            val fadeSamples = 441 // 10ms fade
+            
             while (isPlaying) {
-                for (i in 0 until bufferSize) {
+                val buffer = ShortArray(1024)
+                for (i in buffer.indices) {
                     val t = sampleIndex.toDouble() / sampleRate
                     val angle = 2.0 * Math.PI * freq * t
-                    
-                    var rawSample = when (wave) {
+                    var raw = when(wave) {
                         Waveform.SINE -> sin(angle)
                         Waveform.SQUARE -> if (sin(angle) >= 0) 0.5 else -0.5
                         Waveform.TRIANGLE -> (2.0 / Math.PI) * Math.asin(sin(angle))
                     }
-
-                    // החלקת התחלת הצליל (Fade In)
-                    if (sampleIndex < fadeSamples) {
-                        rawSample *= (sampleIndex.toDouble() / fadeSamples)
+                    
+                    // Fade In למניעת קליק בהתחלה
+                    if (sampleIndex < fadeSamples) raw *= (sampleIndex.toDouble() / fadeSamples)
+                    
+                    val valShort = (raw * Short.MAX_VALUE * volume).toInt().coerceIn(-32767, 32767).toShort()
+                    buffer[i] = valShort
+                    
+                    if (isRecording) {
+                        val bytes = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(valShort).array()
+                        recordingBuffer.write(bytes)
                     }
-
-                    buffer[i] = (rawSample * Short.MAX_VALUE * volume).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
                     sampleIndex++
                 }
-                audioTrack?.write(buffer, 0, bufferSize)
+                audioTrack?.write(buffer, 0, buffer.size)
             }
         }
     }
 
     fun stopTone() {
         isPlaying = false
-        try {
+        try { 
+            audioTrack?.flush()
             audioTrack?.stop()
-            audioTrack?.release()
+            audioTrack?.release() 
         } catch (e: Exception) {}
         audioTrack = null
     }
 }
 
+fun writeWav(out: OutputStream, pcmData: ByteArray, sampleRate: Int) {
+    val totalDataLen = pcmData.size + 36
+    val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+    header.put("RIFF".toByteArray())
+    header.putInt(totalDataLen)
+    header.put("WAVE".toByteArray())
+    header.put("fmt ".toByteArray())
+    header.putInt(16)
+    header.putShort(1)
+    header.putShort(1)
+    header.putInt(sampleRate)
+    header.putInt(sampleRate * 2)
+    header.putShort(2)
+    header.putShort(16)
+    header.put("data".toByteArray())
+    header.putInt(pcmData.size)
+    out.write(header.array())
+    out.write(pcmData)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynthAppUI(frequencies: MutableList<Float>) {
+    val context = LocalContext.current
     var selectedWaveform by remember { mutableStateOf(Waveform.SINE) }
     var activeNoteIndex by remember { mutableStateOf<Int?>(null) }
     val soundGen = remember { SoundGenerator() }
-
     var volume by remember { mutableFloatStateOf(0.5f) }
     var isRecording by remember { mutableStateOf(false) }
-    var recordingTime by remember { mutableLongStateOf(0L) }
-
-    val saveFileLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("audio/wav")
-    ) { uri: Uri? -> }
-
-    LaunchedEffect(isRecording) {
-        if (isRecording) {
-            val startTime = System.currentTimeMillis()
-            while (isRecording) {
-                recordingTime = (System.currentTimeMillis() - startTime) / 1000
-                delay(1000)
-            }
-        } else {
-            recordingTime = 0
+    
+    val saveFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri: Uri? ->
+        uri?.let {
+            val pcmData = soundGen.recordingBuffer.toByteArray()
+            context.contentResolver.openOutputStream(it)?.use { out -> writeWav(out, pcmData, 44100) }
         }
     }
 
-    val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
-    val darkBg = Color(0xFF121212)
-    val cyanAccent = Color(0xFF00E5FF)
-    val goldAccent = Color(0xFFFFD700)
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(darkBg)
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("MicroScale Synth", color = cyanAccent, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // בורר גלים
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF121212)).padding(16.dp)) {
+        Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        
+        Row {
             Waveform.entries.forEach { wave ->
-                FilterChip(
-                    selected = selectedWaveform == wave,
-                    onClick = { selectedWaveform = wave },
-                    label = { Text(wave.name) }
-                )
+                FilterChip(selected = selectedWaveform == wave, onClick = { selectedWaveform = wave }, label = { Text(wave.name) })
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Slider(value = volume, onValueChange = { volume = it })
 
-        // סליידר ווליום בלבד
-        Text("Volume: ${(volume * 100).toInt()}%", color = Color.White, fontSize = 14.sp)
-        Slider(
-            value = volume,
-            onValueChange = { volume = it },
-            modifier = Modifier.fillMaxWidth(0.9f)
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // אזור הקלטה וייצוא
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(onClick = { isRecording = !isRecording }) {
-                Text(if (isRecording) "Stop Rec" else "Start Rec")
-            }
-            if (isRecording) {
-                Text("🔴 $recordingTime s", color = Color.Red, fontWeight = FontWeight.Bold)
-            }
-            Button(onClick = { saveFileLauncher.launch("microtone_tune.wav") }) {
-                Text("Export File")
-            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = { 
+                isRecording = !isRecording
+                soundGen.isRecording = isRecording 
+            }) { Text(if (isRecording) "Stop Recording" else "Start Recording") }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            Button(onClick = { saveFileLauncher.launch("my_song.wav") }) { Text("Export WAV") }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // תיבות כיוון תדרים ידני (Microtonal Input)
-        Text("כיוון תדרים (Hz):", color = goldAccent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(vertical = 8.dp)
-        ) {
+        LazyRow {
             itemsIndexed(frequencies) { index, freq ->
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(noteNames[index], color = Color.White, fontSize = 11.sp)
-                    OutlinedTextField(
-                        value = freq.toString(),
-                        onValueChange = { newValue ->
-                            newValue.toFloatOrNull()?.let { frequencies[index] = it }
-                        },
-                        modifier = Modifier.width(68.dp),
-                        singleLine = true,
-                        textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, color = Color.White)
-                    )
-                }
+                OutlinedTextField(
+                    value = freq.toString(),
+                    onValueChange = { newValue -> newValue.toFloatOrNull()?.let { frequencies[index] = it } },
+                    modifier = Modifier.width(70.dp)
+                )
             }
         }
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // המקלדת - 8 קלידים עם חיווי לחיצה
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(180.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
+        Row(modifier = Modifier.height(150.dp)) {
             frequencies.forEachIndexed { index, freq ->
-                val isPressed = activeNoteIndex == index
-                Card(
-                    shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isPressed) cyanAccent else Color(0xFFE0E0E0)
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .pointerInput(selectedWaveform, freq, volume) {
-                            detectTapGestures(
-                                onPress = {
-                                    activeNoteIndex = index
-                                    soundGen.startTone(freq, selectedWaveform, volume)
-                                    tryAwaitRelease()
-                                    soundGen.stopTone()
-                                    activeNoteIndex = null
-                                }
-                            )
+                Card(modifier = Modifier.weight(1f).pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            activeNoteIndex = index
+                            soundGen.startTone(freq, selectedWaveform, volume)
+                            tryAwaitRelease()
+                            soundGen.stopTone()
+                            activeNoteIndex = null
                         }
-                ) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                        Text(
-                            text = "${noteNames[index]}\n${freq.toInt()}Hz",
-                            color = if (isPressed) Color.Black else Color.DarkGray,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-                    }
-                }
+                    )
+                }) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(freq.toInt().toString()) } }
             }
         }
     }
