@@ -3,194 +3,137 @@ package com.microtonal.synth
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
-import java.io.ByteArrayOutputStream
-import java.io.OutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 import kotlin.math.sin
 
-enum class Waveform { SINE, SQUARE, TRIANGLE }
-
 class MainActivity : ComponentActivity() {
-    private val defaultFrequencies = mutableStateListOf(261.63f, 293.66f, 329.63f, 349.23f, 392.00f, 440.00f, 493.88f, 523.25f)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { SynthAppUI(defaultFrequencies) }
+        val engine = SynthEngine()
+        engine.start()
+        setContent { SynthAppUI(engine) }
     }
 }
 
-class SoundGenerator {
-    private var audioTrack: AudioTrack? = null
-    @Volatile private var isPlaying = false
+class SynthEngine {
     private val sampleRate = 44100
+    private var isRunning = true
+    private val activeNotes = ConcurrentHashMap<Float, Float>() // Freq -> Phase
+    var volume = 0.5f
+    var waveformType = 0 // 0=Sine, 1=Square, 2=Triangle
     
-    val recordingBuffer = ByteArrayOutputStream()
-    var isRecording = false
+    // Buffer for Visualizer
+    var visualizerBuffer = FloatArray(512)
 
-    fun startTone(freq: Float, wave: Waveform, volume: Float) {
-        stopTone()
-        isPlaying = true
-        
-        val minBufferSize = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        audioTrack = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-            .setBufferSizeInBytes(minBufferSize)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
-        audioTrack?.play()
+    fun noteOn(freq: Float) { activeNotes[freq] = 0f }
+    fun noteOff(freq: Float) { activeNotes.remove(freq) }
 
+    fun start() {
         thread {
-            var sampleIndex = 0
-            val fadeSamples = 441 // 10ms fade
+            val minBufferSize = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            val audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                .setBufferSizeInBytes(minBufferSize)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+
+            audioTrack.play()
+            val buffer = ShortArray(512)
             
-            while (isPlaying) {
-                val buffer = ShortArray(1024)
+            while (isRunning) {
                 for (i in buffer.indices) {
-                    val t = sampleIndex.toDouble() / sampleRate
-                    val angle = 2.0 * Math.PI * freq * t
-                    var raw = when(wave) {
-                        Waveform.SINE -> sin(angle)
-                        Waveform.SQUARE -> if (sin(angle) >= 0) 0.5 else -0.5
-                        Waveform.TRIANGLE -> (2.0 / Math.PI) * Math.asin(sin(angle))
+                    var sample = 0.0
+                    val activeCount = activeNotes.size
+                    
+                    if (activeCount > 0) {
+                        for ((freq, phase) in activeNotes) {
+                            val newPhase = phase + (2.0 * Math.PI * freq / sampleRate)
+                            activeNotes[freq] = (newPhase % (2.0 * Math.PI)).toFloat()
+                            
+                            val raw = when(waveformType) {
+                                0 -> sin(newPhase)
+                                1 -> if (sin(newPhase) >= 0) 0.5 else -0.5
+                                else -> (2.0 / Math.PI) * Math.asin(sin(newPhase))
+                            }
+                            sample += raw
+                        }
+                        sample = (sample / activeCount) * volume
                     }
                     
-                    // Fade In למניעת קליק בהתחלה
-                    if (sampleIndex < fadeSamples) raw *= (sampleIndex.toDouble() / fadeSamples)
-                    
-                    val valShort = (raw * Short.MAX_VALUE * volume).toInt().coerceIn(-32767, 32767).toShort()
-                    buffer[i] = valShort
-                    
-                    if (isRecording) {
-                        val bytes = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(valShort).array()
-                        recordingBuffer.write(bytes)
-                    }
-                    sampleIndex++
+                    buffer[i] = (sample * Short.MAX_VALUE).toInt().toShort()
+                    visualizerBuffer[i] = sample.toFloat()
                 }
-                audioTrack?.write(buffer, 0, buffer.size)
+                audioTrack.write(buffer, 0, buffer.size)
             }
         }
     }
-
-    fun stopTone() {
-        isPlaying = false
-        try { 
-            audioTrack?.flush()
-            audioTrack?.stop()
-            audioTrack?.release() 
-        } catch (e: Exception) {}
-        audioTrack = null
-    }
 }
 
-fun writeWav(out: OutputStream, pcmData: ByteArray, sampleRate: Int) {
-    val totalDataLen = pcmData.size + 36
-    val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
-    header.put("RIFF".toByteArray())
-    header.putInt(totalDataLen)
-    header.put("WAVE".toByteArray())
-    header.put("fmt ".toByteArray())
-    header.putInt(16)
-    header.putShort(1)
-    header.putShort(1)
-    header.putInt(sampleRate)
-    header.putInt(sampleRate * 2)
-    header.putShort(2)
-    header.putShort(16)
-    header.put("data".toByteArray())
-    header.putInt(pcmData.size)
-    out.write(header.array())
-    out.write(pcmData)
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SynthAppUI(frequencies: MutableList<Float>) {
-    val context = LocalContext.current
-    var selectedWaveform by remember { mutableStateOf(Waveform.SINE) }
-    var activeNoteIndex by remember { mutableStateOf<Int?>(null) }
-    val soundGen = remember { SoundGenerator() }
-    var volume by remember { mutableFloatStateOf(0.5f) }
-    var isRecording by remember { mutableStateOf(false) }
+fun SynthAppUI(engine: SynthEngine) {
+    val frequencies = listOf(261.63f, 293.66f, 329.63f, 349.23f, 392.00f, 440.00f, 493.88f, 523.25f)
+    var currentWave by remember { mutableIntStateOf(0) }
+    var vol by remember { mutableFloatStateOf(0.5f) }
     
-    val saveFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri: Uri? ->
-        uri?.let {
-            val pcmData = soundGen.recordingBuffer.toByteArray()
-            context.contentResolver.openOutputStream(it)?.use { out -> writeWav(out, pcmData, 44100) }
-        }
-    }
+    // Trigger recomposition for visualizer
+    var trigger by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) { while(true) { delay(30); trigger = System.currentTimeMillis() } }
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF121212)).padding(16.dp)) {
-        Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text("MicroScale Synth", color = Color.Cyan, style = MaterialTheme.typography.headlineMedium)
         
-        Row {
-            Waveform.entries.forEach { wave ->
-                FilterChip(selected = selectedWaveform == wave, onClick = { selectedWaveform = wave }, label = { Text(wave.name) })
+        Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
+            listOf("Sine", "Square", "Tri").forEachIndexed { i, name ->
+                FilterChip(selected = currentWave == i, onClick = { currentWave = i; engine.waveformType = i }, label = { Text(name) })
             }
         }
+        
+        Slider(value = vol, onValueChange = { vol = it; engine.volume = it })
 
-        Slider(value = volume, onValueChange = { volume = it })
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = { 
-                isRecording = !isRecording
-                soundGen.isRecording = isRecording 
-            }) { Text(if (isRecording) "Stop Recording" else "Start Recording") }
+        // Visualizer
+        Canvas(modifier = Modifier.fillMaxWidth().height(150.dp).padding(8.dp).background(Color.Black)) {
+            val path = Path()
+            val centerY = size.height / 2
+            val step = size.width / engine.visualizerBuffer.size
             
-            Spacer(modifier = Modifier.width(16.dp))
-            
-            Button(onClick = { saveFileLauncher.launch("my_song.wav") }) { Text("Export WAV") }
-        }
-
-        LazyRow {
-            itemsIndexed(frequencies) { index, freq ->
-                OutlinedTextField(
-                    value = freq.toString(),
-                    onValueChange = { newValue -> newValue.toFloatOrNull()?.let { frequencies[index] = it } },
-                    modifier = Modifier.width(70.dp)
-                )
+            engine.visualizerBuffer.forEachIndexed { i, sample ->
+                val x = i * step
+                val y = centerY + (sample * centerY)
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
+            drawPath(path, Color.Green, style = Stroke(width = 4f))
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(Modifier.weight(1f))
 
-        Row(modifier = Modifier.height(150.dp)) {
-            frequencies.forEachIndexed { index, freq ->
-                Card(modifier = Modifier.weight(1f).pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = {
-                            activeNoteIndex = index
-                            soundGen.startTone(freq, selectedWaveform, volume)
-                            tryAwaitRelease()
-                            soundGen.stopTone()
-                            activeNoteIndex = null
-                        }
-                    )
-                }) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(freq.toInt().toString()) } }
+        Row(Modifier.height(180.dp), Arrangement.spacedBy(4.dp)) {
+            frequencies.forEach { freq ->
+                Card(
+                    modifier = Modifier.weight(1f).fillMaxHeight().pointerInput(Unit) {
+                        detectTapGestures(
+                            onPress = { engine.noteOn(freq); tryAwaitRelease(); engine.noteOff(freq) }
+                        )
+                    }
+                ) { Box(Modifier.fillMaxSize(), Alignment.Center) { Text(freq.toInt().toString()) } }
             }
         }
     }
