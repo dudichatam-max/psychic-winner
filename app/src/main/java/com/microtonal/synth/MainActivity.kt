@@ -62,7 +62,7 @@ class SynthEngine(private val context: Context) {
     private val activeNotes = ConcurrentHashMap<Float, NoteState>()
 
     var volume = 0.5f
-    var waveformType = 0 // 0=Sine, 1=Square, 2=Triangle, 3=Sawtooth, 4=Noise
+    var waveformType = 3 // 0=Sine, 1=Square, 2=Triangle, 3=Sawtooth, 4=Noise
 
     // ADSR
     var attackMs = 15f
@@ -70,15 +70,14 @@ class SynthEngine(private val context: Context) {
     var releaseMs = 200f
 
     // DSP Effects
-    var cutoffFreq = 5000f  // Low-pass Filter Cutoff (Hz)
-    var echoMix = 0.25f      // Echo Dry/Wet (0.0 - 0.7)
-    var glideMs = 30f       // Portamento / Glide time in ms
+    var cutoffFreq = 5000f
+    var echoMix = 0.25f
+    var glideMs = 30f
 
     var octaveShift = 0
 
     val visualizerBuffer = FloatArray(256)
 
-    // Delay Buffer (1 second capacity)
     private val delayBuffer = FloatArray(44100)
     private var delayWritePos = 0
 
@@ -98,7 +97,6 @@ class SynthEngine(private val context: Context) {
             existing.isReleasing = false
             existing.targetFreq = freq
         } else {
-            // Apply Glide from the last active frequency if available
             val lastFreq = activeNotes.values.lastOrNull()?.currentFreq ?: freq
             activeNotes[freq] = NoteState(targetFreq = freq, currentFreq = if (glideMs > 0) lastFreq else freq)
         }
@@ -125,7 +123,7 @@ class SynthEngine(private val context: Context) {
     }
 
     private fun saveWavFile(pcmData: ByteArray) {
-        val fileName = "Synth_Rec_${System.currentTimeMillis()}.wav"
+        val fileName = "ElScale_Rec_${System.currentTimeMillis()}.wav"
         val header = createWavHeader(pcmData.size, sampleRate, 1, 16)
 
         try {
@@ -185,7 +183,6 @@ class SynthEngine(private val context: Context) {
         return header
     }
 
-    // Soft Clipper למניעת עיוותים בפוליפוניה
     private fun softClip(sample: Double): Double {
         return Math.tanh(sample)
     }
@@ -218,7 +215,7 @@ class SynthEngine(private val context: Context) {
             val byteBuffer = ByteBuffer.allocate(512).order(ByteOrder.LITTLE_ENDIAN)
 
             var filterState = 0.0
-            val delaySamples = (sampleRate * 0.25).toInt() // 250ms delay time
+            val delaySamples = (sampleRate * 0.25).toInt()
 
             while (isRunning) {
                 byteBuffer.clear()
@@ -235,7 +232,6 @@ class SynthEngine(private val context: Context) {
                         val entry = iterator.next()
                         val state = entry.value
 
-                        // Glide / Portamento Interpolation
                         if (glideMs > 0 && Math.abs(state.currentFreq - state.targetFreq) > 0.05f) {
                             state.currentFreq += ((state.targetFreq - state.currentFreq) * glideFactor).toFloat()
                         } else {
@@ -265,22 +261,20 @@ class SynthEngine(private val context: Context) {
                         }
 
                         val raw = when (waveformType) {
-                            0 -> sin(state.phase) // Sine
-                            1 -> if (sin(state.phase) >= 0) 0.3 else -0.3 // Square
-                            2 -> (2.0 / Math.PI) * Math.asin(sin(state.phase)) // Triangle
-                            3 -> (1.0 - (state.phase / Math.PI)) * 0.4 // Sawtooth
-                            else -> (Math.random() * 2.0 - 1.0) * 0.2 // Noise
+                            0 -> sin(state.phase)
+                            1 -> if (sin(state.phase) >= 0) 0.3 else -0.3
+                            2 -> (2.0 / Math.PI) * Math.asin(sin(state.phase))
+                            3 -> (1.0 - (state.phase / Math.PI)) * 0.4
+                            else -> (Math.random() * 2.0 - 1.0) * 0.2
                         }
 
                         sample += raw * state.envelopeVolume
                     }
 
-                    // Low-Pass Filter (Cutoff)
                     val filterAlpha = (2.0 * Math.PI * cutoffFreq / sampleRate).coerceIn(0.01, 1.0)
                     filterState += filterAlpha * (sample - filterState)
                     sample = filterState
 
-                    // Echo / Delay Effect
                     val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
                     val echoSample = delayBuffer[delayReadPos]
                     delayBuffer[delayWritePos] = (sample + echoSample * 0.4).toFloat()
@@ -288,7 +282,6 @@ class SynthEngine(private val context: Context) {
 
                     sample += echoSample * echoMix
 
-                    // Soft Clipping & Master Volume
                     sample = softClip(sample * volume * 0.7)
 
                     val shortVal = (sample * Short.MAX_VALUE).toInt().coerceIn(-32768, 32767).toShort()
@@ -310,23 +303,23 @@ class SynthEngine(private val context: Context) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynthAppUI(engine: SynthEngine) {
+    // סולם 8 התווים הייחודי (עם לה = 440Hz ואל = 489.94Hz)
     val defaultFrequencies = remember {
-        listOf(261.63f, 293.66f, 329.63f, 349.23f, 392.00f, 440.00f, 493.88f, 523.25f)
+        listOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 489.94f)
     }
     val frequencies = remember {
-        mutableStateListOf(261.63f, 293.66f, 329.63f, 349.23f, 392.00f, 440.00f, 493.88f, 523.25f)
+        mutableStateListOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 489.94f)
     }
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
-    var currentWave by remember { mutableIntStateOf(0) }
+    var currentWave by remember { mutableIntStateOf(3) }
     var vol by remember { mutableFloatStateOf(0.5f) }
     var attackVal by remember { mutableFloatStateOf(15f) }
     var sustainVal by remember { mutableFloatStateOf(0.8f) }
     var releaseVal by remember { mutableFloatStateOf(200f) }
-    
-    // New Controls State
+
     var cutoffVal by remember { mutableFloatStateOf(5000f) }
-    var echoVal by remember { mutableFloatStateOf(0.2f) }
+    var echoVal by remember { mutableFloatStateOf(0.25f) }
     var glideVal by remember { mutableFloatStateOf(30f) }
 
     var currentOctave by remember { mutableIntStateOf(0) }
@@ -381,7 +374,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(2.dp))
 
-        // Waveforms selection (Updated with Saw & Noise)
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.fillMaxWidth()
@@ -426,7 +418,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // Sliders: Vol / Attack / Sustain / Release
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 9.sp)
@@ -451,7 +442,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // Sliders: Cutoff Filter / Echo / Glide
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text("Filter Cutoff: ${cutoffVal.toInt()}Hz", color = Color(0xFFFF7043), fontSize = 9.sp)
@@ -498,7 +488,7 @@ fun SynthAppUI(engine: SynthEngine) {
             OutlinedButton(
                 onClick = { defaultFrequencies.forEachIndexed { i, f -> frequencies[i] = f } },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-            ) { Text("איפוס", color = Color(0xFFFFD700), fontSize = 9.sp) }
+            ) { Text("איפוס לסולם אל", color = Color(0xFFFFD700), fontSize = 9.sp) }
         }
 
         LazyRow(
