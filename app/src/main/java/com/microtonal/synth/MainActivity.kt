@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -303,7 +304,9 @@ class SynthEngine(private val context: Context) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynthAppUI(engine: SynthEngine) {
-    // סולם 8 התווים הייחודי (עם לה = 440Hz ואל = 489.94Hz)
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE) }
+
     val defaultFrequencies = remember {
         listOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 489.94f)
     }
@@ -324,6 +327,61 @@ fun SynthAppUI(engine: SynthEngine) {
 
     var currentOctave by remember { mutableIntStateOf(0) }
     var isRec by remember { mutableStateOf(false) }
+
+    var selectedPresetSlot by remember { mutableIntStateOf(1) }
+
+    fun savePresetToSlot(slot: Int) {
+        prefs.edit().apply {
+            putFloat("p_${slot}_vol", vol)
+            putFloat("p_${slot}_attack", attackVal)
+            putFloat("p_${slot}_sustain", sustainVal)
+            putFloat("p_${slot}_release", releaseVal)
+            putFloat("p_${slot}_cutoff", cutoffVal)
+            putFloat("p_${slot}_echo", echoVal)
+            putFloat("p_${slot}_glide", glideVal)
+            putString("p_${slot}_freqs", frequencies.joinToString(","))
+            putBoolean("p_${slot}_exists", true)
+            apply()
+        }
+        Toast.makeText(context, "פריסט $slot נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
+    }
+
+    fun loadPresetFromSlot(slot: Int) {
+        if (!prefs.getBoolean("p_${slot}_exists", false)) {
+            Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        vol = prefs.getFloat("p_${slot}_vol", 0.5f)
+        engine.volume = vol
+
+        attackVal = prefs.getFloat("p_${slot}_attack", 15f)
+        engine.attackMs = attackVal
+
+        sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f)
+        engine.sustainLevel = sustainVal
+
+        releaseVal = prefs.getFloat("p_${slot}_release", 200f)
+        engine.releaseMs = releaseVal
+
+        cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f)
+        engine.cutoffFreq = cutoffVal
+
+        echoVal = prefs.getFloat("p_${slot}_echo", 0.25f)
+        engine.echoMix = echoVal
+
+        glideVal = prefs.getFloat("p_${slot}_glide", 30f)
+        engine.glideMs = glideVal
+
+        val freqsStr = prefs.getString("p_${slot}_freqs", null)
+        if (freqsStr != null) {
+            val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
+            if (list.size == frequencies.size) {
+                list.forEachIndexed { i, f -> frequencies[i] = f }
+            }
+        }
+        Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
+    }
 
     var renderTrigger by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
@@ -401,10 +459,11 @@ fun SynthAppUI(engine: SynthEngine) {
                             engine.octaveShift = currentOctave
                         }
                     },
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
                 ) { Text("-1 Oct", fontSize = 9.sp, color = Color.White) }
 
-                Text(" Oct: $currentOctave ", color = Color.Yellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(" Oct: $currentOctave ", color = Color.Yellow, fontSize = 9.sp, fontWeight = FontWeight.Bold)
 
                 OutlinedButton(
                     onClick = {
@@ -413,8 +472,39 @@ fun SynthAppUI(engine: SynthEngine) {
                             engine.octaveShift = currentOctave
                         }
                     },
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
                 ) { Text("+1 Oct", fontSize = 9.sp, color = Color.White) }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                (1..4).forEach { slot ->
+                    Button(
+                        onClick = {
+                            selectedPresetSlot = slot
+                            loadPresetFromSlot(slot)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selectedPresetSlot == slot) Color(0xFF00E5FF) else Color(0xFF333333)
+                        ),
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Text("$slot", fontSize = 10.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
+                    }
+                }
+
+                Button(
+                    onClick = { savePresetToSlot(selectedPresetSlot) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFAB47BC)),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Text("שמור", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
