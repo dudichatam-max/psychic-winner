@@ -633,7 +633,7 @@ fun SynthAppUI(engine: SynthEngine) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(45.dp)
+                .height(40.dp)
                 .background(Color.Black, shape = RoundedCornerShape(8.dp))
                 .padding(4.dp)
         ) {
@@ -650,9 +650,14 @@ fun SynthAppUI(engine: SynthEngine) {
             drawPath(path, Color(0xFF00FF66), style = Stroke(width = 2f))
         }
 
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.weight(1f))
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        // כיוון תדרים (מוקם בדיוק מעל המקלדת)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text("כיוון תדרים (Hz):", color = Color(0xFFFFD700), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             OutlinedButton(
                 onClick = { defaultFrequencies.forEachIndexed { i, f -> frequencies[i] = f } },
@@ -662,7 +667,7 @@ fun SynthAppUI(engine: SynthEngine) {
 
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(vertical = 2.dp)
+            modifier = Modifier.padding(vertical = 4.dp)
         ) {
             itemsIndexed(frequencies) { index, freq ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -680,8 +685,9 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(4.dp))
 
+        // המקלדת (Keys)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
