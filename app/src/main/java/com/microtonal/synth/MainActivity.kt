@@ -334,9 +334,11 @@ class SynthEngine(private val context: Context) {
 
     fun startRecording() {
         try {
-            wavFile = File(context.getExternalFilesDir(null), "synth_recording_${System.currentTimeMillis()}.wav")
-            recordedAudioStream = FileOutputStream(wavFile)
-            writeWavHeader(recordedAudioStream!, 0)
+            val file = File(context.getExternalFilesDir(null), "synth_recording_${System.currentTimeMillis()}.wav")
+            wavFile = file
+            val stream = FileOutputStream(file)
+            recordedAudioStream = stream
+            writeWavHeader(stream, 0L)
             isRecording = true
         } catch (e: Exception) {
             e.printStackTrace()
@@ -347,8 +349,10 @@ class SynthEngine(private val context: Context) {
         if (!isRecording) return
         isRecording = false
         try {
-            recordedAudioStream?.flush()
-            recordedAudioStream?.close()
+            val stream = recordedAudioStream
+            stream?.flush()
+            stream?.close()
+            recordedAudioStream = null
             wavFile?.let { updateWavHeader(it) }
             Toast.makeText(context, "ההקלטה נשמרה ב: ${wavFile?.name}", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
@@ -414,7 +418,6 @@ class SynthEngine(private val context: Context) {
     private fun updateWavHeader(file: File) {
         val totalAudioLen = file.length() - 44
         val totalDataLen = totalAudioLen + 36
-        val byteRate = sampleRate * 1 * 2
 
         val randomAccessFile = java.io.RandomAccessFile(file, "rw")
         randomAccessFile.seek(4)
