@@ -77,8 +77,11 @@ class NoteSlot {
     var frozenSustain: Float = 0.8f
     var frozenRelease: Float = 200f
 
-    var svfLow: Double = 0.0
-    var svfBand: Double = 0.0
+    // משתנים מעודכנים עבור פילטר ה-ZDF והחלקת הסאונד
+    var zdfState1: Double = 0.0
+    var zdfState2: Double = 0.0
+    var smoothedCutoff: Float = 5000f
+    var smoothedRes: Float = 0.3f
 }
 
 data class LooperNoteEvent(
