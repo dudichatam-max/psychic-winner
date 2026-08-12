@@ -48,7 +48,6 @@ import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.PI
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -164,7 +163,6 @@ class SynthEngine(private val context: Context) {
                         delay(note.startTimeMs)
                         if (!isLoopPlaying) return@launch
                         
-                        // קורא לתו עם כל הערכים השמורים בהקלטה
                         noteOn(
                             note.baseFreq, note.waveform, note.cutoff, note.resonance,
                             note.attack, note.sustain, note.release, true
@@ -272,7 +270,6 @@ class SynthEngine(private val context: Context) {
             val startTimeMs = pressTime - loopStartTime
             val durationMs = (System.currentTimeMillis() - pressTime).coerceAtLeast(50L)
             
-            // שומר את ההקלטה עם כל פרמטרי ה-ADSR של הלייב
             recordedNotes.add(RecordedNote(
                 baseFreq, startTimeMs, durationMs, 
                 waveformType, cutoffFreq, resonance, 
@@ -414,7 +411,8 @@ class SynthEngine(private val context: Context) {
                         if (noteSlots[v].active) activeCount++
                     }
 
-                    val headroomScale = if (activeCount > 0) 1.0 / sqrt(activeCount.toDouble()) else 1.0
+                    // מנגנון הנחתה דינמי חכם יותר - ככל שיש יותר תווים במקביל, הווליום של כל אחד יורד כדי למנוע פיצוץ
+                    val headroomScale = if (activeCount > 0) 1.0 / (1.0 + activeCount * 0.2) else 1.0
 
                     for (v in 0 until maxVoices) {
                         val slot = noteSlots[v]
@@ -431,7 +429,6 @@ class SynthEngine(private val context: Context) {
                             slot.phase %= (2.0 * PI)
                         }
 
-                        // חישוב ADSR אינדיבידואלי לכל תו
                         val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
                         val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
                         val actualRelease = if (slot.isLooperNote) slot.frozenRelease else releaseMs
@@ -458,9 +455,8 @@ class SynthEngine(private val context: Context) {
                             else -> (Math.random() * 2.0 - 1.0) * 0.2
                         }
 
-                        var voiceSample = raw * slot.envelopeVolume * headroomScale
+                        var voiceSample = raw * slot.envelopeVolume * headroomScale * 0.6 // בסיס סאונד מונחת מעט
 
-                        // פילטר עצמאי
                         val actualCutoff = if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq
                         val actualRes = if (slot.isLooperNote) slot.frozenRes else resonance
 
@@ -472,7 +468,6 @@ class SynthEngine(private val context: Context) {
                         slot.svfLow += f * slot.svfBand
                         voiceSample = slot.svfLow
 
-                        // בידוד ווליום - לייב מול לופר
                         if (slot.isLooperNote) {
                             voiceSample *= looperVolume
                         } else {
@@ -482,22 +477,20 @@ class SynthEngine(private val context: Context) {
                         totalSample += voiceSample
                     }
 
-                    // אפקט השהייה (Delay/Echo)
                     val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
                     val echoSample = delayBuffer[delayReadPos]
                     delayBuffer[delayWritePos] = (totalSample + echoSample * 0.4).toFloat()
                     totalSample += echoSample * echoMix
 
-                    // מסנן DC
                     val dcSample = totalSample - dcX1 + 0.995 * dcY1
                     dcX1 = totalSample
                     dcY1 = dcSample
                     totalSample = dcSample
 
-                    // שימו לב: הסרנו את הווליום הגלובלי מכאן כי הוא מחושב פר-תו למעלה
-                    totalSample = softClip(totalSample * 0.6)
+                    // לימיטר: הנחתה לפני הסופט-קליפר כדי למנוע עיוות מרובע
+                    totalSample = softClip(totalSample * 0.4) 
 
-                    val shortVal = (totalSample * Short.MAX_VALUE).toInt().coerceIn(-32768, 32767).toShort()
+                    val shortVal = (totalSample * Short.MAX_VALUE * 0.95).toInt().coerceIn(-32768, 32767).toShort()
                     buffer[i] = shortVal
                     visualizerBuffer[i] = totalSample.toFloat()
                     byteBuffer.putShort(shortVal)
