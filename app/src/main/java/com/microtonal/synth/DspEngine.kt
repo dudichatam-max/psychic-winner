@@ -75,6 +75,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 if (slot.envelopeVolume < 0.001) {
                     slot.envelopeVolume = 0.0
                     slot.active = false
+                    slot.svfLow = 0.0
+                    slot.svfBand = 0.0
                     continue
                 }
             }
@@ -89,16 +91,26 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.55
 
+            // --- STABLE STATE VARIABLE FILTER (SVF) ---
             val actualCutoff = if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq
             val actualRes = if (slot.isLooperNote) slot.frozenRes else resonance
 
-            val f = (2.0 * sin(PI * actualCutoff / sampleRate)).coerceIn(0.01, 0.8)
+            // הגבלת תדר החיתוך למניעת קריסה מתמטית ב-SVF
+            val safeCutoff = actualCutoff.coerceIn(20f, 7500f)
+            val f = (2.0 * sin(PI * safeCutoff / sampleRate)).coerceIn(0.001, 0.45)
             val q = (1.0 - actualRes.toDouble().coerceIn(0.0, 0.95))
 
-            val hp = voiceSample - slot.svfLow - q * slot.svfBand
-            slot.svfBand += f * hp
-            slot.svfLow += f * slot.svfBand
+            // 2-step Oversampling להבטחת יציבות צליל
+            for (step in 0..1) {
+                val hp = voiceSample - slot.svfLow - q * slot.svfBand
+                slot.svfBand += (f * 0.5) * hp
+                slot.svfLow += (f * 0.5) * slot.svfBand
+            }
             voiceSample = slot.svfLow
+
+            // הגנה מפני NaN או Infinity
+            if (slot.svfLow.isNaN() || slot.svfLow.isInfinite()) slot.svfLow = 0.0
+            if (slot.svfBand.isNaN() || slot.svfBand.isInfinite()) slot.svfBand = 0.0
 
             if (slot.isLooperNote) {
                 looperChannelMix += voiceSample
@@ -107,7 +119,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
         }
 
-        // חישוב נפרד לכל ערוץ לצורך הדימוי הוויזואלי
         val finalLiveSample = (liveChannelMix * liveVolume).toFloat()
         val finalLooperSample = (looperChannelMix * looperVolume).toFloat()
 
@@ -115,17 +126,18 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
         val delaySamples = (sampleRate * 0.25).toInt()
         val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
-        val echoSample = delayBuffer[delayReadPos]
+        val echoSample = delayBuffer[delayReadPos].toDouble()
 
         delayBuffer[delayWritePos] = (totalSample + echoSample * 0.4).toFloat()
         delayWritePos = (delayWritePos + 1) % delayBuffer.size
 
         totalSample += echoSample * echoMix
 
+        // DC Blocker עם הגנה
         val dcSample = totalSample - dcX1 + 0.995 * dcY1
         dcX1 = totalSample
-        dcY1 = dcSample
-        totalSample = dcSample
+        dcY1 = if (dcSample.isNaN() || dcSample.isInfinite()) 0.0 else dcSample
+        totalSample = dcY1
 
         val masterSample = softClip(totalSample * 0.45).toFloat()
 
