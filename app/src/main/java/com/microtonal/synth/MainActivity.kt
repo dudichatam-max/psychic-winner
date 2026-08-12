@@ -280,8 +280,10 @@ class SynthEngine(private val context: Context) {
             slot.frozenAttack = attack ?: attackMs
             slot.frozenSustain = sustain ?: sustainLevel
             slot.frozenRelease = release ?: releaseMs
-            slot.svfLow = 0.0
-            slot.svfBand = 0.0
+            
+            // איפוס פילטר ה-ZDF המשודרג
+            slot.zdfState1 = 0.0
+            slot.zdfState2 = 0.0
         }
     }
 
@@ -530,7 +532,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
     var selectedPresetSlot by remember { mutableIntStateOf(1) }
 
-    // Launcher לשמירת קובץ WAV דרך חלון הבחירה המערכתי
     val createWavLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("audio/wav")
     ) { uri ->
@@ -692,7 +693,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         if (isRec) {
                             engine.stopAndSaveRecording()
                             isRec = false
-                            // פתיחת דיאלוג בחירת המיקום ושם הקובץ
                             val defaultFileName = "Siren_Recording_${System.currentTimeMillis()}.wav"
                             createWavLauncher.launch(defaultFileName)
                         } else {
