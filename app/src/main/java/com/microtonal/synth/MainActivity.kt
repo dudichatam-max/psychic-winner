@@ -67,6 +67,7 @@ class NoteSlot {
     var phase: Double = 0.0
     var envelopeVolume: Double = 0.0
     @Volatile var isReleasing: Boolean = false
+    @Volatile var waveform: Int = 3 // סוג הגל של ה-Slot הספציפי
 }
 
 data class RecordedNote(
@@ -141,23 +142,18 @@ class SynthEngine(private val context: Context) {
         loopJob = CoroutineScope(Dispatchers.Default).launch {
             while (isLoopPlaying) {
                 val currentLoopStart = System.currentTimeMillis()
-                val activeJobs = mutableListOf<Job>()
 
                 for (note in recordedNotes) {
-                    val job = launch {
+                    launch {
                         delay(note.startTimeMs)
                         if (!isLoopPlaying) return@launch
                         
-                        // זמני לשמור את הסוג הקיים ולנגן בגל של ההקלטה
-                        val tempWave = waveformType
-                        waveformType = note.waveform
-                        noteOn(note.baseFreq)
-                        waveformType = tempWave
+                        // מנגן את התו עם סוג הגל המקורי שלו!
+                        noteOn(note.baseFreq, customWaveform = note.waveform)
 
                         delay(note.durationMs)
                         noteOff(note.baseFreq)
                     }
-                    activeJobs.add(job)
                 }
 
                 val elapsed = System.currentTimeMillis() - currentLoopStart
@@ -171,6 +167,7 @@ class SynthEngine(private val context: Context) {
         isLoopPlaying = false
         loopJob?.cancel()
         loopJob = null
+        allNotesOff() // משחרר מיידית את כל התווים התקועים
     }
 
     fun clearLoop() {
@@ -179,7 +176,13 @@ class SynthEngine(private val context: Context) {
         loopDurationMs = 0L
     }
 
-    fun noteOn(baseFreq: Float) {
+    fun allNotesOff() {
+        for (i in 0 until maxVoices) {
+            noteSlots[i].isReleasing = true
+        }
+    }
+
+    fun noteOn(baseFreq: Float, customWaveform: Int = waveformType) {
         if (isLoopRecording) {
             activePressTimes[baseFreq] = System.currentTimeMillis()
         }
@@ -191,6 +194,7 @@ class SynthEngine(private val context: Context) {
             if (slot.active && abs(slot.baseFreq - baseFreq) < 0.01f) {
                 slot.isReleasing = false
                 slot.targetFreq = freq
+                slot.waveform = customWaveform
                 return
             }
         }
@@ -220,6 +224,7 @@ class SynthEngine(private val context: Context) {
         targetSlot.currentFreq = if (glideMs > 0) lastActiveFreq else freq
         targetSlot.isReleasing = false
         targetSlot.envelopeVolume = 0.001
+        targetSlot.waveform = customWaveform
         targetSlot.active = true
     }
 
@@ -399,7 +404,8 @@ class SynthEngine(private val context: Context) {
                             }
                         }
 
-                        val raw = when (waveformType) {
+                        // שימוש בסוג הגל הבלעדי של ה-Slot הספציפי
+                        val raw = when (slot.waveform) {
                             0 -> sin(slot.phase)
                             1 -> if (sin(slot.phase) >= 0) 0.3 else -0.3
                             2 -> (2.0 / PI) * asin(sin(slot.phase))
@@ -584,7 +590,7 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // --- LOOP CONTROL BAR (הלופר האקטיבי) ---
+        // --- LOOP CONTROL BAR ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
