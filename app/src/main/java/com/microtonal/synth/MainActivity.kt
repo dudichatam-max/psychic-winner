@@ -67,7 +67,6 @@ class NoteSlot {
     var envelopeVolume: Double = 0.0
     @Volatile var isReleasing: Boolean = false
     
-    // Snapshot הרמטי לכל תו
     @Volatile var waveform: Int = 3 
     @Volatile var frozenCutoff: Float = 5000f
     @Volatile var frozenRes: Float = 0.3f
@@ -398,6 +397,7 @@ class SynthEngine(private val context: Context) {
             var dcY1 = 0.0
 
             val delaySamples = (sampleRate * 0.25).toInt()
+            var currentHeadroom = 1.0 // משתנה להחלקה למניעת קליקים בלופ
 
             while (isRunning) {
                 byteBuffer.clear()
@@ -411,8 +411,9 @@ class SynthEngine(private val context: Context) {
                         if (noteSlots[v].active) activeCount++
                     }
 
-                    // מנגנון הנחתה דינמי חכם יותר - ככל שיש יותר תווים במקביל, הווליום של כל אחד יורד כדי למנוע פיצוץ
-                    val headroomScale = if (activeCount > 0) 1.0 / (1.0 + activeCount * 0.2) else 1.0
+                    // החלקה דינמית של ה-Headroom כדי למנוע קפיצות עוצמה פתאומיות שיוצרות פיצוצים/קליקים
+                    val targetHeadroom = if (activeCount > 0) 1.0 / (1.0 + activeCount * 0.15) else 1.0
+                    currentHeadroom += (targetHeadroom - currentHeadroom) * 0.05
 
                     for (v in 0 until maxVoices) {
                         val slot = noteSlots[v]
@@ -455,7 +456,7 @@ class SynthEngine(private val context: Context) {
                             else -> (Math.random() * 2.0 - 1.0) * 0.2
                         }
 
-                        var voiceSample = raw * slot.envelopeVolume * headroomScale * 0.6 // בסיס סאונד מונחת מעט
+                        var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.55
 
                         val actualCutoff = if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq
                         val actualRes = if (slot.isLooperNote) slot.frozenRes else resonance
@@ -487,8 +488,7 @@ class SynthEngine(private val context: Context) {
                     dcY1 = dcSample
                     totalSample = dcSample
 
-                    // לימיטר: הנחתה לפני הסופט-קליפר כדי למנוע עיוות מרובע
-                    totalSample = softClip(totalSample * 0.4) 
+                    totalSample = softClip(totalSample * 0.45) 
 
                     val shortVal = (totalSample * Short.MAX_VALUE * 0.95).toInt().coerceIn(-32768, 32767).toShort()
                     buffer[i] = shortVal
