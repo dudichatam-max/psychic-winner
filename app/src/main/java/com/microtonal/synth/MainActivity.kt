@@ -179,7 +179,11 @@ class SynthEngine(private val context: Context) {
                         echoMix = echoMix
                     )
 
-                    val shortVal = (frame.masterSample * Short.MAX_VALUE * 0.95).toInt().coerceIn(-32768, 32767).toShort()
+                    // --- SOFT LIMITER / SATURATION (PREVENTS CLICKING & POPPING) ---
+                    val rawMaster = frame.masterSample
+                    val softClipped = Math.tanh(rawMaster.toDouble()).toFloat()
+                    val shortVal = (softClipped * Short.MAX_VALUE * 0.85f).toInt().coerceIn(-32768, 32767).toShort()
+                    
                     buffer[i] = shortVal
 
                     liveVisualizerBuffer[i] = frame.liveSample
@@ -331,7 +335,7 @@ class SynthEngine(private val context: Context) {
                         }
                         eventIndex++
                     }
-                    try { Thread.sleep(2) } catch (_: Exception) {}
+                    try { Thread.sleep(1) } catch (_: Exception) {}
                 }
 
                 noteSlots.filter { it.isLooperNote }.forEach { it.active = false }
