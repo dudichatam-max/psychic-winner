@@ -1,15 +1,10 @@
 package com.microtonal.synth
 
-import android.content.ContentValues
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.os.Process
-import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -33,59 +28,61 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.concurrent.thread
-import kotlin.math.abs
-import kotlin.math.asin
-import kotlin.math.PI
-import kotlin.math.sin
 
 class MainActivity : ComponentActivity() {
+    private lateinit var synthEngine: SynthEngine
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val engine = SynthEngine(this)
-        engine.start()
-        setContent { SynthAppUI(engine) }
+        synthEngine = SynthEngine(this)
+        synthEngine.start()
+
+        setContent {
+            MaterialTheme {
+                SynthAppUI(synthEngine)
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        synthEngine.stop()
     }
 }
 
 class NoteSlot {
-    @Volatile var active: Boolean = false
-    @Volatile var baseFreq: Float = 0f
-    @Volatile var targetFreq: Float = 0f
-    var currentFreq: Float = 0f
+    var active: Boolean = false
+    var baseFreq: Float = 440f
+    var targetFreq: Float = 440f
+    var currentFreq: Float = 440f
     var phase: Double = 0.0
     var envelopeVolume: Double = 0.0
-    @Volatile var isReleasing: Boolean = false
-    
-    @Volatile var waveform: Int = 3 
-    @Volatile var frozenCutoff: Float = 5000f
-    @Volatile var frozenRes: Float = 0.3f
-    @Volatile var frozenAttack: Float = 15f
-    @Volatile var frozenSustain: Float = 0.8f
-    @Volatile var frozenRelease: Float = 200f
-    @Volatile var isLooperNote: Boolean = false
-    
+    var isReleasing: Boolean = false
+    var waveform: Int = 0
+
+    var isLooperNote: Boolean = false
+    var frozenCutoff: Float = 5000f
+    var frozenRes: Float = 0.3f
+    var frozenAttack: Float = 15f
+    var frozenSustain: Float = 0.8f
+    var frozenRelease: Float = 200f
+
     var svfLow: Double = 0.0
     var svfBand: Double = 0.0
 }
 
-data class RecordedNote(
-    val baseFreq: Float,
-    val startTimeMs: Long,
-    val durationMs: Long,
-    val waveform: Int,
+data class LooperNoteEvent(
+    val timestampMs: Long,
+    val isNoteOn: Boolean,
+    val freq: Float,
+    val wave: Int,
     val cutoff: Float,
-    val resonance: Float,
+    val res: Float,
     val attack: Float,
     val sustain: Float,
     val release: Float
@@ -99,310 +96,70 @@ class SynthEngine(private val context: Context) {
     private val maxVoices = 16
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
+    var waveformType = 3
     var volume = 0.5f
-    var looperVolume = 1.0f 
-    var waveformType = 3 
-
-    // ADSR
+    var looperVolume = 1.0f
     var attackMs = 15f
     var sustainLevel = 0.8f
     var releaseMs = 200f
-
-    // DSP
     var cutoffFreq = 5000f
     var resonance = 0.3f
     var echoMix = 0.25f
     var glideMs = 30f
-
     var octaveShift = 0
 
     val liveVisualizerBuffer = FloatArray(256)
     val looperVisualizerBuffer = FloatArray(256)
 
-    private val delayBuffer = FloatArray(44100)
-    private var delayWritePos = 0
-
-    @Volatile var isRecording = false
-        private set
-    private var recordedAudioStream: ByteArrayOutputStream? = null
-
-    // Looper
-    val recordedNotes = mutableListOf<RecordedNote>()
-    @Volatile var isLoopRecording = false
-    @Volatile var isLoopPlaying = false
+    val recordedNotes = mutableListOf<LooperNoteEvent>()
+    private var isLoopRecording = false
+    private var isLoopPlaying = false
     private var loopStartTime = 0L
     private var loopDurationMs = 0L
-    private val activePressTimes = mutableMapOf<Float, Long>()
-    private var loopJob: Job? = null
+    private var loopThread: Thread? = null
 
-    fun getEffectiveFrequency(baseFreq: Float): Float {
-        val multiplier = Math.pow(2.0, octaveShift.toDouble()).toFloat()
-        return baseFreq * multiplier
-    }
+    private var isRecording = false
+    private var recordedAudioStream: FileOutputStream? = null
+    private var wavFile: File? = null
 
-    fun startLoopRecording() {
-        recordedNotes.clear()
-        activePressTimes.clear()
-        isLoopRecording = true
-        loopStartTime = System.currentTimeMillis()
-    }
+    private val audioTrack: AudioTrack
 
-    fun stopLoopRecording() {
-        if (!isLoopRecording) return
-        isLoopRecording = false
-        loopDurationMs = (System.currentTimeMillis() - loopStartTime).coerceAtLeast(500L)
-    }
+    init {
+        val minBufferSize = AudioTrack.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
 
-    fun startLoopPlayback() {
-        if (recordedNotes.isEmpty() || isLoopPlaying) return
-        isLoopPlaying = true
-        loopJob = CoroutineScope(Dispatchers.Default).launch {
-            while (isLoopPlaying) {
-                val currentLoopStart = System.currentTimeMillis()
-
-                for (note in recordedNotes) {
-                    launch {
-                        delay(note.startTimeMs)
-                        if (!isLoopPlaying) return@launch
-                        
-                        noteOn(
-                            note.baseFreq, note.waveform, note.cutoff, note.resonance,
-                            note.attack, note.sustain, note.release, true
-                        )
-
-                        delay(note.durationMs)
-                        noteOff(note.baseFreq, true)
-                    }
-                }
-
-                val elapsed = System.currentTimeMillis() - currentLoopStart
-                val remaining = loopDurationMs - elapsed
-                if (remaining > 0) delay(remaining)
-            }
-        }
-    }
-
-    fun stopLoopPlayback() {
-        isLoopPlaying = false
-        loopJob?.cancel()
-        loopJob = null
-        allNotesOff()
-    }
-
-    fun clearLoop() {
-        stopLoopPlayback()
-        recordedNotes.clear()
-        loopDurationMs = 0L
-    }
-
-    fun allNotesOff() {
-        for (i in 0 until maxVoices) {
-            noteSlots[i].isReleasing = true
-        }
-    }
-
-    fun noteOn(
-        baseFreq: Float, 
-        customWaveform: Int = waveformType, 
-        customCutoff: Float = cutoffFreq, 
-        customRes: Float = resonance,
-        customAttack: Float = attackMs,
-        customSustain: Float = sustainLevel,
-        customRelease: Float = releaseMs,
-        isLooper: Boolean = false
-    ) {
-        if (isLoopRecording && !isLooper) {
-            activePressTimes[baseFreq] = System.currentTimeMillis()
-        }
-
-        val freq = getEffectiveFrequency(baseFreq)
-        
-        for (i in 0 until maxVoices) {
-            val slot = noteSlots[i]
-            if (slot.active && abs(slot.baseFreq - baseFreq) < 0.01f) {
-                slot.isReleasing = false
-                slot.targetFreq = freq
-                slot.waveform = customWaveform
-                slot.frozenCutoff = customCutoff
-                slot.frozenRes = customRes
-                slot.frozenAttack = customAttack
-                slot.frozenSustain = customSustain
-                slot.frozenRelease = customRelease
-                slot.isLooperNote = isLooper
-                return
-            }
-        }
-
-        var targetSlot: NoteSlot? = null
-        for (i in 0 until maxVoices) {
-            if (!noteSlots[i].active) {
-                targetSlot = noteSlots[i]
-                break
-            }
-        }
-
-        if (targetSlot == null) targetSlot = noteSlots[0]
-
-        var lastActiveFreq = freq
-        for (i in 0 until maxVoices) {
-            if (noteSlots[i].active) {
-                lastActiveFreq = noteSlots[i].currentFreq
-                break
-            }
-        }
-
-        targetSlot.baseFreq = baseFreq
-        targetSlot.targetFreq = freq
-        targetSlot.currentFreq = if (glideMs > 0) lastActiveFreq else freq
-        targetSlot.isReleasing = false
-        targetSlot.envelopeVolume = 0.001
-        targetSlot.waveform = customWaveform
-        targetSlot.frozenCutoff = customCutoff
-        targetSlot.frozenRes = customRes
-        targetSlot.frozenAttack = customAttack
-        targetSlot.frozenSustain = customSustain
-        targetSlot.frozenRelease = customRelease
-        targetSlot.isLooperNote = isLooper
-        targetSlot.active = true
-    }
-
-    fun noteOff(baseFreq: Float, isLooper: Boolean = false) {
-        if (isLoopRecording && !isLooper && activePressTimes.containsKey(baseFreq)) {
-            val pressTime = activePressTimes.remove(baseFreq) ?: loopStartTime
-            val startTimeMs = pressTime - loopStartTime
-            val durationMs = (System.currentTimeMillis() - pressTime).coerceAtLeast(50L)
-            
-            recordedNotes.add(RecordedNote(
-                baseFreq, startTimeMs, durationMs, 
-                waveformType, cutoffFreq, resonance, 
-                attackMs, sustainLevel, releaseMs
-            ))
-        }
-
-        for (i in 0 until maxVoices) {
-            val slot = noteSlots[i]
-            if (slot.active && abs(slot.baseFreq - baseFreq) < 0.01f) {
-                slot.isReleasing = true
-            }
-        }
-    }
-
-    fun startRecording() {
-        recordedAudioStream = ByteArrayOutputStream()
-        isRecording = true
-    }
-
-    fun stopAndSaveRecording() {
-        if (!isRecording) return
-        isRecording = false
-
-        thread {
-            val audioBytes = recordedAudioStream?.toByteArray() ?: return@thread
-            saveWavFile(audioBytes)
-        }
-    }
-
-    private fun saveWavFile(pcmData: ByteArray) {
-        val fileName = "ElScale_Rec_${System.currentTimeMillis()}.wav"
-        val header = createWavHeader(pcmData.size, sampleRate, 1, 16)
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val resolver = context.contentResolver
-                val contentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/MicroSynth")
-                }
-                val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, contentValues)
-                uri?.let {
-                    resolver.openOutputStream(it)?.use { os ->
-                        os.write(header)
-                        os.write(pcmData)
-                    }
-                }
-            } else {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val file = File(downloadsDir, fileName)
-                FileOutputStream(file).use { os ->
-                    os.write(header)
-                    os.write(pcmData)
-                }
-            }
-
-            thread {
-                context.getMainExecutor().execute {
-                    Toast.makeText(context, "ההקלטה שנשמרה: $fileName", Toast.LENGTH_LONG).show()
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun createWavHeader(pcmDataLen: Int, sampleRate: Int, channels: Int, bitsPerSample: Int): ByteArray {
-        val totalDataLen = pcmDataLen + 36
-        val byteRate = sampleRate * channels * bitsPerSample / 8
-        val header = ByteArray(44)
-
-        val buffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
-        buffer.put("RIFF".toByteArray())
-        buffer.putInt(totalDataLen)
-        buffer.put("WAVE".toByteArray())
-        buffer.put("fmt ".toByteArray())
-        buffer.putInt(16)
-        buffer.putShort(1.toShort())
-        buffer.putShort(channels.toShort())
-        buffer.putInt(sampleRate)
-        buffer.putInt(byteRate)
-        buffer.putShort((channels * bitsPerSample / 8).toShort())
-        buffer.putShort(bitsPerSample.toShort())
-        buffer.put("data".toByteArray())
-        buffer.putInt(pcmDataLen)
-
-        return header
-    }
-
-    private fun softClip(sample: Double): Double {
-        return Math.tanh(sample)
+        audioTrack = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_GAME)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(minBufferSize)
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .build()
     }
 
     fun start() {
-        thread {
-            Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+        isRunning = true
+        audioTrack.play()
 
-            val minBufferSize = AudioTrack.getMinBufferSize(
-                sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
-            )
-            val audioTrack = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .build()
-                )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                        .build()
-                )
-                .setBufferSizeInBytes(minBufferSize * 2)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
+        Thread {
+            val bufferSize = 256
+            val buffer = ShortArray(bufferSize)
+            val byteBuffer = ByteBuffer.allocate(bufferSize * 2).order(ByteOrder.LITTLE_ENDIAN)
 
-            audioTrack.play()
-            val buffer = ShortArray(256)
-            val byteBuffer = ByteBuffer.allocate(512).order(ByteOrder.LITTLE_ENDIAN)
-
-            var dcX1 = 0.0
-            var dcY1 = 0.0
-
-            val delaySamples = (sampleRate * 0.25).toInt()
-            var currentHeadroom = 1.0 // משתנה להחלקה למניעת קליקים בלופ
-
-                                    while (isRunning) {
+            while (isRunning) {
                 byteBuffer.clear()
 
                 for (i in buffer.indices) {
@@ -422,11 +179,10 @@ class SynthEngine(private val context: Context) {
 
                     val shortVal = (frame.masterSample * Short.MAX_VALUE * 0.95).toInt().coerceIn(-32768, 32767).toShort()
                     buffer[i] = shortVal
-                    
-                    // תצוגות נפרדות למשקי הסאונד
+
                     liveVisualizerBuffer[i] = frame.liveSample
                     looperVisualizerBuffer[i] = frame.looperSample
-                    
+
                     byteBuffer.putShort(shortVal)
                 }
 
@@ -436,9 +192,248 @@ class SynthEngine(private val context: Context) {
 
                 audioTrack.write(buffer, 0, buffer.size)
             }
+        }.start()
+    }
 
+    fun stop() {
+        isRunning = false
+        stopLoopPlayback()
+        audioTrack.stop()
+        audioTrack.release()
+    }
+
+    fun getEffectiveFrequency(baseFreq: Float): Float {
+        return baseFreq * Math.pow(2.0, octaveShift.toDouble()).toFloat()
+    }
+
+    fun noteOn(baseFreq: Float, isLooper: Boolean = false) {
+        val freq = getEffectiveFrequency(baseFreq)
+
+        if (isLoopRecording && !isLooper) {
+            val now = System.currentTimeMillis() - loopStartTime
+            recordedNotes.add(
+                LooperNoteEvent(
+                    timestampMs = now,
+                    isNoteOn = true,
+                    freq = baseFreq,
+                    wave = waveformType,
+                    cutoff = cutoffFreq,
+                    res = resonance,
+                    attack = attackMs,
+                    sustain = sustainLevel,
+                    release = releaseMs
+                )
+            )
         }
-        @OptIn(ExperimentalMaterial3Api::class)
+
+        var slot = noteSlots.find { it.active && it.baseFreq == baseFreq && it.isLooperNote == isLooper }
+        if (slot != null) {
+            slot.isReleasing = false
+            slot.targetFreq = freq
+            return
+        }
+
+        slot = noteSlots.find { !it.active }
+        if (slot != null) {
+            slot.active = true
+            slot.baseFreq = baseFreq
+            slot.targetFreq = freq
+            slot.currentFreq = freq
+            slot.phase = 0.0
+            slot.envelopeVolume = 0.0
+            slot.isReleasing = false
+            slot.waveform = waveformType
+            slot.isLooperNote = isLooper
+            slot.frozenCutoff = cutoffFreq
+            slot.frozenRes = resonance
+            slot.frozenAttack = attackMs
+            slot.frozenSustain = sustainLevel
+            slot.frozenRelease = releaseMs
+            slot.svfLow = 0.0
+            slot.svfBand = 0.0
+        }
+    }
+
+    fun noteOff(baseFreq: Float, isLooper: Boolean = false) {
+        if (isLoopRecording && !isLooper) {
+            val now = System.currentTimeMillis() - loopStartTime
+            recordedNotes.add(
+                LooperNoteEvent(
+                    timestampMs = now,
+                    isNoteOn = false,
+                    freq = baseFreq,
+                    wave = waveformType,
+                    cutoff = cutoffFreq,
+                    res = resonance,
+                    attack = attackMs,
+                    sustain = sustainLevel,
+                    release = releaseMs
+                )
+            )
+        }
+
+        val slot = noteSlots.find { it.active && it.baseFreq == baseFreq && it.isLooperNote == isLooper && !it.isReleasing }
+        slot?.isReleasing = true
+    }
+
+    fun startLoopRecording() {
+        recordedNotes.clear()
+        isLoopRecording = true
+        loopStartTime = System.currentTimeMillis()
+    }
+
+    fun stopLoopRecording() {
+        if (!isLoopRecording) return
+        isLoopRecording = false
+        loopDurationMs = System.currentTimeMillis() - loopStartTime
+    }
+
+    fun startLoopPlayback() {
+        if (recordedNotes.isEmpty() || loopDurationMs <= 0) return
+        stopLoopPlayback()
+        isLoopPlaying = true
+
+        loopThread = Thread {
+            while (isLoopPlaying) {
+                val start = System.currentTimeMillis()
+                var eventIndex = 0
+
+                while (isLoopPlaying) {
+                    val elapsed = System.currentTimeMillis() - start
+                    if (elapsed >= loopDurationMs) break
+
+                    while (eventIndex < recordedNotes.size && recordedNotes[eventIndex].timestampMs <= elapsed) {
+                        val ev = recordedNotes[eventIndex]
+                        if (ev.isNoteOn) {
+                            noteOn(ev.freq, isLooper = true)
+                        } else {
+                            noteOff(ev.freq, isLooper = true)
+                        }
+                        eventIndex++
+                    }
+                    try { Thread.sleep(2) } catch (_: Exception) {}
+                }
+
+                noteSlots.filter { it.isLooperNote }.forEach { it.active = false }
+            }
+        }.also { it.start() }
+    }
+
+    fun stopLoopPlayback() {
+        isLoopPlaying = false
+        loopThread?.interrupt()
+        loopThread = null
+        noteSlots.filter { it.isLooperNote }.forEach { it.active = false }
+    }
+
+    fun clearLoop() {
+        stopLoopPlayback()
+        recordedNotes.clear()
+        loopDurationMs = 0L
+    }
+
+    fun startRecording() {
+        try {
+            wavFile = File(context.getExternalFilesDir(null), "synth_recording_${System.currentTimeMillis()}.wav")
+            recordedAudioStream = FileOutputStream(wavFile)
+            writeWavHeader(recordedAudioStream!, 0)
+            isRecording = true
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun stopAndSaveRecording() {
+        if (!isRecording) return
+        isRecording = false
+        try {
+            recordedAudioStream?.flush()
+            recordedAudioStream?.close()
+            wavFile?.let { updateWavHeader(it) }
+            Toast.makeText(context, "ההקלטה נשמרה ב: ${wavFile?.name}", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun writeWavHeader(out: FileOutputStream, totalAudioLen: Long) {
+        val totalDataLen = totalAudioLen + 36
+        val longSampleRate = sampleRate.toLong()
+        val channels = 1
+        val byteRate = longSampleRate * channels * 2
+
+        val header = ByteArray(44)
+        header[0] = 'R'.code.toByte()
+        header[1] = 'I'.code.toByte()
+        header[2] = 'F'.code.toByte()
+        header[3] = 'F'.code.toByte()
+        header[4] = (totalDataLen and 0xff).toByte()
+        header[5] = (totalDataLen shr 8 and 0xff).toByte()
+        header[6] = (totalDataLen shr 16 and 0xff).toByte()
+        header[7] = (totalDataLen shr 24 and 0xff).toByte()
+        header[8] = 'W'.code.toByte()
+        header[9] = 'A'.code.toByte()
+        header[10] = 'V'.code.toByte()
+        header[11] = 'E'.code.toByte()
+        header[12] = 'f'.code.toByte()
+        header[13] = 'm'.code.toByte()
+        header[14] = 't'.code.toByte()
+        header[15] = ' '.code.toByte()
+        header[16] = 16
+        header[17] = 0
+        header[18] = 0
+        header[19] = 0
+        header[20] = 1
+        header[21] = 0
+        header[22] = channels.toByte()
+        header[23] = 0
+        header[24] = (longSampleRate and 0xff).toByte()
+        header[25] = (longSampleRate shr 8 and 0xff).toByte()
+        header[26] = (longSampleRate shr 16 and 0xff).toByte()
+        header[27] = (longSampleRate shr 24 and 0xff).toByte()
+        header[28] = (byteRate and 0xff).toByte()
+        header[29] = (byteRate shr 8 and 0xff).toByte()
+        header[30] = (byteRate shr 16 and 0xff).toByte()
+        header[31] = (byteRate shr 24 and 0xff).toByte()
+        header[32] = (1 * 16 / 8).toByte()
+        header[33] = 0
+        header[34] = 16
+        header[35] = 0
+        header[36] = 'd'.code.toByte()
+        header[37] = 'a'.code.toByte()
+        header[38] = 't'.code.toByte()
+        header[39] = 'a'.code.toByte()
+        header[40] = (totalAudioLen and 0xff).toByte()
+        header[41] = (totalAudioLen shr 8 and 0xff).toByte()
+        header[42] = (totalAudioLen shr 16 and 0xff).toByte()
+        header[43] = (totalAudioLen shr 24 and 0xff).toByte()
+
+        out.write(header, 0, 44)
+    }
+
+    private fun updateWavHeader(file: File) {
+        val totalAudioLen = file.length() - 44
+        val totalDataLen = totalAudioLen + 36
+        val byteRate = sampleRate * 1 * 2
+
+        val randomAccessFile = java.io.RandomAccessFile(file, "rw")
+        randomAccessFile.seek(4)
+        randomAccessFile.write((totalDataLen and 0xff).toInt())
+        randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
+        randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
+        randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
+
+        randomAccessFile.seek(40)
+        randomAccessFile.write((totalAudioLen and 0xff).toInt())
+        randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
+        randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
+        randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
+
+        randomAccessFile.close()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynthAppUI(engine: SynthEngine) {
     val context = LocalContext.current
@@ -543,7 +538,6 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-    // --- חלון דיאלוג לכיוון תדרים (מתבקש בסעיף 2) ---
     if (showTuningDialog) {
         AlertDialog(
             onDismissRequest = { showTuningDialog = false },
@@ -598,7 +592,6 @@ fun SynthAppUI(engine: SynthEngine) {
             .padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- Header ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -607,7 +600,6 @@ fun SynthAppUI(engine: SynthEngine) {
             Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 16.sp, fontWeight = FontWeight.Bold)
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                // כפתור פתיחת הגדרות תדרים
                 OutlinedButton(
                     onClick = { showTuningDialog = true },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
@@ -641,7 +633,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // --- Looper Panel ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -725,7 +716,6 @@ fun SynthAppUI(engine: SynthEngine) {
             )
         }
 
-        // --- צג סאונד אדום: לופר בלבד (מתבקש בסעיף 1) ---
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
@@ -748,7 +738,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // --- Waveform selection ---
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.fillMaxWidth()
@@ -763,7 +752,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- Octave & Presets ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -826,7 +814,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- Sliders Section ---
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text("Live Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 9.sp)
@@ -877,7 +864,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.weight(1f))
 
-        // --- צג סאונד ירוק: לייב בלבד (מתבקש בסעיף 1) ---
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
@@ -900,7 +886,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(6.dp))
 
-        // --- Piano Keyboard ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -910,14 +895,36 @@ fun SynthAppUI(engine: SynthEngine) {
             frequencies.forEachIndexed { index, freq ->
                 var isPressed by remember { mutableStateOf(false) }
                 Card(
-                    shape = Ro
-}
-
-
-        
-                                                    },
-                        
-            
-
+                    shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isPressed) Color(0xFF00E5FF) else Color(0xFFE0E0E0)
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .pointerInput(freq) {
+                            detectTapGestures(
+                                onPress = {
+                                    isPressed = true
+                                    engine.noteOn(freq)
+                                    tryAwaitRelease()
+                                    engine.noteOff(freq)
+                                    isPressed = false
+                                }
+                            )
+                        }
+                ) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                        Text(
+                            text = "${noteNames[index]}\n${engine.getEffectiveFrequency(freq).toInt()}Hz",
+                            color = if (isPressed) Color.Black else Color.DarkGray,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
