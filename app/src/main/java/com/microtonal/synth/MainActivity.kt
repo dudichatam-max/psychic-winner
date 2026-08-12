@@ -8,6 +8,8 @@ import android.media.AudioTrack
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.provider.MediaStore
 import android.widget.Toast
@@ -68,7 +70,7 @@ class NoteSlot {
     var envelopeVolume: Double = 0.0
     @Volatile var isReleasing: Boolean = false
     @Volatile var waveform: Int = 3
-    @Volatile var isLooperVoice: Boolean = false // האם התו משויך לערוץ הלופר או לנגינה החיה
+    @Volatile var isLooperVoice: Boolean = false
 }
 
 data class RecordedNote(
@@ -94,22 +96,18 @@ class SynthEngine(private val context: Context) {
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
     var volume = 0.5f
-    var waveformType = 4 // ברירת מחדל: Sine (כמו בתמונה)
+    var waveformType = 4 // Sine
 
-    // ADSR - ברירת מחדל מעודכנת לפי התמונה
     var attackMs = 333f
     var sustainLevel = 0.33f
     var releaseMs = 1717f
 
-    // DSP Effects - ברירת מחדל מעודכנת לפי התמונה
     var cutoffFreq = 440f
     var resonance = 0.77f
     var echoMix = 0.55f
     var glideMs = 130f
 
     var octaveShift = 0
-
-    // שליטה בעוצמת הלופר בלבד (בנפרד מהמאסטר)
     var looperVolume = 0.5f
 
     val visualizerBuffer = FloatArray(256)
@@ -121,7 +119,6 @@ class SynthEngine(private val context: Context) {
         private set
     private var recordedAudioStream: ByteArrayOutputStream? = null
 
-    // --- EVENT LOOPER ENGINE ---
     val recordedNotes = mutableListOf<RecordedNote>()
     @Volatile var isLoopRecording = false
     @Volatile var isLoopPlaying = false
@@ -160,7 +157,6 @@ class SynthEngine(private val context: Context) {
                         delay(note.startTimeMs)
                         if (!isLoopPlaying) return@launch
                         
-                        // הפעלת התו עם פריסט הלופ המקורי שנשמר בצורה מוצהרת בזמן ההקלטה!
                         noteOnLooper(note)
 
                         delay(note.durationMs)
@@ -194,7 +190,6 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-    // נגינה חיה מהמקלדת
     fun noteOn(baseFreq: Float) {
         if (isLoopRecording) {
             activePressTimes[baseFreq] = System.currentTimeMillis()
@@ -202,7 +197,6 @@ class SynthEngine(private val context: Context) {
         playVoice(baseFreq, waveformType, false, attackMs, sustainLevel, releaseMs)
     }
 
-    // נגינה אוטומטית מתוך ערוץ הלופר העצמאי
     private fun noteOnLooper(note: RecordedNote) {
         playVoice(note.baseFreq, note.waveform, true, note.attackMs, note.sustainLevel, note.releaseMs)
     }
@@ -256,7 +250,6 @@ class SynthEngine(private val context: Context) {
             val startTimeMs = pressTime - loopStartTime
             val durationMs = (System.currentTimeMillis() - pressTime).coerceAtLeast(50L)
             
-            // שמירת כל פרמטרי הפריסט הנוכחיים יחד עם התו בלופ
             recordedNotes.add(
                 RecordedNote(
                     baseFreq = baseFreq,
@@ -333,10 +326,8 @@ class SynthEngine(private val context: Context) {
                 }
             }
 
-            thread {
-                context.getMainExecutor().execute {
-                    Toast.makeText(context, "ההקלטה שנשמרה: $fileName", Toast.LENGTH_LONG).show()
-                }
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(context, "ההקלטה שנשמרה: $fileName", Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -460,7 +451,7 @@ class SynthEngine(private val context: Context) {
                             1 -> if (sin(slot.phase) >= 0) 0.3 else -0.3
                             2 -> (2.0 / PI) * asin(sin(slot.phase))
                             3 -> (1.0 - (slot.phase / PI)) * 0.4
-                            else -> sin(slot.phase) // Sine בתור ברירת מחדל
+                            else -> sin(slot.phase)
                         }
 
                         val voiceMultiplier = if (slot.isLooperVoice) looperVolume else 1.0
@@ -513,7 +504,6 @@ fun SynthAppUI(engine: SynthEngine) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE) }
 
-    // ברירות מחדל מדויקות לתדרים לפי התמונה שלך
     val defaultFrequencies = remember {
         listOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 475.00f)
     }
@@ -522,8 +512,7 @@ fun SynthAppUI(engine: SynthEngine) {
     }
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
-    // ערכי ברירת מחדל תואמים במדויק לצילום המסך ששלחת (Sine, Attack 333ms, Release 1717ms, Resonance 77%, Glide 130ms, Sustain 33%, Cutoff 440Hz, Echo 55%, Volume 33%)
-    var currentWave by remember { mutableIntStateOf(4) } // 4 = Sine
+    var currentWave by remember { mutableIntStateOf(4) }
     var vol by remember { mutableFloatStateOf(0.33f) }
     var attackVal by remember { mutableFloatStateOf(333f) }
     var sustainVal by remember { mutableFloatStateOf(0.33f) }
@@ -537,12 +526,11 @@ fun SynthAppUI(engine: SynthEngine) {
     var currentOctave by remember { mutableIntStateOf(0) }
     var isRec by remember { mutableStateOf(false) }
 
-    // Loop States & Looper Volume Slider
     var isLoopRecState by remember { mutableStateOf(false) }
     var isLoopPlayState by remember { mutableStateOf(false) }
     var loopVol by remember { mutableFloatStateOf(0.5f) }
 
-    var selectedPresetSlot by remember { mutableIntStateOf(2) } // ברירת מחדל סלוט 2 מסומן כמו בתמונה
+    var selectedPresetSlot by remember { mutableIntStateOf(2) }
 
     fun savePresetToSlot(slot: Int) {
         prefs.edit().apply {
@@ -601,7 +589,6 @@ fun SynthAppUI(engine: SynthEngine) {
             .padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- 1. כותרת והקלטת WAV ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -633,7 +620,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // --- LOOP CONTROL BAR ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -699,7 +685,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // מד עוצמת סאונד נפרד ללופר (מתחת לשורת הלופר)
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -715,7 +700,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(2.dp))
 
-        // --- 2. בחירת גל (ברירת מחדל Sine כמו בתמונה) ---
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.fillMaxWidth()
@@ -730,7 +714,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- 3. אוקטבות ופריסטים ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -793,7 +776,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- 4. סליידרים (מעודכנים לערכים שבתמונה) ---
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text("Attack: ${attackVal.toInt()}ms", color = Color(0xFF00E5FF), fontSize = 9.sp)
@@ -842,7 +824,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- 5. ויזואלייזר ---
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
@@ -865,7 +846,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.weight(1f))
 
-        // --- 6. כיוון תדרים (מעל המקלדת) ---
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -900,7 +880,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(2.dp))
 
-        // --- 7. המקלדת (Keys) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
