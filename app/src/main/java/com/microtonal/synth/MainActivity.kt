@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -20,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -451,6 +453,7 @@ fun SynthAppUI(engine: SynthEngine) {
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
     var showTuningDialog by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Sound, 1: Filter & FX, 2: Looper
 
     var currentWave by remember { mutableIntStateOf(3) }
     var vol by remember { mutableFloatStateOf(0.5f) }
@@ -591,24 +594,28 @@ fun SynthAppUI(engine: SynthEngine) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF121212))
+            .background(Color(0xFF10141D))
             .padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // --- HEADER ---
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 17.sp, fontWeight = FontWeight.Bold)
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(
                     onClick = { showTuningDialog = true },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    modifier = Modifier.height(32.dp)
+                    modifier = Modifier.height(32.dp),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFFFD700)))
                 ) {
-                    Text("⚙️ תדרים", color = Color(0xFFFFD700), fontSize = 9.sp)
+                    Text("⚙️ תדרים", color = Color(0xFFFFD700), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Button(
@@ -622,285 +629,364 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isRec) Color(0xFFFF1744) else Color(0xFF333333)
+                        containerColor = if (isRec) Color(0xFFFF1744) else Color(0xFF1E2638)
                     ),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     modifier = Modifier.height(32.dp)
                 ) {
                     Box(modifier = Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, shape = CircleShape))
                     Spacer(Modifier.width(4.dp))
-                    Text(if (isRec) "שמור WAV" else "הקלט WAV", color = Color.White, fontSize = 9.sp)
+                    Text(if (isRec) "שמור WAV" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        Spacer(Modifier.height(4.dp))
-
-        Row(
+        // --- STUDIO DUAL-OSCILLOSCOPE DISPLAY ---
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF1E1E1E), shape = RoundedCornerShape(8.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .height(125.dp)
+                .background(Color(0xFF080B10), shape = RoundedCornerShape(10.dp))
+                .border(1.dp, Color(0xFF1E2738), shape = RoundedCornerShape(10.dp))
+                .padding(4.dp)
         ) {
-            Text("לופר:", color = Color(0xFF00FF66), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val dummy = renderTrigger
+                val w = size.width
+                val h = size.height
+                val halfH = h / 2f
 
-            Button(
-                onClick = {
-                    if (isLoopRecState) {
-                        engine.stopLoopRecording()
-                        isLoopRecState = false
-                    } else {
-                        engine.startLoopRecording()
-                        isLoopRecState = true
-                        isLoopPlayState = false
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isLoopRecState) Color(0xFFFF5252) else Color(0xFF424242)
-                ),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                modifier = Modifier.height(28.dp)
-            ) {
-                Text(if (isLoopRecState) "עצור הקלטה" else "הקלט לופ", fontSize = 9.sp, color = Color.White)
+                // Studio Background Grid Lines
+                val gridColor = Color(0xFF131D28)
+                val cols = 8
+                val rows = 4
+                for (i in 1 until cols) {
+                    val x = w * (i.toFloat() / cols)
+                    drawLine(gridColor, start = Offset(x, 0f), end = Offset(x, h), strokeWidth = 1f)
+                }
+                for (i in 1 until rows) {
+                    val y = h * (i.toFloat() / rows)
+                    drawLine(gridColor, start = Offset(0f, y), end = Offset(w, y), strokeWidth = 1f)
+                }
+                drawLine(Color(0xFF1E2E3E), start = Offset(0f, halfH), end = Offset(w, halfH), strokeWidth = 1.5f)
+
+                // Live Visualizer (Neon Cyan)
+                val livePath = Path()
+                val liveCenterY = halfH / 2f
+                val liveStep = w / engine.liveVisualizerBuffer.size
+                engine.liveVisualizerBuffer.forEachIndexed { i, sample ->
+                    val x = i * liveStep
+                    val y = liveCenterY + (sample * (halfH / 2f) * 0.85f)
+                    if (i == 0) livePath.moveTo(x, y) else livePath.lineTo(x, y)
+                }
+                drawPath(livePath, Color(0xFF00E5FF), style = Stroke(width = 3.5f))
+
+                // Looper Visualizer (Neon Red)
+                val looperPath = Path()
+                val looperCenterY = halfH + (halfH / 2f)
+                val looperStep = w / engine.looperVisualizerBuffer.size
+                engine.looperVisualizerBuffer.forEachIndexed { i, sample ->
+                    val x = i * looperStep
+                    val y = looperCenterY + (sample * (halfH / 2f) * 0.85f)
+                    if (i == 0) looperPath.moveTo(x, y) else looperPath.lineTo(x, y)
+                }
+                drawPath(looperPath, Color(0xFFFF2A55), style = Stroke(width = 3.5f))
             }
 
-            Button(
-                onClick = {
-                    if (isLoopPlayState) {
-                        engine.stopLoopPlayback()
-                        isLoopPlayState = false
-                    } else {
-                        engine.startLoopPlayback()
-                        isLoopPlayState = true
-                    }
-                },
-                enabled = engine.recordedNotes.isNotEmpty() && !isLoopRecState,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isLoopPlayState) Color(0xFF00C853) else Color(0xFF0288D1)
-                ),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                modifier = Modifier.height(28.dp)
-            ) {
-                Text(if (isLoopPlayState) "עצור לופ" else "נגן לופ", fontSize = 9.sp, color = Color.White)
-            }
-
-            OutlinedButton(
-                onClick = {
-                    engine.clearLoop()
-                    isLoopRecState = false
-                    isLoopPlayState = false
-                },
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                modifier = Modifier.height(28.dp)
-            ) {
-                Text("נקה", fontSize = 9.sp, color = Color.Gray)
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("עוצמת הלופר: ${(looperVolState * 100).toInt()}%", color = Color(0xFFFF1744), fontSize = 9.sp)
-            Slider(
-                value = looperVolState,
-                onValueChange = {
-                    looperVolState = it
-                    engine.looperVolume = it
-                },
+            // Screen Labels Overlay
+            Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 8.dp)
-            )
+                    .fillMaxSize()
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("LIVE SCOPE", color = Color(0xFF00E5FF).copy(alpha = 0.7f), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                Text("LOOP SCOPE", color = Color(0xFFFF2A55).copy(alpha = 0.7f), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            }
         }
 
-        Canvas(
+        Spacer(Modifier.height(8.dp))
+
+        // --- TAB SELECTION BAR ---
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(24.dp)
-                .background(Color.Black, shape = RoundedCornerShape(6.dp))
-                .padding(2.dp)
+                .background(Color(0xFF181E2B), shape = RoundedCornerShape(8.dp))
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            val dummy = renderTrigger
-            val path = Path()
-            val centerY = size.height / 2
-            val step = size.width / engine.looperVisualizerBuffer.size
-
-            engine.looperVisualizerBuffer.forEachIndexed { i, sample ->
-                val x = i * step
-                val y = centerY + (sample * centerY * 0.9f)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            drawPath(path, Color(0xFFFF1744), style = Stroke(width = 2f))
-        }
-
-        Spacer(Modifier.height(4.dp))
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
-            itemsIndexed(waves) { index, name ->
-                FilterChip(
-                    selected = currentWave == index,
-                    onClick = { currentWave = index; engine.waveformType = index },
-                    label = { Text(name, fontSize = 9.sp) }
-                )
+            val tabs = listOf("🎛️ סאונד", "🎚️ פילטר ו-FX", "🔄 לופר")
+            tabs.forEachIndexed { index, title ->
+                Button(
+                    onClick = { selectedTab = index },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedTab == index) Color(0xFF26334A) else Color.Transparent
+                    ),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        title,
+                        color = if (selectedTab == index) Color(0xFF00E5FF) else Color.Gray,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Spacer(Modifier.height(8.dp))
+
+        // --- TAB CONTENT AREA ---
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .background(Color(0xFF151A24), shape = RoundedCornerShape(10.dp))
+                .padding(8.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(
-                    onClick = {
-                        if (currentOctave > -2) {
-                            currentOctave--
-                            engine.octaveShift = currentOctave
+            when (selectedTab) {
+                // TAB 0: SOUND ENGINE & ADSR
+                0 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("סוג גל", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(2.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
+                            itemsIndexed(waves) { index, name ->
+                                FilterChip(
+                                    selected = currentWave == index,
+                                    onClick = { currentWave = index; engine.waveformType = index },
+                                    label = { Text(name, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = Color(0xFF00E5FF),
+                                        selectedLabelColor = Color.Black
+                                    )
+                                )
+                            }
                         }
-                    },
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                    modifier = Modifier.height(30.dp)
-                ) { Text("-1 Oct", fontSize = 9.sp, color = Color.White) }
+                    }
 
-                Text(" Oct: $currentOctave ", color = Color.Yellow, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-
-                OutlinedButton(
-                    onClick = {
-                        if (currentOctave < 2) {
-                            currentOctave++
-                            engine.octaveShift = currentOctave
-                        }
-                    },
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                    modifier = Modifier.height(30.dp)
-                ) { Text("+1 Oct", fontSize = 9.sp, color = Color.White) }
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                (1..4).forEach { slot ->
-                    Button(
-                        onClick = {
-                            selectedPresetSlot = slot
-                            loadPresetFromSlot(slot)
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (selectedPresetSlot == slot) Color(0xFF00E5FF) else Color(0xFF333333)
-                        ),
-                        contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.size(28.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("$slot", fontSize = 10.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedButton(
+                                onClick = {
+                                    if (currentOctave > -2) {
+                                        currentOctave--
+                                        engine.octaveShift = currentOctave
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) { Text("-1 Oct", fontSize = 9.sp, color = Color.White) }
+
+                            Text(" Oct: $currentOctave ", color = Color.Yellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+
+                            OutlinedButton(
+                                onClick = {
+                                    if (currentOctave < 2) {
+                                        currentOctave++
+                                        engine.octaveShift = currentOctave
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) { Text("+1 Oct", fontSize = 9.sp, color = Color.White) }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            (1..4).forEach { slot ->
+                                Button(
+                                    onClick = {
+                                        selectedPresetSlot = slot
+                                        loadPresetFromSlot(slot)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (selectedPresetSlot == slot) Color(0xFF00E5FF) else Color(0xFF26334A)
+                                    ),
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Text("$slot", fontSize = 10.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
+                                }
+                            }
+                            Button(
+                                onClick = { savePresetToSlot(selectedPresetSlot) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFAB47BC)),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text("שמור", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    SynthSlider(
+                        label = "ווליום נגינה",
+                        valueDisplay = "${(vol * 100).toInt()}%",
+                        value = vol,
+                        accentColor = Color.White,
+                        onValueChange = { vol = it; engine.volume = it }
+                    )
+
+                    SynthSlider(
+                        label = "Attack (התקפה)",
+                        valueDisplay = "${attackVal.toInt()}ms",
+                        value = attackVal,
+                        valueRange = 5f..500f,
+                        accentColor = Color(0xFF00E5FF),
+                        onValueChange = { attackVal = it; engine.attackMs = it }
+                    )
+
+                    SynthSlider(
+                        label = "Sustain (החזקה)",
+                        valueDisplay = "${(sustainVal * 100).toInt()}%",
+                        value = sustainVal,
+                        valueRange = 0f..1f,
+                        accentColor = Color(0xFF00FF66),
+                        onValueChange = { sustainVal = it; engine.sustainLevel = it }
+                    )
+
+                    SynthSlider(
+                        label = "Release (דעיכה)",
+                        valueDisplay = "${releaseVal.toInt()}ms",
+                        value = releaseVal,
+                        valueRange = 20f..2000f,
+                        accentColor = Color(0xFFFFD700),
+                        onValueChange = { releaseVal = it; engine.releaseMs = it }
+                    )
+                }
+
+                // TAB 1: FILTER & FX
+                1 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
+                    SynthSlider(
+                        label = "Cutoff (חיתוך תדרים)",
+                        valueDisplay = "${cutoffVal.toInt()}Hz",
+                        value = cutoffVal,
+                        valueRange = 200f..12000f,
+                        accentColor = Color(0xFFFF7043),
+                        onValueChange = { cutoffVal = it; engine.cutoffFreq = it }
+                    )
+
+                    SynthSlider(
+                        label = "Resonance (תהודה)",
+                        valueDisplay = "${(resVal * 100).toInt()}%",
+                        value = resVal,
+                        valueRange = 0f..0.9f,
+                        accentColor = Color(0xFFFF4081),
+                        onValueChange = { resVal = it; engine.resonance = it }
+                    )
+
+                    SynthSlider(
+                        label = "Echo Mix (דיליי)",
+                        valueDisplay = "${(echoVal * 100).toInt()}%",
+                        value = echoVal,
+                        valueRange = 0f..0.6f,
+                        accentColor = Color(0xFFAB47BC),
+                        onValueChange = { echoVal = it; engine.echoMix = it }
+                    )
+
+                    SynthSlider(
+                        label = "Glide (פליסנדו בין תווים)",
+                        valueDisplay = "${glideVal.toInt()}ms",
+                        value = glideVal,
+                        valueRange = 0f..200f,
+                        accentColor = Color(0xFF26C6DA),
+                        onValueChange = { glideVal = it; engine.glideMs = it }
+                    )
+                }
+
+                // TAB 2: LOOPER CONTROLS
+                2 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
+                    SynthSlider(
+                        label = "עוצמת הלופר",
+                        valueDisplay = "${(looperVolState * 100).toInt()}%",
+                        value = looperVolState,
+                        accentColor = Color(0xFFFF2A55),
+                        onValueChange = {
+                            looperVolState = it
+                            engine.looperVolume = it
+                        }
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                if (isLoopRecState) {
+                                    engine.stopLoopRecording()
+                                    isLoopRecState = false
+                                } else {
+                                    engine.startLoopRecording()
+                                    isLoopRecState = true
+                                    isLoopPlayState = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isLoopRecState) Color(0xFFFF5252) else Color(0xFF26334A)
+                            ),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Text(if (isLoopRecState) "עצור הקלטה" else "🔴 הקלט לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                if (isLoopPlayState) {
+                                    engine.stopLoopPlayback()
+                                    isLoopPlayState = false
+                                } else {
+                                    engine.startLoopPlayback()
+                                    isLoopPlayState = true
+                                }
+                            },
+                            enabled = engine.recordedNotes.isNotEmpty() && !isLoopRecState,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isLoopPlayState) Color(0xFF00C853) else Color(0xFF0288D1)
+                            ),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Text(if (isLoopPlayState) "עצור ניגון" else "▶️ נגן לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            engine.clearLoop()
+                            isLoopRecState = false
+                            isLoopPlayState = false
+                        },
+                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
+                    ) {
+                        Text("🗑️ נקה לופר", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-
-                Button(
-                    onClick = { savePresetToSlot(selectedPresetSlot) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFAB47BC)),
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                    modifier = Modifier.height(28.dp)
-                ) {
-                    Text("שמור", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                }
             }
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f)) {
-                Text("Live Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 9.sp)
-                Slider(value = vol, onValueChange = { vol = it; engine.volume = it })
-            }
-            Spacer(Modifier.width(6.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Attack: ${attackVal.toInt()}ms", color = Color(0xFF00E5FF), fontSize = 9.sp)
-                Slider(value = attackVal, valueRange = 5f..500f, onValueChange = { attackVal = it; engine.attackMs = it })
-            }
-        }
+        Spacer(Modifier.height(8.dp))
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f)) {
-                Text("Sustain: ${(sustainVal * 100).toInt()}%", color = Color(0xFF00FF66), fontSize = 9.sp)
-                Slider(value = sustainVal, valueRange = 0f..1f, onValueChange = { sustainVal = it; engine.sustainLevel = it })
-            }
-            Spacer(Modifier.width(6.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Release: ${releaseVal.toInt()}ms", color = Color(0xFFFFD700), fontSize = 9.sp)
-                Slider(value = releaseVal, valueRange = 20f..2000f, onValueChange = { releaseVal = it; engine.releaseMs = it })
-            }
-        }
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f)) {
-                Text("Cutoff: ${cutoffVal.toInt()}Hz", color = Color(0xFFFF7043), fontSize = 9.sp)
-                Slider(value = cutoffVal, valueRange = 200f..12000f, onValueChange = { cutoffVal = it; engine.cutoffFreq = it })
-            }
-            Spacer(Modifier.width(6.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Resonance: ${(resVal * 100).toInt()}%", color = Color(0xFFFF4081), fontSize = 9.sp)
-                Slider(value = resVal, valueRange = 0f..0.9f, onValueChange = { resVal = it; engine.resonance = it })
-            }
-        }
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f)) {
-                Text("Echo: ${(echoVal * 100).toInt()}%", color = Color(0xFFAB47BC), fontSize = 9.sp)
-                Slider(value = echoVal, valueRange = 0f..0.6f, onValueChange = { echoVal = it; engine.echoMix = it })
-            }
-            Spacer(Modifier.width(6.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Glide: ${glideVal.toInt()}ms", color = Color(0xFF26C6DA), fontSize = 9.sp)
-                Slider(value = glideVal, valueRange = 0f..200f, onValueChange = { glideVal = it; engine.glideMs = it })
-            }
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(30.dp)
-                .background(Color.Black, shape = RoundedCornerShape(6.dp))
-                .padding(2.dp)
-        ) {
-            val dummy = renderTrigger
-            val path = Path()
-            val centerY = size.height / 2
-            val step = size.width / engine.liveVisualizerBuffer.size
-
-            engine.liveVisualizerBuffer.forEachIndexed { i, sample ->
-                val x = i * step
-                val y = centerY + (sample * centerY * 0.9f)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            drawPath(path, Color(0xFF00FF66), style = Stroke(width = 2f))
-        }
-
-        Spacer(Modifier.height(6.dp))
-
+        // --- FIXED KEYBOARD AT BOTTOM ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(115.dp),
+                .height(110.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             frequencies.forEachIndexed { index, freq ->
                 var isPressed by remember { mutableStateOf(false) }
                 Card(
-                    shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp),
+                    shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp, topStart = 4.dp, topEnd = 4.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (isPressed) Color(0xFF00E5FF) else Color(0xFFE0E0E0)
+                        containerColor = if (isPressed) Color(0xFF00E5FF) else Color(0xFFE2E8F0)
                     ),
                     modifier = Modifier
                         .weight(1f)
@@ -918,16 +1004,57 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                 ) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                        Text(
-                            text = "${noteNames[index]}\n${engine.getEffectiveFrequency(freq).toInt()}Hz",
-                            color = if (isPressed) Color.Black else Color.DarkGray,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 9.sp,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        ) {
+                            Text(
+                                text = noteNames[index],
+                                color = if (isPressed) Color.Black else Color(0xFF1E293B),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = "${engine.getEffectiveFrequency(freq).toInt()}Hz",
+                                color = if (isPressed) Color.Black.copy(alpha = 0.7f) else Color(0xFF64748B),
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 8.sp
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+// Reusable Custom Slider Component for Clean Design
+@Composable
+fun SynthSlider(
+    label: String,
+    valueDisplay: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
+    accentColor: Color = Color(0xFF00E5FF),
+    onValueChange: (Float) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Text(valueDisplay, color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+        Slider(
+            value = value,
+            valueRange = valueRange,
+            onValueChange = onValueChange,
+            colors = SliderDefaults.colors(
+                thumbColor = accentColor,
+                activeTrackColor = accentColor,
+                inactiveTrackColor = Color(0xFF26334A)
+            )
+        )
     }
 }
