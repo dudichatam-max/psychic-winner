@@ -68,13 +68,15 @@ class NoteSlot {
     var envelopeVolume: Double = 0.0
     @Volatile var isReleasing: Boolean = false
     
-    // נתונים לשמירת מצב (Snapshot) עבור כל תו ספציפי
+    // Snapshot הרמטי לכל תו
     @Volatile var waveform: Int = 3 
     @Volatile var frozenCutoff: Float = 5000f
     @Volatile var frozenRes: Float = 0.3f
+    @Volatile var frozenAttack: Float = 15f
+    @Volatile var frozenSustain: Float = 0.8f
+    @Volatile var frozenRelease: Float = 200f
     @Volatile var isLooperNote: Boolean = false
     
-    // מצב הפילטר הפנימי של התו
     var svfLow: Double = 0.0
     var svfBand: Double = 0.0
 }
@@ -85,7 +87,10 @@ data class RecordedNote(
     val durationMs: Long,
     val waveform: Int,
     val cutoff: Float,
-    val resonance: Float
+    val resonance: Float,
+    val attack: Float,
+    val sustain: Float,
+    val release: Float
 )
 
 class SynthEngine(private val context: Context) {
@@ -96,15 +101,15 @@ class SynthEngine(private val context: Context) {
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
     var volume = 0.5f
-    var looperVolume = 1.0f // עוצמה נפרדת ללופר
-    var waveformType = 3 // 0=Sine, 1=Square, 2=Triangle, 3=Sawtooth, 4=Noise
+    var looperVolume = 1.0f 
+    var waveformType = 3 
 
     // ADSR
     var attackMs = 15f
     var sustainLevel = 0.8f
     var releaseMs = 200f
 
-    // DSP Effects
+    // DSP
     var cutoffFreq = 5000f
     var resonance = 0.3f
     var echoMix = 0.25f
@@ -113,7 +118,6 @@ class SynthEngine(private val context: Context) {
     var octaveShift = 0
 
     val visualizerBuffer = FloatArray(256)
-
     private val delayBuffer = FloatArray(44100)
     private var delayWritePos = 0
 
@@ -121,7 +125,7 @@ class SynthEngine(private val context: Context) {
         private set
     private var recordedAudioStream: ByteArrayOutputStream? = null
 
-    // --- EVENT LOOPER ENGINE ---
+    // Looper
     val recordedNotes = mutableListOf<RecordedNote>()
     @Volatile var isLoopRecording = false
     @Volatile var isLoopPlaying = false
@@ -160,8 +164,11 @@ class SynthEngine(private val context: Context) {
                         delay(note.startTimeMs)
                         if (!isLoopPlaying) return@launch
                         
-                        // מנגן את התו עם הערכים שהוקפאו ומסמן אותו כתו מהלופר
-                        noteOn(note.baseFreq, note.waveform, note.cutoff, note.resonance, true)
+                        // קורא לתו עם כל הערכים השמורים בהקלטה
+                        noteOn(
+                            note.baseFreq, note.waveform, note.cutoff, note.resonance,
+                            note.attack, note.sustain, note.release, true
+                        )
 
                         delay(note.durationMs)
                         noteOff(note.baseFreq, true)
@@ -194,7 +201,16 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-    fun noteOn(baseFreq: Float, customWaveform: Int = waveformType, customCutoff: Float = cutoffFreq, customRes: Float = resonance, isLooper: Boolean = false) {
+    fun noteOn(
+        baseFreq: Float, 
+        customWaveform: Int = waveformType, 
+        customCutoff: Float = cutoffFreq, 
+        customRes: Float = resonance,
+        customAttack: Float = attackMs,
+        customSustain: Float = sustainLevel,
+        customRelease: Float = releaseMs,
+        isLooper: Boolean = false
+    ) {
         if (isLoopRecording && !isLooper) {
             activePressTimes[baseFreq] = System.currentTimeMillis()
         }
@@ -209,6 +225,9 @@ class SynthEngine(private val context: Context) {
                 slot.waveform = customWaveform
                 slot.frozenCutoff = customCutoff
                 slot.frozenRes = customRes
+                slot.frozenAttack = customAttack
+                slot.frozenSustain = customSustain
+                slot.frozenRelease = customRelease
                 slot.isLooperNote = isLooper
                 return
             }
@@ -222,9 +241,7 @@ class SynthEngine(private val context: Context) {
             }
         }
 
-        if (targetSlot == null) {
-            targetSlot = noteSlots[0]
-        }
+        if (targetSlot == null) targetSlot = noteSlots[0]
 
         var lastActiveFreq = freq
         for (i in 0 until maxVoices) {
@@ -242,6 +259,9 @@ class SynthEngine(private val context: Context) {
         targetSlot.waveform = customWaveform
         targetSlot.frozenCutoff = customCutoff
         targetSlot.frozenRes = customRes
+        targetSlot.frozenAttack = customAttack
+        targetSlot.frozenSustain = customSustain
+        targetSlot.frozenRelease = customRelease
         targetSlot.isLooperNote = isLooper
         targetSlot.active = true
     }
@@ -251,8 +271,13 @@ class SynthEngine(private val context: Context) {
             val pressTime = activePressTimes.remove(baseFreq) ?: loopStartTime
             val startTimeMs = pressTime - loopStartTime
             val durationMs = (System.currentTimeMillis() - pressTime).coerceAtLeast(50L)
-            // שומר את ההקלטה עם הפרמטרים שמוגדרים כרגע באפליקציה
-            recordedNotes.add(RecordedNote(baseFreq, startTimeMs, durationMs, waveformType, cutoffFreq, resonance))
+            
+            // שומר את ההקלטה עם כל פרמטרי ה-ADSR של הלייב
+            recordedNotes.add(RecordedNote(
+                baseFreq, startTimeMs, durationMs, 
+                waveformType, cutoffFreq, resonance, 
+                attackMs, sustainLevel, releaseMs
+            ))
         }
 
         for (i in 0 until maxVoices) {
@@ -379,9 +404,6 @@ class SynthEngine(private val context: Context) {
 
             while (isRunning) {
                 byteBuffer.clear()
-
-                val attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (attackMs / 1000.0).coerceAtLeast(0.001)))
-                val releaseCoeff = Math.exp(-1.0 / (sampleRate * (releaseMs / 1000.0).coerceAtLeast(0.001)))
                 val glideFactor = if (glideMs > 0) (1.0 / (sampleRate * (glideMs / 1000.0))).coerceIn(0.001, 1.0) else 1.0
 
                 for (i in buffer.indices) {
@@ -409,8 +431,16 @@ class SynthEngine(private val context: Context) {
                             slot.phase %= (2.0 * PI)
                         }
 
+                        // חישוב ADSR אינדיבידואלי לכל תו
+                        val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
+                        val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
+                        val actualRelease = if (slot.isLooperNote) slot.frozenRelease else releaseMs
+
+                        val attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
+                        val releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
+
                         if (!slot.isReleasing) {
-                            slot.envelopeVolume += (sustainLevel.toDouble() - slot.envelopeVolume) * attackCoeff
+                            slot.envelopeVolume += (actualSustain.toDouble() - slot.envelopeVolume) * attackCoeff
                         } else {
                             slot.envelopeVolume *= releaseCoeff
                             if (slot.envelopeVolume < 0.001) {
@@ -430,7 +460,7 @@ class SynthEngine(private val context: Context) {
 
                         var voiceSample = raw * slot.envelopeVolume * headroomScale
 
-                        // הפעלת פילטר (Cutoff/Resonance) באופן עצמאי לכל קול (Per-Voice DSP)
+                        // פילטר עצמאי
                         val actualCutoff = if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq
                         val actualRes = if (slot.isLooperNote) slot.frozenRes else resonance
 
@@ -442,9 +472,11 @@ class SynthEngine(private val context: Context) {
                         slot.svfLow += f * slot.svfBand
                         voiceSample = slot.svfLow
 
-                        // הפעלת שליטת ווליום נפרדת ללופר בלבד
+                        // בידוד ווליום - לייב מול לופר
                         if (slot.isLooperNote) {
                             voiceSample *= looperVolume
+                        } else {
+                            voiceSample *= volume
                         }
 
                         totalSample += voiceSample
@@ -454,7 +486,6 @@ class SynthEngine(private val context: Context) {
                     val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
                     val echoSample = delayBuffer[delayReadPos]
                     delayBuffer[delayWritePos] = (totalSample + echoSample * 0.4).toFloat()
-                    delayWritePos = (delayWritePos + 1) % delayBuffer.size
                     totalSample += echoSample * echoMix
 
                     // מסנן DC
@@ -463,7 +494,8 @@ class SynthEngine(private val context: Context) {
                     dcY1 = dcSample
                     totalSample = dcSample
 
-                    totalSample = softClip(totalSample * volume * 0.6)
+                    // שימו לב: הסרנו את הווליום הגלובלי מכאן כי הוא מחושב פר-תו למעלה
+                    totalSample = softClip(totalSample * 0.6)
 
                     val shortVal = (totalSample * Short.MAX_VALUE).toInt().coerceIn(-32768, 32767).toShort()
                     buffer[i] = shortVal
@@ -509,7 +541,6 @@ fun SynthAppUI(engine: SynthEngine) {
     var currentOctave by remember { mutableIntStateOf(0) }
     var isRec by remember { mutableStateOf(false) }
 
-    // Loop States
     var isLoopRecState by remember { mutableStateOf(false) }
     var isLoopPlayState by remember { mutableStateOf(false) }
     var looperVolState by remember { mutableFloatStateOf(1.0f) }
@@ -556,7 +587,6 @@ fun SynthAppUI(engine: SynthEngine) {
         if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
     }
 
-    // טעינת פריסט 1 כברירת מחדל בעת פתיחת האפליקציה
     LaunchedEffect(Unit) {
         loadPresetFromSlot(1, showToast = false)
     }
@@ -593,7 +623,6 @@ fun SynthAppUI(engine: SynthEngine) {
             .padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- 1. כותרת, הקלטת WAV וסקציית LOOP ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -625,7 +654,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // --- LOOP CONTROL BAR ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -689,7 +717,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
         
-        // --- LOOPER VOLUME SLIDER ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -712,7 +739,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(2.dp))
 
-        // --- 2. בחירת גל ---
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.fillMaxWidth()
@@ -727,7 +753,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- 3. אוקטבות ופריסטים ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -790,10 +815,9 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- 4. סליידרים ---
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
-                Text("Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 9.sp)
+                Text("Live Volume: ${(vol * 100).toInt()}%", color = Color.White, fontSize = 9.sp)
                 Slider(value = vol, onValueChange = { vol = it; engine.volume = it })
             }
             Spacer(Modifier.width(6.dp))
@@ -839,7 +863,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- 5. ויזואלייזר ---
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
@@ -862,7 +885,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.weight(1f))
 
-        // --- 6. כיוון תדרים (מעל המקלדת) ---
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -897,7 +919,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(2.dp))
 
-        // --- 7. המקלדת (Keys) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
