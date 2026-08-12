@@ -93,6 +93,7 @@ data class RecordedNote(
 
 class SynthEngine(private val context: Context) {
     private val sampleRate = 44100
+    private val dspEngine = DspEngine(sampleRate)
     @Volatile private var isRunning = true
 
     private val maxVoices = 16
@@ -399,100 +400,27 @@ class SynthEngine(private val context: Context) {
             val delaySamples = (sampleRate * 0.25).toInt()
             var currentHeadroom = 1.0 // משתנה להחלקה למניעת קליקים בלופ
 
-            while (isRunning) {
+                        while (isRunning) {
                 byteBuffer.clear()
-                val glideFactor = if (glideMs > 0) (1.0 / (sampleRate * (glideMs / 1000.0))).coerceIn(0.001, 1.0) else 1.0
 
                 for (i in buffer.indices) {
-                    var totalSample = 0.0
-                    var activeCount = 0
-
-                    for (v in 0 until maxVoices) {
-                        if (noteSlots[v].active) activeCount++
-                    }
-
-                    // החלקה דינמית של ה-Headroom כדי למנוע קפיצות עוצמה פתאומיות שיוצרות פיצוצים/קליקים
-                    val targetHeadroom = if (activeCount > 0) 1.0 / (1.0 + activeCount * 0.15) else 1.0
-                    currentHeadroom += (targetHeadroom - currentHeadroom) * 0.05
-
-                    for (v in 0 until maxVoices) {
-                        val slot = noteSlots[v]
-                        if (!slot.active) continue
-
-                        if (glideMs > 0 && abs(slot.currentFreq - slot.targetFreq) > 0.05f) {
-                            slot.currentFreq += ((slot.targetFreq - slot.currentFreq) * glideFactor).toFloat()
-                        } else {
-                            slot.currentFreq = slot.targetFreq
-                        }
-
-                        slot.phase += (2.0 * PI * slot.currentFreq / sampleRate)
-                        if (slot.phase >= 2.0 * PI) {
-                            slot.phase %= (2.0 * PI)
-                        }
-
-                        val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
-                        val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
-                        val actualRelease = if (slot.isLooperNote) slot.frozenRelease else releaseMs
-
-                        val attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
-                        val releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
-
-                        if (!slot.isReleasing) {
-                            slot.envelopeVolume += (actualSustain.toDouble() - slot.envelopeVolume) * attackCoeff
-                        } else {
-                            slot.envelopeVolume *= releaseCoeff
-                            if (slot.envelopeVolume < 0.001) {
-                                slot.envelopeVolume = 0.0
-                                slot.active = false
-                                continue
-                            }
-                        }
-
-                        val raw = when (slot.waveform) {
-                            0 -> sin(slot.phase)
-                            1 -> if (sin(slot.phase) >= 0) 0.3 else -0.3
-                            2 -> (2.0 / PI) * asin(sin(slot.phase))
-                            3 -> (1.0 - (slot.phase / PI)) * 0.4
-                            else -> (Math.random() * 2.0 - 1.0) * 0.2
-                        }
-
-                        var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.55
-
-                        val actualCutoff = if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq
-                        val actualRes = if (slot.isLooperNote) slot.frozenRes else resonance
-
-                        val f = (2.0 * sin(PI * actualCutoff / sampleRate)).coerceIn(0.01, 0.8)
-                        val q = (1.0 - actualRes.toDouble().coerceIn(0.0, 0.95))
-                        
-                        val hp = voiceSample - slot.svfLow - q * slot.svfBand
-                        slot.svfBand += f * hp
-                        slot.svfLow += f * slot.svfBand
-                        voiceSample = slot.svfLow
-
-                        if (slot.isLooperNote) {
-                            voiceSample *= looperVolume
-                        } else {
-                            voiceSample *= volume
-                        }
-
-                        totalSample += voiceSample
-                    }
-
-                    val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
-                    val echoSample = delayBuffer[delayReadPos]
-                    delayBuffer[delayWritePos] = (totalSample + echoSample * 0.4).toFloat()
-                    totalSample += echoSample * echoMix
-
-                    val dcSample = totalSample - dcX1 + 0.995 * dcY1
-                    dcX1 = totalSample
-                    dcY1 = dcSample
-                    totalSample = dcSample
-
-                    totalSample = softClip(totalSample * 0.45) 
+                    val totalSample = dspEngine.processNextSample(
+                        noteSlots = noteSlots,
+                        maxVoices = maxVoices,
+                        glideMs = glideMs,
+                        liveVolume = volume,
+                        looperVolume = looperVolume,
+                        cutoffFreq = cutoffFreq,
+                        resonance = resonance,
+                        attackMs = attackMs,
+                        sustainLevel = sustainLevel,
+                        releaseMs = releaseMs,
+                        echoMix = echoMix
+                    )
 
                     val shortVal = (totalSample * Short.MAX_VALUE * 0.95).toInt().coerceIn(-32768, 32767).toShort()
                     buffer[i] = shortVal
-                    visualizerBuffer[i] = totalSample.toFloat()
+                    visualizerBuffer[i] = totalSample
                     byteBuffer.putShort(shortVal)
                 }
 
@@ -502,6 +430,7 @@ class SynthEngine(private val context: Context) {
 
                 audioTrack.write(buffer, 0, buffer.size)
             }
+
         }
     }
 }
