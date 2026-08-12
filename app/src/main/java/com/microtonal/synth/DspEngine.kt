@@ -6,18 +6,20 @@ import kotlin.math.asin
 import kotlin.math.sin
 import kotlin.math.tanh
 
+data class DspFrame(
+    val liveSample: Float,
+    val looperSample: Float,
+    val masterSample: Float
+)
+
 class DspEngine(private val sampleRate: Int = 44100) {
 
-    private val delayBuffer = FloatArray(sampleRate) // באפר של שנייה עבור Echo
+    private val delayBuffer = FloatArray(sampleRate)
     private var delayWritePos = 0
     private var dcX1 = 0.0
     private var dcY1 = 0.0
     private var currentHeadroom = 1.0
 
-    /**
-     * מעבד דגימה בודדת (Sample) מכל הקולות, מפריד בין ערוץ ה-Live לערוץ ה-Looper,
-     * ומפעיל מנגנון Limiter למניעת פיצוצים וקליקים.
-     */
     fun processNextSample(
         noteSlots: Array<NoteSlot>,
         maxVoices: Int,
@@ -30,7 +32,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
         sustainLevel: Float,
         releaseMs: Float,
         echoMix: Float
-    ): Float {
+    ): DspFrame {
         val glideFactor = if (glideMs > 0) (1.0 / (sampleRate * (glideMs / 1000.0))).coerceIn(0.001, 1.0) else 1.0
 
         var activeCount = 0
@@ -38,32 +40,27 @@ class DspEngine(private val sampleRate: Int = 44100) {
             if (noteSlots[v].active) activeCount++
         }
 
-        // 1. החלקה דינמית של ה-Headroom למניעת קליקים וקפיצות עוצמה בלופר
         val targetHeadroom = if (activeCount > 0) 1.0 / (1.0 + activeCount * 0.15) else 1.0
         currentHeadroom += (targetHeadroom - currentHeadroom) * 0.05
 
         var liveChannelMix = 0.0
         var looperChannelMix = 0.0
 
-        // 2. חישוב הקולות והפרדה בין הערוצים
         for (v in 0 until maxVoices) {
             val slot = noteSlots[v]
             if (!slot.active) continue
 
-            // Glide (פורטמנטו)
             if (glideMs > 0 && abs(slot.currentFreq - slot.targetFreq) > 0.05f) {
                 slot.currentFreq += ((slot.targetFreq - slot.currentFreq) * glideFactor).toFloat()
             } else {
                 slot.currentFreq = slot.targetFreq
             }
 
-            // Phase step
             slot.phase += (2.0 * PI * slot.currentFreq / sampleRate)
             if (slot.phase >= 2.0 * PI) {
                 slot.phase %= (2.0 * PI)
             }
 
-            // מעטפת ADSR
             val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
             val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
             val actualRelease = if (slot.isLooperNote) slot.frozenRelease else releaseMs
@@ -82,7 +79,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 }
             }
 
-            // מחולל גלים (Waveforms)
             val raw = when (slot.waveform) {
                 0 -> sin(slot.phase)
                 1 -> if (sin(slot.phase) >= 0) 0.3 else -0.3
@@ -93,7 +89,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.55
 
-            // פילטר SVF לכל קול
             val actualCutoff = if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq
             val actualRes = if (slot.isLooperNote) slot.frozenRes else resonance
 
@@ -105,7 +100,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
             slot.svfLow += f * slot.svfBand
             voiceSample = slot.svfLow
 
-            // פיצול ערוצים: הפרדה מוחלטת בין הלופר לנגינה החיה
             if (slot.isLooperNote) {
                 looperChannelMix += voiceSample
             } else {
@@ -113,10 +107,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
         }
 
-        // 3. איחוד ערוצים עם עוצמה נפרדת (מונע בדיוק את העומס והפיצוצים)
+        // חישוב נפרד לכל ערוץ לצורך הדימוי הוויזואלי
+        val finalLiveSample = (liveChannelMix * liveVolume).toFloat()
+        val finalLooperSample = (looperChannelMix * looperVolume).toFloat()
+
         var totalSample = (liveChannelMix * liveVolume) + (looperChannelMix * looperVolume)
 
-        // 4. אפקט דיליי (Echo)
         val delaySamples = (sampleRate * 0.25).toInt()
         val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
         val echoSample = delayBuffer[delayReadPos]
@@ -126,14 +122,18 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
         totalSample += echoSample * echoMix
 
-        // 5. ניקוי תדרים נמוכים (DC Offset Filter)
         val dcSample = totalSample - dcX1 + 0.995 * dcY1
         dcX1 = totalSample
         dcY1 = dcSample
         totalSample = dcSample
 
-        // 6. אלגוריתם Soft-Clipping / Limiter (דוחס את הסאונד בעדינות במקום להתפוצץ)
-        return softClip(totalSample * 0.45).toFloat()
+        val masterSample = softClip(totalSample * 0.45).toFloat()
+
+        return DspFrame(
+            liveSample = finalLiveSample,
+            looperSample = finalLooperSample,
+            masterSample = masterSample
+        )
     }
 
     private fun softClip(sample: Double): Double {
