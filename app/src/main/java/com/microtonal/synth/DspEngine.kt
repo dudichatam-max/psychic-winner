@@ -4,7 +4,6 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.tan
-import kotlin.math.tanh
 
 data class DspFrame(
     val liveSample: Float,
@@ -24,6 +23,29 @@ class DspEngine(private val sampleRate: Int = 44100) {
     private var smoothedLiveVol = 0.5
     private var smoothedLooperVol = 1.0
     private var smoothedEchoMix = 0.25
+
+    // --- OPTIMIZATION 1: SINE LOOKUP TABLE (LUT) ---
+    private val lutSize = 4096
+    private val lutMask = lutSize - 1
+    private val sineLUT = FloatArray(lutSize) { i ->
+        sin(2.0 * PI * i / lutSize).toFloat()
+    }
+
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun fastSine(phaseNorm: Double): Double {
+        val index = (phaseNorm * lutSize).toInt() and lutMask
+        return sineLUT[index].toDouble()
+    }
+
+    // --- OPTIMIZATION 2: FAST XORSHIFT PRNG FOR NOISE ---
+    private var noiseSeed = 123456789
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun fastNoise(): Double {
+        noiseSeed = noiseSeed xor (noiseSeed shl 13)
+        noiseSeed = noiseSeed xor (noiseSeed ushr 17)
+        noiseSeed = noiseSeed xor (noiseSeed shl 5)
+        return (noiseSeed.toDouble() / Int.MAX_VALUE) * 0.15
+    }
 
     fun processNextSample(
         noteSlots: Array<NoteSlot>,
@@ -95,16 +117,15 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 }
             }
 
-            // --- מחולל גלים נקיים מ-Aliasing בעזרת PolyBLEP ---
-            val raw = generateBandLimitedWaveform(slot.waveform, phaseNorm, dt)
+            // --- מחולל גלים אופטימלי (PolyBLEP + LUT) ---
+            val raw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt)
 
             var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.5
 
-            // --- פילטר ZDF / TPT SVF (Zero-Delay Feedback) ---
+            // --- פילטר ZDF / TPT SVF ---
             val targetCutoff = (if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq).coerceIn(20f, 16000f)
             val targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance).coerceIn(0.0f, 0.95f)
 
-            // החלקת פרמטרים פנימית של הפילטר למניעת הקלקות
             slot.smoothedCutoff += (targetCutoff - slot.smoothedCutoff) * 0.005f
             slot.smoothedRes += (targetRes - slot.smoothedRes) * 0.005f
 
@@ -133,7 +154,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
         var totalSample = (liveChannelMix * smoothedLiveVol) + (looperChannelMix * smoothedLooperVol)
 
-        // אפקט דיליי עם החלקה
+        // אפקט דיליי
         val delaySamples = (sampleRate * 0.25).toInt()
         val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
         val echoSample = delayBuffer[delayReadPos].toDouble()
@@ -148,7 +169,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
         dcX1 = totalSample
         dcY1 = if (dcSample.isNaN() || dcSample.isInfinite()) 0.0 else dcSample
 
-        val masterSample = softClip(dcY1 * 0.45).toFloat()
+        // --- OPTIMIZATION 3: FAST CUBIC SOFT CLIPPER ---
+        val masterSample = fastCubicSoftClip(dcY1 * 0.45).toFloat()
 
         return DspFrame(
             liveSample = finalLiveSample,
@@ -158,7 +180,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
     }
 
     // --- PolyBLEP Anti-Aliasing Logic ---
-    private fun polyBlep(t: Double, dt: Double): Double {
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun polyBlep(t: Double, dt: Double): Double {
         return when {
             t < dt -> {
                 val p = t / dt
@@ -172,32 +195,31 @@ class DspEngine(private val sampleRate: Int = 44100) {
         }
     }
 
-    private fun generateBandLimitedWaveform(waveType: Int, phase: Double, dt: Double): Double {
+    private fun generateOptimizedWaveform(waveType: Int, phase: Double, dt: Double): Double {
         return when (waveType) {
-            0 -> sin(2.0 * PI * phase) // Sine (כבר נקי מהרמוניות)
-            1 -> { // Square Wave עם PolyBLEP
+            0 -> fastSine(phase) // Sine מהיר מטבלת LUT
+            1 -> { // Square Wave
                 var naive = if (phase < 0.5) 0.3 else -0.3
                 naive += polyBlep(phase, dt) * 0.3
                 naive -= polyBlep((phase + 0.5) % 1.0, dt) * 0.3
                 naive
             }
             2 -> { // Triangle Wave
-                var square = if (phase < 0.5) 1.0 else -1.0
-                square += polyBlep(phase, dt)
-                square -= polyBlep((phase + 0.5) % 1.0, dt)
-                // אינטגרציה לקבלת גל משולש נקי
                 (2.0 * abs(2.0 * phase - 1.0) - 1.0) * 0.35
             }
-            3 -> { // Sawtooth Wave עם PolyBLEP
+            3 -> { // Sawtooth Wave
                 var naive = (2.0 * phase - 1.0) * 0.35
                 naive -= polyBlep(phase, dt) * 0.35
                 naive
             }
-            else -> (Math.random() * 2.0 - 1.0) * 0.15 // Noise
+            else -> fastNoise() // PRNG מהיר בסיביות
         }
     }
 
-    private fun softClip(sample: Double): Double {
-        return tanh(sample)
+    // Fast Algebraic Cubic Saturator (במקום tanh)
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun fastCubicSoftClip(x: Double): Double {
+        val clamped = x.coerceIn(-1.5, 1.5)
+        return clamped * (1.0 - (clamped * clamped) / 6.75)
     }
 }
