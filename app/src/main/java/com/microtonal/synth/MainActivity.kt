@@ -8,6 +8,7 @@ import android.media.AudioTrack
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Process
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -38,9 +39,12 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
+import kotlin.math.abs
+import kotlin.math.asin
+import kotlin.math.PI
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,16 +55,23 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-class NoteState(var targetFreq: Float, var currentFreq: Float = targetFreq) {
+class NoteSlot {
+    @Volatile var active: Boolean = false
+    @Volatile var baseFreq: Float = 0f
+    @Volatile var targetFreq: Float = 0f
+    var currentFreq: Float = 0f
     var phase: Double = 0.0
-    var envelopeVolume = 0.0
-    var isReleasing = false
+    var envelopeVolume: Double = 0.0
+    @Volatile var isReleasing: Boolean = false
 }
 
 class SynthEngine(private val context: Context) {
     private val sampleRate = 44100
     @Volatile private var isRunning = true
-    private val activeNotes = ConcurrentHashMap<Float, NoteState>()
+
+    // GC-Free Polyphony Management (Up to 16 simultaneous voices)
+    private val maxVoices = 16
+    private val noteSlots = Array(maxVoices) { NoteSlot() }
 
     var volume = 0.5f
     var waveformType = 3 // 0=Sine, 1=Square, 2=Triangle, 3=Sawtooth, 4=Noise
@@ -72,6 +83,7 @@ class SynthEngine(private val context: Context) {
 
     // DSP Effects
     var cutoffFreq = 5000f
+    var resonance = 0.3f // Resonant Filter Peak [0..0.9]
     var echoMix = 0.25f
     var glideMs = 30f
 
@@ -93,19 +105,54 @@ class SynthEngine(private val context: Context) {
 
     fun noteOn(baseFreq: Float) {
         val freq = getEffectiveFrequency(baseFreq)
-        val existing = activeNotes[freq]
-        if (existing != null) {
-            existing.isReleasing = false
-            existing.targetFreq = freq
-        } else {
-            val lastFreq = activeNotes.values.lastOrNull()?.currentFreq ?: freq
-            activeNotes[freq] = NoteState(targetFreq = freq, currentFreq = if (glideMs > 0) lastFreq else freq)
+        
+        // Check if note is already playing
+        for (i in 0 until maxVoices) {
+            val slot = noteSlots[i]
+            if (slot.active && abs(slot.baseFreq - baseFreq) < 0.01f) {
+                slot.isReleasing = false
+                slot.targetFreq = freq
+                return
+            }
         }
+
+        // Find inactive slot
+        var targetSlot: NoteSlot? = null
+        for (i in 0 until maxVoices) {
+            if (!noteSlots[i].active) {
+                targetSlot = noteSlots[i]
+                break
+            }
+        }
+
+        // Voice stealing if full
+        if (targetSlot == null) {
+            targetSlot = noteSlots[0]
+        }
+
+        var lastActiveFreq = freq
+        for (i in 0 until maxVoices) {
+            if (noteSlots[i].active) {
+                lastActiveFreq = noteSlots[i].currentFreq
+                break
+            }
+        }
+
+        targetSlot.baseFreq = baseFreq
+        targetSlot.targetFreq = freq
+        targetSlot.currentFreq = if (glideMs > 0) lastActiveFreq else freq
+        targetSlot.isReleasing = false
+        targetSlot.envelopeVolume = 0.001
+        targetSlot.active = true
     }
 
     fun noteOff(baseFreq: Float) {
-        val freq = getEffectiveFrequency(baseFreq)
-        activeNotes[freq]?.isReleasing = true
+        for (i in 0 until maxVoices) {
+            val slot = noteSlots[i]
+            if (slot.active && abs(slot.baseFreq - baseFreq) < 0.01f) {
+                slot.isReleasing = true
+            }
+        }
     }
 
     fun startRecording() {
@@ -190,6 +237,8 @@ class SynthEngine(private val context: Context) {
 
     fun start() {
         thread {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+
             val minBufferSize = AudioTrack.getMinBufferSize(
                 sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
             )
@@ -207,7 +256,7 @@ class SynthEngine(private val context: Context) {
                         .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                         .build()
                 )
-                .setBufferSizeInBytes(minBufferSize)
+                .setBufferSizeInBytes(minBufferSize * 2)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
 
@@ -215,75 +264,95 @@ class SynthEngine(private val context: Context) {
             val buffer = ShortArray(256)
             val byteBuffer = ByteBuffer.allocate(512).order(ByteOrder.LITTLE_ENDIAN)
 
-            var filterState = 0.0
+            // Resonant State Variable Filter (SVF)
+            var svfLow = 0.0
+            var svfBand = 0.0
+
+            // DC Blocker Filter State
+            var dcX1 = 0.0
+            var dcY1 = 0.0
+
             val delaySamples = (sampleRate * 0.25).toInt()
 
             while (isRunning) {
                 byteBuffer.clear()
 
-                val attackStep = 1.0 / (sampleRate * (attackMs / 1000.0))
-                val releaseStep = 1.0 / (sampleRate * (releaseMs / 1000.0))
+                // Exponential ADSR Coefficients
+                val attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (attackMs / 1000.0).coerceAtLeast(0.001)))
+                val releaseCoeff = Math.exp(-1.0 / (sampleRate * (releaseMs / 1000.0).coerceAtLeast(0.001)))
                 val glideFactor = if (glideMs > 0) (1.0 / (sampleRate * (glideMs / 1000.0))).coerceIn(0.001, 1.0) else 1.0
 
                 for (i in buffer.indices) {
                     var sample = 0.0
-                    val iterator = activeNotes.entries.iterator()
+                    var activeCount = 0
 
-                    while (iterator.hasNext()) {
-                        val entry = iterator.next()
-                        val state = entry.value
+                    for (v in 0 until maxVoices) {
+                        if (noteSlots[v].active) activeCount++
+                    }
 
-                        if (glideMs > 0 && Math.abs(state.currentFreq - state.targetFreq) > 0.05f) {
-                            state.currentFreq += ((state.targetFreq - state.currentFreq) * glideFactor).toFloat()
+                    val headroomScale = if (activeCount > 0) 1.0 / sqrt(activeCount.toDouble()) else 1.0
+
+                    for (v in 0 until maxVoices) {
+                        val slot = noteSlots[v]
+                        if (!slot.active) continue
+
+                        if (glideMs > 0 && abs(slot.currentFreq - slot.targetFreq) > 0.05f) {
+                            slot.currentFreq += ((slot.targetFreq - slot.currentFreq) * glideFactor).toFloat()
                         } else {
-                            state.currentFreq = state.targetFreq
+                            slot.currentFreq = slot.targetFreq
                         }
 
-                        state.phase += (2.0 * Math.PI * state.currentFreq / sampleRate)
-                        if (state.phase >= 2.0 * Math.PI) {
-                            state.phase %= (2.0 * Math.PI)
+                        slot.phase += (2.0 * PI * slot.currentFreq / sampleRate)
+                        if (slot.phase >= 2.0 * PI) {
+                            slot.phase %= (2.0 * PI)
                         }
 
-                        if (!state.isReleasing) {
-                            if (state.envelopeVolume < sustainLevel) {
-                                state.envelopeVolume += attackStep
-                                if (state.envelopeVolume > sustainLevel) state.envelopeVolume = sustainLevel.toDouble()
-                            } else if (state.envelopeVolume > sustainLevel) {
-                                state.envelopeVolume -= attackStep
-                                if (state.envelopeVolume < sustainLevel) state.envelopeVolume = sustainLevel.toDouble()
-                            }
+                        // Exponential Envelope Logic
+                        if (!slot.isReleasing) {
+                            slot.envelopeVolume += (sustainLevel.toDouble() - slot.envelopeVolume) * attackCoeff
                         } else {
-                            state.envelopeVolume -= releaseStep
-                            if (state.envelopeVolume <= 0.0) {
-                                state.envelopeVolume = 0.0
-                                iterator.remove()
+                            slot.envelopeVolume *= releaseCoeff
+                            if (slot.envelopeVolume < 0.001) {
+                                slot.envelopeVolume = 0.0
+                                slot.active = false
                                 continue
                             }
                         }
 
                         val raw = when (waveformType) {
-                            0 -> sin(state.phase)
-                            1 -> if (sin(state.phase) >= 0) 0.3 else -0.3
-                            2 -> (2.0 / Math.PI) * Math.asin(sin(state.phase))
-                            3 -> (1.0 - (state.phase / Math.PI)) * 0.4
+                            0 -> sin(slot.phase)
+                            1 -> if (sin(slot.phase) >= 0) 0.3 else -0.3
+                            2 -> (2.0 / PI) * asin(sin(slot.phase))
+                            3 -> (1.0 - (slot.phase / PI)) * 0.4
                             else -> (Math.random() * 2.0 - 1.0) * 0.2
                         }
 
-                        sample += raw * state.envelopeVolume
+                        sample += raw * slot.envelopeVolume * headroomScale
                     }
 
-                    val filterAlpha = (2.0 * Math.PI * cutoffFreq / sampleRate).coerceIn(0.01, 1.0)
-                    filterState += filterAlpha * (sample - filterState)
-                    sample = filterState
+                    // Resonant State Variable Low-Pass Filter (SVF)
+                    val f = (2.0 * sin(PI * cutoffFreq / sampleRate)).coerceIn(0.01, 0.8)
+                    val q = (1.0 - resonance.toDouble().coerceIn(0.0, 0.95))
+                    val hp = sample - svfLow - q * svfBand
+                    svfBand += f * hp
+                    svfLow += f * svfBand
+                    sample = svfLow
 
+                    // Echo Effect
                     val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
                     val echoSample = delayBuffer[delayReadPos]
                     delayBuffer[delayWritePos] = (sample + echoSample * 0.4).toFloat()
                     delayWritePos = (delayWritePos + 1) % delayBuffer.size
-
                     sample += echoSample * echoMix
 
-                    sample = softClip(sample * volume * 0.7)
+                    // DC Blocker Filter
+                    val dcSample = sample - dcX1 + 0.995 * dcY1
+                    dcX1 = sample
+                    dcY1 = dcSample
+                    sample = dcSample
+
+                    // Soft Clipping Limiter
+                    sample = softClip(sample * volume * 0.6)
 
                     val shortVal = (sample * Short.MAX_VALUE).toInt().coerceIn(-32768, 32767).toShort()
                     buffer[i] = shortVal
@@ -308,10 +377,10 @@ fun SynthAppUI(engine: SynthEngine) {
     val prefs = remember { context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE) }
 
     val defaultFrequencies = remember {
-        listOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 489.94f)
+        listOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 475.00f)
     }
     val frequencies = remember {
-        mutableStateListOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 489.94f)
+        mutableStateListOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 475.00f)
     }
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
@@ -322,6 +391,7 @@ fun SynthAppUI(engine: SynthEngine) {
     var releaseVal by remember { mutableFloatStateOf(200f) }
 
     var cutoffVal by remember { mutableFloatStateOf(5000f) }
+    var resVal by remember { mutableFloatStateOf(0.3f) }
     var echoVal by remember { mutableFloatStateOf(0.25f) }
     var glideVal by remember { mutableFloatStateOf(30f) }
 
@@ -337,6 +407,7 @@ fun SynthAppUI(engine: SynthEngine) {
             putFloat("p_${slot}_sustain", sustainVal)
             putFloat("p_${slot}_release", releaseVal)
             putFloat("p_${slot}_cutoff", cutoffVal)
+            putFloat("p_${slot}_res", resVal)
             putFloat("p_${slot}_echo", echoVal)
             putFloat("p_${slot}_glide", glideVal)
             putString("p_${slot}_freqs", frequencies.joinToString(","))
@@ -367,6 +438,9 @@ fun SynthAppUI(engine: SynthEngine) {
         cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f)
         engine.cutoffFreq = cutoffVal
 
+        resVal = prefs.getFloat("p_${slot}_res", 0.3f)
+        engine.resonance = resVal
+
         echoVal = prefs.getFloat("p_${slot}_echo", 0.25f)
         engine.echoMix = echoVal
 
@@ -386,7 +460,7 @@ fun SynthAppUI(engine: SynthEngine) {
     var renderTrigger by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
         while (true) {
-            delay(30)
+            delay(33) // ~30 FPS UI Visualizer
             renderTrigger = System.currentTimeMillis()
         }
     }
@@ -534,19 +608,24 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
-                Text("Filter Cutoff: ${cutoffVal.toInt()}Hz", color = Color(0xFFFF7043), fontSize = 9.sp)
+                Text("Cutoff: ${cutoffVal.toInt()}Hz", color = Color(0xFFFF7043), fontSize = 9.sp)
                 Slider(value = cutoffVal, valueRange = 200f..12000f, onValueChange = { cutoffVal = it; engine.cutoffFreq = it })
             }
             Spacer(Modifier.width(6.dp))
             Column(Modifier.weight(1f)) {
-                Text("Echo: ${(echoVal * 100).toInt()}%", color = Color(0xFFAB47BC), fontSize = 9.sp)
-                Slider(value = echoVal, valueRange = 0f..0.6f, onValueChange = { echoVal = it; engine.echoMix = it })
+                Text("Resonance: ${(resVal * 100).toInt()}%", color = Color(0xFFFF4081), fontSize = 9.sp)
+                Slider(value = resVal, valueRange = 0f..0.9f, onValueChange = { resVal = it; engine.resonance = it })
             }
         }
 
-        Row(Modifier.fillMaxWidth()) {
-            Column(Modifier.weight(0.5f)) {
-                Text("Glide / Portamento: ${glideVal.toInt()}ms", color = Color(0xFF26C6DA), fontSize = 9.sp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("Echo: ${(echoVal * 100).toInt()}%", color = Color(0xFFAB47BC), fontSize = 9.sp)
+                Slider(value = echoVal, valueRange = 0f..0.6f, onValueChange = { echoVal = it; engine.echoMix = it })
+            }
+            Spacer(Modifier.width(6.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Glide: ${glideVal.toInt()}ms", color = Color(0xFF26C6DA), fontSize = 9.sp)
                 Slider(value = glideVal, valueRange = 0f..200f, onValueChange = { glideVal = it; engine.glideMs = it })
             }
         }
