@@ -208,7 +208,16 @@ class SynthEngine(private val context: Context) {
         return baseFreq * Math.pow(2.0, octaveShift.toDouble()).toFloat()
     }
 
-    fun noteOn(baseFreq: Float, isLooper: Boolean = false) {
+    fun noteOn(
+        baseFreq: Float,
+        isLooper: Boolean = false,
+        wave: Int? = null,
+        cutoff: Float? = null,
+        res: Float? = null,
+        attack: Float? = null,
+        sustain: Float? = null,
+        release: Float? = null
+    ) {
         val freq = getEffectiveFrequency(baseFreq)
 
         if (isLoopRecording && !isLooper) {
@@ -244,13 +253,13 @@ class SynthEngine(private val context: Context) {
             slot.phase = 0.0
             slot.envelopeVolume = 0.0
             slot.isReleasing = false
-            slot.waveform = waveformType
+            slot.waveform = wave ?: waveformType
             slot.isLooperNote = isLooper
-            slot.frozenCutoff = cutoffFreq
-            slot.frozenRes = resonance
-            slot.frozenAttack = attackMs
-            slot.frozenSustain = sustainLevel
-            slot.frozenRelease = releaseMs
+            slot.frozenCutoff = cutoff ?: cutoffFreq
+            slot.frozenRes = res ?: resonance
+            slot.frozenAttack = attack ?: attackMs
+            slot.frozenSustain = sustain ?: sustainLevel
+            slot.frozenRelease = release ?: releaseMs
             slot.svfLow = 0.0
             slot.svfBand = 0.0
         }
@@ -307,7 +316,16 @@ class SynthEngine(private val context: Context) {
                     while (eventIndex < recordedNotes.size && recordedNotes[eventIndex].timestampMs <= elapsed) {
                         val ev = recordedNotes[eventIndex]
                         if (ev.isNoteOn) {
-                            noteOn(ev.freq, isLooper = true)
+                            noteOn(
+                                baseFreq = ev.freq,
+                                isLooper = true,
+                                wave = ev.wave,
+                                cutoff = ev.cutoff,
+                                res = ev.res,
+                                attack = ev.attack,
+                                sustain = ev.sustain,
+                                release = ev.release
+                            )
                         } else {
                             noteOff(ev.freq, isLooper = true)
                         }
@@ -453,7 +471,7 @@ fun SynthAppUI(engine: SynthEngine) {
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
     var showTuningDialog by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Sound, 1: Filter & FX, 2: Looper
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     var currentWave by remember { mutableIntStateOf(3) }
     var vol by remember { mutableFloatStateOf(0.5f) }
@@ -656,7 +674,6 @@ fun SynthAppUI(engine: SynthEngine) {
                 val h = size.height
                 val halfH = h / 2f
 
-                // Studio Background Grid Lines
                 val gridColor = Color(0xFF131D28)
                 val cols = 8
                 val rows = 4
@@ -693,7 +710,6 @@ fun SynthAppUI(engine: SynthEngine) {
                 drawPath(looperPath, Color(0xFFFF2A55), style = Stroke(width = 3.5f))
             }
 
-            // Screen Labels Overlay
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -747,10 +763,9 @@ fun SynthAppUI(engine: SynthEngine) {
                 .padding(8.dp)
         ) {
             when (selectedTab) {
-                // TAB 0: SOUND ENGINE & ADSR
                 0 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
                     Column {
-                        Text("סוג גל", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("סוג גל (נגינה חיה)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(2.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
@@ -862,7 +877,6 @@ fun SynthAppUI(engine: SynthEngine) {
                     )
                 }
 
-                // TAB 1: FILTER & FX
                 1 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
                     SynthSlider(
                         label = "Cutoff (חיתוך תדרים)",
@@ -901,7 +915,6 @@ fun SynthAppUI(engine: SynthEngine) {
                     )
                 }
 
-                // TAB 2: LOOPER CONTROLS
                 2 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
                     SynthSlider(
                         label = "עוצמת הלופר",
@@ -1028,7 +1041,6 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 }
 
-// Reusable Custom Slider Component for Clean Design
 @Composable
 fun SynthSlider(
     label: String,
