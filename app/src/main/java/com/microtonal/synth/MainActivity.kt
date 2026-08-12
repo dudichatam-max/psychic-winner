@@ -4,10 +4,13 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -179,10 +182,8 @@ class SynthEngine(private val context: Context) {
                         echoMix = echoMix
                     )
 
-                    // --- SOFT LIMITER / SATURATION (PREVENTS CLICKING & POPPING) ---
                     val rawMaster = frame.masterSample
-                    val softClipped = Math.tanh(rawMaster.toDouble()).toFloat()
-                    val shortVal = (softClipped * Short.MAX_VALUE * 0.85f).toInt().coerceIn(-32768, 32767).toShort()
+                    val shortVal = (rawMaster * Short.MAX_VALUE * 0.85f).toInt().coerceIn(-32768, 32767).toShort()
                     
                     buffer[i] = shortVal
 
@@ -248,7 +249,19 @@ class SynthEngine(private val context: Context) {
             return
         }
 
+        // 1. חיפוש ערוץ פנוי
         slot = noteSlots.find { !it.active }
+
+        // 2. VOICE STEALING: אם הכל תפוס, גנוב את התו החלש ביותר בדעיכה (Release)
+        if (slot == null) {
+            slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
+        }
+
+        // 3. אם עדיין אין ערוץ, גנוב את התו החלש ביותר באופן כללי
+        if (slot == null) {
+            slot = noteSlots.minByOrNull { it.envelopeVolume }
+        }
+
         if (slot != null) {
             slot.active = true
             slot.baseFreq = baseFreq
@@ -358,7 +371,7 @@ class SynthEngine(private val context: Context) {
 
     fun startRecording() {
         try {
-            val file = File(context.getExternalFilesDir(null), "synth_recording_${System.currentTimeMillis()}.wav")
+            val file = File(context.cacheDir, "temp_synth_recording.wav")
             wavFile = file
             val stream = FileOutputStream(file)
             recordedAudioStream = stream
@@ -369,8 +382,8 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-    fun stopAndSaveRecording() {
-        if (!isRecording) return
+    fun stopAndSaveRecording(): File? {
+        if (!isRecording) return wavFile
         isRecording = false
         try {
             val stream = recordedAudioStream
@@ -378,9 +391,26 @@ class SynthEngine(private val context: Context) {
             stream?.close()
             recordedAudioStream = null
             wavFile?.let { updateWavHeader(it) }
-            Toast.makeText(context, "ההקלטה נשמרה ב: ${wavFile?.name}", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+        return wavFile
+    }
+
+    fun exportRecordingToUri(context: Context, destinationUri: Uri): Boolean {
+        val sourceFile = wavFile ?: File(context.cacheDir, "temp_synth_recording.wav")
+        if (!sourceFile.exists()) return false
+
+        return try {
+            context.contentResolver.openOutputStream(destinationUri)?.use { outputStream ->
+                sourceFile.inputStream().use { inputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
         }
     }
 
@@ -496,6 +526,20 @@ fun SynthAppUI(engine: SynthEngine) {
     var looperVolState by remember { mutableFloatStateOf(1.0f) }
 
     var selectedPresetSlot by remember { mutableIntStateOf(1) }
+
+    // Launcher לשמירת קובץ WAV דרך חלון הבחירה המערכתי
+    val createWavLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("audio/wav")
+    ) { uri ->
+        uri?.let {
+            val success = engine.exportRecordingToUri(context, it)
+            if (success) {
+                Toast.makeText(context, "ההקלטה נשמרה בהצלחה!", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "שגיאה בשמירת הקובץ", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     fun loadPresetFromSlot(slot: Int, showToast: Boolean = true) {
         if (!prefs.getBoolean("p_${slot}_exists", false)) {
@@ -645,6 +689,9 @@ fun SynthAppUI(engine: SynthEngine) {
                         if (isRec) {
                             engine.stopAndSaveRecording()
                             isRec = false
+                            // פתיחת דיאלוג בחירת המיקום ושם הקובץ
+                            val defaultFileName = "Siren_Recording_${System.currentTimeMillis()}.wav"
+                            createWavLauncher.launch(defaultFileName)
                         } else {
                             engine.startRecording()
                             isRec = true
