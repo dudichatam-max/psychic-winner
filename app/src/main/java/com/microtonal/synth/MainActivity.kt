@@ -43,6 +43,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity() {
     private lateinit var synthEngine: SynthEngine
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,6 +81,15 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            synthEngine.stop()
+        } catch (_: Exception) {}
+    }
+}
+
 
     override fun onDestroy() {
         super.onDestroy()
