@@ -1,6 +1,5 @@
 package com.microtonal.synth
 
-import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
@@ -12,99 +11,9 @@ class DspFrame(
     var masterSample: Float = 0f
 )
 
-// אירועים מה-UI ל-DSP (מנגנון Lock-Free בטוח)
-sealed class AudioEvent {
-    data class NoteOn(
-        val voiceIndex: Int,
-        val freq: Float,
-        val waveform: Int,
-        val isLooper: Boolean,
-        val sustain: Float,
-        val attackMs: Float,
-        val releaseMs: Float,
-        val cutoff: Float,
-        val res: Float
-    ) : AudioEvent()
+class DspEngine(private val sampleRate: Int = 44100) {
 
-    data class NoteOff(val voiceIndex: Int) : AudioEvent()
-    data class SetFreq(val voiceIndex: Int, val freq: Float) : AudioEvent()
-}
-
-class DspEngine(
-    val sampleRate: Int = 44100,
-    private val maxVoices: Int = 16
-) {
-    // --- OPTIMIZATION 1: STRUCTURE OF ARRAYS (SoA) ---
-    // זיכרון רציף ושטוח בבלוק יחיד במקום מערך אובייקטים (מונע Cache Misses ב-L1/L2)
-    private val active = BooleanArray(maxVoices)
-    private val currentFreq = FloatArray(maxVoices)
-    private val targetFreq = FloatArray(maxVoices)
-    private val phase = DoubleArray(maxVoices)
-    private val envelopeVolume = DoubleArray(maxVoices)
-    private val isReleasing = BooleanArray(maxVoices)
-    private val waveform = IntArray(maxVoices)
-    private val zdfState1 = DoubleArray(maxVoices)
-    private val zdfState2 = DoubleArray(maxVoices)
-    private val smoothedCutoff = FloatArray(maxVoices)
-    private val smoothedRes = FloatArray(maxVoices)
-    private val isLooperNote = BooleanArray(maxVoices)
-    private val frozenSustain = FloatArray(maxVoices)
-    private val frozenAttack = FloatArray(maxVoices)
-    private val frozenRelease = FloatArray(maxVoices)
-    private val frozenCutoff = FloatArray(maxVoices)
-    private val frozenRes = FloatArray(maxVoices)
-    private val attackCoeff = DoubleArray(maxVoices)
-    private val releaseCoeff = DoubleArray(maxVoices)
-
-    // --- OPTIMIZATION 2: LOCK-FREE SPSC EVENT QUEUE ---
-    private val eventQueue = ConcurrentLinkedQueue<AudioEvent>()
-
-    fun postEvent(event: AudioEvent) {
-        eventQueue.offer(event)
-    }
-
-    private fun processEvents() {
-        while (true) {
-            val event = eventQueue.poll() ?: break
-            when (event) {
-                is AudioEvent.NoteOn -> {
-                    val v = event.voiceIndex
-                    if (v in 0 until maxVoices) {
-                        active[v] = true
-                        isReleasing[v] = false
-                        targetFreq[v] = event.freq
-                        if (currentFreq[v] == 0f) currentFreq[v] = event.freq
-                        waveform[v] = event.waveform
-                        isLooperNote[v] = event.isLooper
-                        frozenSustain[v] = event.sustain
-                        frozenAttack[v] = event.attackMs
-                        frozenRelease[v] = event.releaseMs
-                        frozenCutoff[v] = event.cutoff
-                        frozenRes[v] = event.res
-
-                        val attackSec = (event.attackMs / 1000.0).coerceAtLeast(0.001)
-                        attackCoeff[v] = 1.0 - Math.exp(-1.0 / (sampleRate * attackSec))
-
-                        val releaseSec = (event.releaseMs / 1000.0).coerceAtLeast(0.001)
-                        releaseCoeff[v] = Math.exp(-1.0 / (sampleRate * releaseSec))
-                    }
-                }
-                is AudioEvent.NoteOff -> {
-                    val v = event.voiceIndex
-                    if (v in 0 until maxVoices) {
-                        isReleasing[v] = true
-                    }
-                }
-                is AudioEvent.SetFreq -> {
-                    val v = event.voiceIndex
-                    if (v in 0 until maxVoices) {
-                        targetFreq[v] = event.freq
-                    }
-                }
-            }
-        }
-    }
-
+    // שימוש מחדש באובייקט פלט יחיד למניעת עומס על ה-Garbage Collector
     private val reusableFrame = DspFrame()
 
     private val delayBuffer = FloatArray(sampleRate)
@@ -114,11 +23,12 @@ class DspEngine(
     private var delayFilterState = 0.0
     private var currentHeadroom = 1.0
 
+    // החלקת פרמטרים גלובלית למניעת Zipper Noise
     private var smoothedLiveVol = 0.5
     private var smoothedLooperVol = 1.0
     private var smoothedEchoMix = 0.25
 
-    // Sine Lookup Table (LUT)
+    // --- OPTIMIZATION 1: SINE LOOKUP TABLE (LUT) ---
     private val lutSize = 4096
     private val lutMask = lutSize - 1
     private val sineLUT = FloatArray(lutSize) { i ->
@@ -131,7 +41,7 @@ class DspEngine(
         return sineLUT[index].toDouble()
     }
 
-    // Fast PRNG Noise
+    // --- OPTIMIZATION 2: FAST XORSHIFT PRNG FOR NOISE ---
     private var noiseSeed = 123456789
     @Suppress("NOTHING_TO_INLINE")
     private inline fun fastNoise(): Double {
@@ -142,6 +52,8 @@ class DspEngine(
     }
 
     fun processNextSample(
+        noteSlots: Array<NoteSlot>,
+        maxVoices: Int,
         glideMs: Float,
         liveVolume: Float,
         looperVolume: Float,
@@ -152,10 +64,7 @@ class DspEngine(
         releaseMs: Float,
         echoMix: Float
     ): DspFrame {
-        // 1. שריפת אירועים שנשלחו מה-UI ללא נעילות
-        processEvents()
-
-        // החלקת עוצמות
+        // החלקת עוצמות (Parameter Smoothing)
         smoothedLiveVol += (liveVolume - smoothedLiveVol) * 0.005
         smoothedLooperVol += (looperVolume - smoothedLooperVol) * 0.005
         smoothedEchoMix += (echoMix - smoothedEchoMix) * 0.005
@@ -164,7 +73,7 @@ class DspEngine(
 
         var activeCount = 0
         for (v in 0 until maxVoices) {
-            if (active[v]) activeCount++
+            if (noteSlots[v].active) activeCount++
         }
 
         val targetHeadroom = if (activeCount > 0) 1.0 / (1.0 + activeCount * 0.12) else 1.0
@@ -173,71 +82,76 @@ class DspEngine(
         var liveChannelMix = 0.0
         var looperChannelMix = 0.0
 
-        // ריצה רציפה על זיכרון מושלם
         for (v in 0 until maxVoices) {
-            if (!active[v]) continue
+            val slot = noteSlots[v]
+            if (!slot.active) continue
 
-            if (glideMs > 0 && abs(currentFreq[v] - targetFreq[v]) > 0.05f) {
-                currentFreq[v] += ((targetFreq[v] - currentFreq[v]) * glideFactor).toFloat()
+            // Glissando / Glide
+            if (glideMs > 0 && abs(slot.currentFreq - slot.targetFreq) > 0.05f) {
+                slot.currentFreq += ((slot.targetFreq - slot.currentFreq) * glideFactor).toFloat()
             } else {
-                currentFreq[v] = targetFreq[v]
+                slot.currentFreq = slot.targetFreq
             }
 
-            val dt = (currentFreq[v] / sampleRate.toDouble()).coerceIn(0.0001, 0.45)
-            phase[v] += 2.0 * PI * dt
-            if (phase[v] >= 2.0 * PI) {
-                phase[v] %= (2.0 * PI)
+            val dt = (slot.currentFreq / sampleRate.toDouble()).coerceIn(0.0001, 0.45)
+            slot.phase += 2.0 * PI * dt
+            if (slot.phase >= 2.0 * PI) {
+                slot.phase %= (2.0 * PI)
             }
-            val phaseNorm = phase[v] / (2.0 * PI)
+            val phaseNorm = slot.phase / (2.0 * PI)
 
-            val actualSustain = if (isLooperNote[v]) frozenSustain[v] else sustainLevel
+            // מעטפת ADSR (שימוש במקדמים מחושבים מראש למניעת חישובי Math.exp יקרים בלולאה)
+            val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
 
-            val attCoeff = if (attackCoeff[v] > 0.0) attackCoeff[v] else {
-                val actualAttack = if (isLooperNote[v]) frozenAttack[v] else attackMs
+            val attackCoeff = if (slot.attackCoeff > 0.0) slot.attackCoeff else {
+                val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
                 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
             }
 
-            val relCoeff = if (releaseCoeff[v] > 0.0) releaseCoeff[v] else {
-                val actualRelease = if (isLooperNote[v]) frozenRelease[v] else releaseMs
+            val releaseCoeff = if (slot.releaseCoeff > 0.0) slot.releaseCoeff else {
+                val actualRelease = if (slot.isLooperNote) slot.frozenRelease else releaseMs
                 Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
             }
 
-            if (!isReleasing[v]) {
-                envelopeVolume[v] += (actualSustain.toDouble() - envelopeVolume[v]) * attCoeff
+            if (!slot.isReleasing) {
+                slot.envelopeVolume += (actualSustain.toDouble() - slot.envelopeVolume) * attackCoeff
             } else {
-                envelopeVolume[v] *= relCoeff
-                if (envelopeVolume[v] < 0.0005) {
-                    envelopeVolume[v] = 0.0
-                    active[v] = false
-                    zdfState1[v] = 0.0
-                    zdfState2[v] = 0.0
+                slot.envelopeVolume *= releaseCoeff
+                if (slot.envelopeVolume < 0.0005) {
+                    slot.envelopeVolume = 0.0
+                    slot.active = false
+                    slot.zdfState1 = 0.0
+                    slot.zdfState2 = 0.0
                     continue
                 }
             }
 
-            val raw = generateOptimizedWaveform(waveform[v], phaseNorm, dt)
-            var voiceSample = raw * envelopeVolume[v] * currentHeadroom * 0.5
+            // --- מחולל גלים אופטימלי (PolyBLEP + LUT) ---
+            val raw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt)
 
-            val targetCut = (if (isLooperNote[v]) frozenCutoff[v] else cutoffFreq).coerceIn(20f, 16000f)
-            val targetR = (if (isLooperNote[v]) frozenRes[v] else resonance).coerceIn(0.0f, 0.95f)
+            var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.5
 
-            smoothedCutoff[v] += (targetCut - smoothedCutoff[v]) * 0.005f
-            smoothedRes[v] += (targetR - smoothedRes[v]) * 0.005f
+            // --- פילטר ZDF / TPT SVF ---
+            val targetCutoff = (if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq).coerceIn(20f, 16000f)
+            val targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance).coerceIn(0.0f, 0.95f)
 
-            val g = tan(PI * smoothedCutoff[v] / sampleRate)
-            val k = 2.0 * (1.0 - smoothedRes[v].toDouble())
+            slot.smoothedCutoff += (targetCutoff - slot.smoothedCutoff) * 0.005f
+            slot.smoothedRes += (targetRes - slot.smoothedRes) * 0.005f
+
+            val g = tan(PI * slot.smoothedCutoff / sampleRate)
+            val k = 2.0 * (1.0 - slot.smoothedRes.toDouble())
             val h = 1.0 / (1.0 + g * (g + k))
 
-            val hp = h * (voiceSample - (g + k) * zdfState1[v] - zdfState2[v])
-            val bp = g * hp + zdfState1[v]
-            val lp = g * bp + zdfState2[v]
+            val hp = h * (voiceSample - (g + k) * slot.zdfState1 - slot.zdfState2)
+            val bp = g * hp + slot.zdfState1
+            val lp = g * bp + slot.zdfState2
 
-            zdfState1[v] = g * hp + bp
-            zdfState2[v] = g * bp + lp
+            slot.zdfState1 = g * hp + bp
+            slot.zdfState2 = g * bp + lp
 
             voiceSample = lp
 
-            if (isLooperNote[v]) {
+            if (slot.isLooperNote) {
                 looperChannelMix += voiceSample
             } else {
                 liveChannelMix += voiceSample
@@ -249,25 +163,31 @@ class DspEngine(
 
         var totalSample = (liveChannelMix * smoothedLiveVol) + (looperChannelMix * smoothedLooperVol)
 
+        // אפקט דיליי מוזיקלי עם Feedback + סינון
         val delaySamples = (sampleRate * 0.28).toInt()
         val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
         var echoSample = delayBuffer[delayReadPos].toDouble()
 
+        // סינון עדין על ההד (Low-pass)
         echoSample = echoSample * 0.82 + delayFilterState * 0.18
         delayFilterState = echoSample
 
+        // Feedback
         val feedback = 0.42
         delayBuffer[delayWritePos] = (totalSample + echoSample * feedback).toFloat()
         delayWritePos = (delayWritePos + 1) % delayBuffer.size
 
         totalSample += echoSample * smoothedEchoMix
 
+        // DC Blocker
         val dcSample = totalSample - dcX1 + 0.995 * dcY1
         dcX1 = totalSample
         dcY1 = if (dcSample.isNaN() || dcSample.isInfinite()) 0.0 else dcSample
 
+        // Fast Cubic Soft Clipper
         val masterSample = softSaturate(dcY1 * 0.52).toFloat()
 
+        // עדכון האובייקט הקיים והחזרתו ללא יצירת אובייקט חדש בזיכרון
         reusableFrame.liveSample = finalLiveSample
         reusableFrame.looperSample = finalLooperSample
         reusableFrame.masterSample = masterSample
@@ -275,6 +195,7 @@ class DspEngine(
         return reusableFrame
     }
 
+    // --- PolyBLEP Anti-Aliasing Logic ---
     @Suppress("NOTHING_TO_INLINE")
     private inline fun polyBlep(t: Double, dt: Double): Double {
         return when {
@@ -292,23 +213,26 @@ class DspEngine(
 
     private fun generateOptimizedWaveform(waveType: Int, phase: Double, dt: Double): Double {
         return when (waveType) {
-            0 -> fastSine(phase)
-            1 -> {
+            0 -> fastSine(phase) // Sine מהיר מטבלת LUT
+            1 -> { // Square Wave
                 var naive = if (phase < 0.5) 0.3 else -0.3
                 naive += polyBlep(phase, dt) * 0.3
                 naive -= polyBlep((phase + 0.5) % 1.0, dt) * 0.3
                 naive
             }
-            2 -> (2.0 * abs(2.0 * phase - 1.0) - 1.0) * 0.35
-            3 -> {
+            2 -> { // Triangle Wave
+                (2.0 * abs(2.0 * phase - 1.0) - 1.0) * 0.35
+            }
+            3 -> { // Sawtooth Wave
                 var naive = (2.0 * phase - 1.0) * 0.35
                 naive -= polyBlep(phase, dt) * 0.35
                 naive
             }
-            else -> fastNoise()
+            else -> fastNoise() // PRNG מהיר בסיביות
         }
     }
 
+    // Fast Algebraic Cubic Saturator (במקום tanh)
     @Suppress("NOTHING_TO_INLINE")
     private inline fun softSaturate(x: Double): Double {
         val driven = x * 1.35
