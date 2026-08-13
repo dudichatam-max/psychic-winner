@@ -581,7 +581,7 @@ fun SynthAppUI(engine: SynthEngine) {
                     CompactSlider("Echo", echoVal, 0f..0.6f, "${(echoVal * 100).toInt()}%", gold) { v -> echoVal = v; engine.echoMix = v }
                     CompactSlider("Glide", glideVal, 0f..200f, "${glideVal.toInt()}ms", gold) { v -> glideVal = v; engine.glideMs = v }
                     CompactSlider("Drive", driveVal, 0f..1f, "${(driveVal * 100).toInt()}%", gold) { v -> driveVal = v; engine.driveAmount = v }
-                    CompactSlider("LFO Rate", lfoRateVal, 0f..12f, String.format("%.1f", lfoRateVal) + "Hz", gold) { v -> lfoRateVal = v; engine.lfoRate = v }
+                    CompactSlider("LFO Rate", lfoRateVal, 0f..12f, "${lfoRateVal.toInt()}Hz", gold) { v -> lfoRateVal = v; engine.lfoRate = v }
                     CompactSlider("LFO Amount", lfoAmountVal, 0f..1f, "${(lfoAmountVal * 100).toInt()}%", gold) { v -> lfoAmountVal = v; engine.lfoAmount = v }
                 }
                 2 -> Column(Modifier.fillMaxSize(), Arrangement.SpaceEvenly) {
