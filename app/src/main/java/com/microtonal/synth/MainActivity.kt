@@ -353,6 +353,7 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
+    @Composable
     fun loadPresetFromSlot(slot: Int, showToast: Boolean = true) {
         if (!prefs.getBoolean("p_${slot}_exists", false)) {
             if (showToast) Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
@@ -376,6 +377,7 @@ fun SynthAppUI(engine: SynthEngine) {
 
     LaunchedEffect(Unit) { loadPresetFromSlot(1, false) }
 
+    @Composable
     fun savePresetToSlot(slot: Int) {
         prefs.edit().apply {
             putFloat("p_${slot}_vol", vol)
