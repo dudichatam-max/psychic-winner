@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -38,9 +40,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-
+import kotlin.math.pow
 
 class MainActivity : ComponentActivity() {
     private lateinit var synthEngine: SynthEngine
@@ -176,7 +176,7 @@ class SynthEngine(private val context: Context) {
         audioTrack.release()
     }
 
-    fun getEffectiveFrequency(baseFreq: Float): Float = baseFreq * Math.pow(2.0, octaveShift.toDouble()).toFloat()
+    fun getEffectiveFrequency(baseFreq: Float): Float = (baseFreq * 2.0f.pow(octaveShift)).toFloat()
 
     fun noteOn(baseFreq: Float, isLooper: Boolean = false, wave: Int? = null, cutoff: Float? = null, res: Float? = null, attack: Float? = null, sustain: Float? = null, release: Float? = null) {
         val freq = getEffectiveFrequency(baseFreq)
@@ -415,7 +415,7 @@ fun SynthAppUI(engine: SynthEngine) {
                             Spacer(Modifier.height(4.dp))
                             OutlinedTextField(
                                 value = freq.toString(),
-                                onValueChange = { it.toFloatOrNull()?.let { v -> frequencies[index] = v } },
+                                onValueChange = { text -> text.toFloatOrNull()?.let { v -> frequencies[index] = v } },
                                 modifier = Modifier.width(68.dp),
                                 singleLine = true,
                                 textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = Color.White)
@@ -546,24 +546,24 @@ fun SynthAppUI(engine: SynthEngine) {
                             }
                         }
                     }
-                    CompactSlider("ווליום", vol, 0f..1f, "${(vol * 100).toInt()}%", gold) { vol = it; engine.volume = it }
-                    CompactSlider("Attack", attackVal, 5f..500f, "${attackVal.toInt()}ms", gold) { attackVal = it; engine.attackMs = it }
-                    CompactSlider("Sustain", sustainVal, 0f..1f, "${(sustainVal * 100).toInt()}%", gold) { sustainVal = it; engine.sustainLevel = it }
-                    CompactSlider("Release", releaseVal, 20f..2000f, "${releaseVal.toInt()}ms", gold) { releaseVal = it; engine.releaseMs = it }
-                    CompactSlider("Pulse Width", pulseWidthVal, 0.05f..0.95f, "${(pulseWidthVal * 100).toInt()}%", gold) { pulseWidthVal = it; engine.pulseWidth = it }
-                    CompactSlider("Sub Osc", subVal, 0f..1f, "${(subVal * 100).toInt()}%", gold) { subVal = it; engine.subLevel = it }
+                    CompactSlider("ווליום", vol, 0f..1f, "${(vol * 100).toInt()}%", gold) { v -> vol = v; engine.volume = v }
+                    CompactSlider("Attack", attackVal, 5f..500f, "${attackVal.toInt()}ms", gold) { v -> attackVal = v; engine.attackMs = v }
+                    CompactSlider("Sustain", sustainVal, 0f..1f, "${(sustainVal * 100).toInt()}%", gold) { v -> sustainVal = v; engine.sustainLevel = v }
+                    CompactSlider("Release", releaseVal, 20f..2000f, "${releaseVal.toInt()}ms", gold) { v -> releaseVal = v; engine.releaseMs = v }
+                    CompactSlider("Pulse Width", pulseWidthVal, 0.05f..0.95f, "${(pulseWidthVal * 100).toInt()}%", gold) { v -> pulseWidthVal = v; engine.pulseWidth = v }
+                    CompactSlider("Sub Osc", subVal, 0f..1f, "${(subVal * 100).toInt()}%", gold) { v -> subVal = v; engine.subLevel = v }
                 }
                 1 -> Column(Modifier.fillMaxSize(), Arrangement.SpaceEvenly) {
-                    CompactSlider("Cutoff", cutoffVal, 200f..12000f, "${cutoffVal.toInt()}Hz", gold) { cutoffVal = it; engine.cutoffFreq = it }
-                    CompactSlider("Resonance", resVal, 0f..0.9f, "${(resVal * 100).toInt()}%", gold) { resVal = it; engine.resonance = it }
-                    CompactSlider("Echo", echoVal, 0f..0.6f, "${(echoVal * 100).toInt()}%", gold) { echoVal = it; engine.echoMix = it }
-                    CompactSlider("Glide", glideVal, 0f..200f, "${glideVal.toInt()}ms", gold) { glideVal = it; engine.glideMs = it }
-                    CompactSlider("Drive", driveVal, 0f..1f, "${(driveVal * 100).toInt()}%", gold) { driveVal = it; engine.driveAmount = it }
-                    CompactSlider("LFO Rate", lfoRateVal, 0f..12f, String.format("%.1f", lfoRateVal) + "Hz", gold) { lfoRateVal = it; engine.lfoRate = it }
-                    CompactSlider("LFO Amount", lfoAmountVal, 0f..1f, "${(lfoAmountVal * 100).toInt()}%", gold) { lfoAmountVal = it; engine.lfoAmount = it }
+                    CompactSlider("Cutoff", cutoffVal, 200f..12000f, "${cutoffVal.toInt()}Hz", gold) { v -> cutoffVal = v; engine.cutoffFreq = v }
+                    CompactSlider("Resonance", resVal, 0f..0.9f, "${(resVal * 100).toInt()}%", gold) { v -> resVal = v; engine.resonance = v }
+                    CompactSlider("Echo", echoVal, 0f..0.6f, "${(echoVal * 100).toInt()}%", gold) { v -> echoVal = v; engine.echoMix = v }
+                    CompactSlider("Glide", glideVal, 0f..200f, "${glideVal.toInt()}ms", gold) { v -> glideVal = v; engine.glideMs = v }
+                    CompactSlider("Drive", driveVal, 0f..1f, "${(driveVal * 100).toInt()}%", gold) { v -> driveVal = v; engine.driveAmount = v }
+                    CompactSlider("LFO Rate", lfoRateVal, 0f..12f, String.format("%.1f", lfoRateVal) + "Hz", gold) { v -> lfoRateVal = v; engine.lfoRate = v }
+                    CompactSlider("LFO Amount", lfoAmountVal, 0f..1f, "${(lfoAmountVal * 100).toInt()}%", gold) { v -> lfoAmountVal = v; engine.lfoAmount = v }
                 }
                 2 -> Column(Modifier.fillMaxSize(), Arrangement.SpaceEvenly) {
-                    CompactSlider("Looper Vol", looperVolState, 0f..1f, "${(looperVolState * 100).toInt()}%", gold) { looperVolState = it; engine.looperVolume = it }
+                    CompactSlider("Looper Vol", looperVolState, 0f..1f, "${(looperVolState * 100).toInt()}%", gold) { v -> looperVolState = v; engine.looperVolume = v }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(onClick = {
                             if (isLoopRecState) { engine.stopLoopRecording(); isLoopRecState = false }
@@ -616,7 +616,7 @@ fun SynthAppUI(engine: SynthEngine) {
 }
 
 @Composable
-fun CompactSlider2(
+fun CompactSlider(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
