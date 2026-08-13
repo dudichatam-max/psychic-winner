@@ -252,9 +252,8 @@ class SynthEngine(private val context: Context) {
         try {
             val file = File(context.cacheDir, "temp_synth_recording.wav")
             wavFile = file
-            val stream = FileOutputStream(file)
-            recordedAudioStream = stream
-            writeWavHeader(stream, 0L)
+            recordedAudioStream = FileOutputStream(file)
+            writeWavHeader(recordedAudioStream!!, 0L)
             isRecording = true
         } catch (e: Exception) { e.printStackTrace() }
     }
@@ -532,7 +531,7 @@ fun SynthAppUI(engine: SynthEngine) {
                     CompactSlider("Echo", echoVal, 0f..0.6f, "${(echoVal*100).toInt()}%", gold) { echoVal = it; engine.echoMix = it }
                     CompactSlider("Glide", glideVal, 0f..200f, "${glideVal.toInt()}ms", gold) { glideVal = it; engine.glideMs = it }
                     CompactSlider("Drive", driveVal, 0f..1f, "${(driveVal*100).toInt()}%", gold) { driveVal = it; engine.driveAmount = it }
-                    CompactSlider("LFO Rate", lfoRateVal, 0f..12f, "${"%.1f".format(lfoRateVal)}Hz", gold) { lfoRateVal = it; engine.lfoRate = it }
+                    CompactSlider("LFO Rate", lfoRateVal, 0f..12f, String.format("%.1f", lfoRateVal) + "Hz", gold) { lfoRateVal = it; engine.lfoRate = it }
                     CompactSlider("LFO Amount", lfoAmountVal, 0f..1f, "${(lfoAmountVal*100).toInt()}%", gold) { lfoAmountVal = it; engine.lfoAmount = it }
                 }
                 2 -> Column(Modifier.fillMaxSize(), Arrangement.SpaceEvenly) {
@@ -598,7 +597,7 @@ fun CompactSlider(
     onChange: (Float) -> Unit
 ) {
     var showDialog by remember { mutableStateOf(false) }
-    var textValue by remember { mutableStateOf(display) }
+    var textValue by remember { mutableStateOf("") }
 
     if (showDialog) {
         AlertDialog(
@@ -615,13 +614,14 @@ fun CompactSlider(
             confirmButton = {
                 Button(onClick = {
                     textValue.toFloatOrNull()?.let { v ->
-                        val clamped = v.coerceIn(range.start, range.endInclusive)
-                        onChange(clamped)
+                        onChange(v.coerceIn(range.start, range.endInclusive))
                     }
                     showDialog = false
                 }) { Text("אישור") }
             },
-            dismissButton = { TextButton(onClick = { showDialog = false }) { Text("ביטול") } }
+            dismissButton = {
+                Button(onClick = { showDialog = false }) { Text("ביטול") }
+            }
         )
     }
 
