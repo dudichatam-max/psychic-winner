@@ -655,9 +655,6 @@ fun CompactSlider(
     color: Color,
     onChange: (Float) -> Unit
 ) {
-    var showDialog by remember { mutableStateOf(false) }
-    var textValue by remember { mutableStateOf("") }
-
     Column(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
         Row(
             Modifier.fillMaxWidth(),
@@ -665,16 +662,7 @@ fun CompactSlider(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Text(
-                text = display,
-                color = color,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable {
-                    textValue = display.filter { it.isDigit() || it == '.' || it == '-' }
-                    showDialog = true
-                }
-            )
+            Text(display, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
         Slider(
             value = value,
@@ -686,6 +674,9 @@ fun CompactSlider(
                 inactiveTrackColor = Color(0xFF2A2A2A)
             ),
             modifier = Modifier.height(20.dp)
+        )
+    }
+}
         )
     }
 
