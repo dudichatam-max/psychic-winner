@@ -131,16 +131,27 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.5
 
-            // --- פילטר ZDF / TPT SVF ---
+                        // --- פילטר ZDF / TPT SVF (אופטימיזציה) ---
             val targetCutoff = (if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq).coerceIn(20f, 16000f)
             val targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance).coerceIn(0.0f, 0.95f)
 
             slot.smoothedCutoff += (targetCutoff - slot.smoothedCutoff) * 0.005f
             slot.smoothedRes += (targetRes - slot.smoothedRes) * 0.005f
 
-            val g = tan(PI * slot.smoothedCutoff / sampleRate)
+            if (Math.abs(slot.smoothedCutoff - slot.lastCutoff) > 1.0f || Math.abs(slot.smoothedRes - slot.lastRes) > 0.01f) {
+                slot.lastCutoff = slot.smoothedCutoff
+                slot.lastRes = slot.smoothedRes
+                
+                val gTemp = tan(PI * slot.smoothedCutoff / sampleRate)
+                val kTemp = 2.0 * (1.0 - slot.smoothedRes.toDouble())
+                
+                slot.cachedG = gTemp
+                slot.cachedH = 1.0 / (1.0 + gTemp * (gTemp + kTemp))
+            }
+
+            val g = slot.cachedG
             val k = 2.0 * (1.0 - slot.smoothedRes.toDouble())
-            val h = 1.0 / (1.0 + g * (g + k))
+            val h = slot.cachedH
 
             val hp = h * (voiceSample - (g + k) * slot.zdfState1 - slot.zdfState2)
             val bp = g * hp + slot.zdfState1
@@ -150,6 +161,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
             slot.zdfState2 = g * bp + lp
 
             voiceSample = lp
+
 
             if (slot.isLooperNote) {
                 looperChannelMix += voiceSample
