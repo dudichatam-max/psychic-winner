@@ -690,7 +690,7 @@ fun SynthAppUI(engine: SynthEngine) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("MicroScale Synth", color = Color(0xFF00E5FF), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text("SIREN", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(
