@@ -101,7 +101,7 @@ class SynthEngine(private val context: Context) {
     private val dspEngine = DspEngine(sampleRate)
     @Volatile private var isRunning = true
 
-    private val maxVoices = 16
+    private val maxVoices = 12
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
     var waveformType = 3
@@ -253,12 +253,26 @@ class SynthEngine(private val context: Context) {
         }
 
         // 1. חיפוש ערוץ פנוי
-        slot = noteSlots.find { !it.active }
+slot = noteSlots.find { !it.active }
 
-        // 2. VOICE STEALING: אם הכל תפוס, גנוב את התו החלש ביותר בדעיכה (Release)
-        if (slot == null) {
-            slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
-        }
+// 2. אם הכל תפוס – קודם כל גנוב קול שכבר בדעיכה (Release) והכי חלש
+if (slot == null) {
+    slot = noteSlots
+        .filter { it.isReleasing }
+        .minByOrNull { it.envelopeVolume }
+}
+
+// 3. אם עדיין אין – גנוב את הקול הכי חלש שאינו לופר
+if (slot == null) {
+    slot = noteSlots
+        .filter { !it.isLooperNote }
+        .minByOrNull { it.envelopeVolume }
+}
+
+// 4. במקרה קיצון – גנוב את הקול הכי חלש בכלל
+if (slot == null) {
+    slot = noteSlots.minByOrNull { it.envelopeVolume }
+}
 
         // 3. אם עדיין אין ערוץ, גנוב את התו החלש ביותר באופן כללי
         if (slot == null) {
