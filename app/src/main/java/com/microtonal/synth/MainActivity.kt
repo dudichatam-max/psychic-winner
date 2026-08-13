@@ -47,15 +47,47 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        synthEngine = SynthEngine(this)
-        synthEngine.start()
 
-        setContent {
-            MaterialTheme {
-                SynthAppUI(synthEngine)
+        try {
+            synthEngine = SynthEngine(this)
+            synthEngine.start()
+
+            setContent {
+                MaterialTheme {
+                    SynthAppUI(synthEngine)
+                }
+            }
+        } catch (e: Exception) {
+            // הצגת השגיאה המדויקת על המסך כדי שנוכל לדעת מה גורם לקריסה
+            setContent {
+                MaterialTheme {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = Color.Black
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "שגיאת קריסה באתחול:\n\n${e.localizedMessage}\n\n${e.stackTraceToString().take(400)}",
+                                color = Color.Red,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
             }
         }
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            synthEngine.stop()
+        } catch (_: Exception) {}
+    }
+}
 
     override fun onDestroy() {
         super.onDestroy()
