@@ -3,6 +3,7 @@ package com.microtonal.synth
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.net.Uri
 import android.os.Bundle
@@ -100,8 +101,9 @@ data class LooperNoteEvent(
 )
 
 class SynthEngine(private val context: Context) {
-    private val sampleRate = 44100
-    private val dspEngine = DspEngine(sampleRate)
+    var sampleRate: Int = 44100
+    private var bufferSizeFrames: Int = 256
+    private val dspEngine: DspEngine
     @Volatile private var isRunning = true
 
     private val maxVoices = 12
@@ -136,14 +138,23 @@ class SynthEngine(private val context: Context) {
     private val audioTrack: AudioTrack
 
     init {
+        // שאילת נתוני החומרה הטבעיים של המכשיר להפחתת Latency
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val nativeSampleRateStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
+        val nativeBufferSizeStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
+
+        sampleRate = nativeSampleRateStr?.toIntOrNull() ?: 44100
+        bufferSizeFrames = nativeBufferSizeStr?.toIntOrNull() ?: 256
+
+        dspEngine = DspEngine(sampleRate)
+
         val minBufferSize = AudioTrack.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
 
-        // הגדלת חוצץ לטובת יציבות
-        val safeBufferSize = minBufferSize * 2
+        val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 2)
 
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
@@ -161,6 +172,7 @@ class SynthEngine(private val context: Context) {
             )
             .setBufferSizeInBytes(safeBufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
+            .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
             .build()
     }
 
@@ -169,7 +181,6 @@ class SynthEngine(private val context: Context) {
         audioTrack.play()
 
         Thread {
-            // תעדוף מקסימלי לתהליכון האודיו
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
 
             val bufferSize = 256
@@ -261,7 +272,7 @@ class SynthEngine(private val context: Context) {
             return
         }
 
-        // Voice Stealing משופר
+        // Voice Stealing
         slot = noteSlots.find { !it.active }
 
         if (slot == null) {
@@ -294,7 +305,6 @@ class SynthEngine(private val context: Context) {
             slot.zdfState1 = 0.0
             slot.zdfState2 = 0.0
             
-            // חישוב מקדמי מעטפת מראש
             val actualAttack = slot.frozenAttack
             val actualRelease = slot.frozenRelease
             slot.attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
@@ -980,7 +990,7 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(6.dp))
 
-        // --- KEYBOARD (גדול יותר) ---
+        // --- KEYBOARD ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
