@@ -14,14 +14,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,7 +31,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -531,35 +528,17 @@ fun SynthAppUI(engine: SynthEngine) {
                     }
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedButton(
-                                onClick = { if (currentOctave > -2) { currentOctave--; engine.octaveShift = currentOctave } },
-                                contentPadding = PaddingValues(4.dp, 1.dp),
-                                modifier = Modifier.height(26.dp)
-                            ) { Text("-1", fontSize = 9.sp, color = Color.White) }
+                            OutlinedButton(onClick = { if (currentOctave > -2) { currentOctave--; engine.octaveShift = currentOctave } }, contentPadding = PaddingValues(4.dp, 1.dp), modifier = Modifier.height(26.dp)) { Text("-1", fontSize = 9.sp, color = Color.White) }
                             Text(" $currentOctave ", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            OutlinedButton(
-                                onClick = { if (currentOctave < 2) { currentOctave++; engine.octaveShift = currentOctave } },
-                                contentPadding = PaddingValues(4.dp, 1.dp),
-                                modifier = Modifier.height(26.dp)
-                            ) { Text("+1", fontSize = 9.sp, color = Color.White) }
+                            OutlinedButton(onClick = { if (currentOctave < 2) { currentOctave++; engine.octaveShift = currentOctave } }, contentPadding = PaddingValues(4.dp, 1.dp), modifier = Modifier.height(26.dp)) { Text("+1", fontSize = 9.sp, color = Color.White) }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
                             (1..4).forEach { slot ->
-                                Button(
-                                    onClick = { selectedPresetSlot = slot; loadPresetFromSlot(slot) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = if (selectedPresetSlot == slot) gold else panelBg2),
-                                    contentPadding = PaddingValues(0.dp),
-                                    modifier = Modifier.size(24.dp)
-                                ) {
+                                Button(onClick = { selectedPresetSlot = slot; loadPresetFromSlot(slot) }, colors = ButtonDefaults.buttonColors(containerColor = if (selectedPresetSlot == slot) gold else panelBg2), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(24.dp)) {
                                     Text("$slot", fontSize = 9.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
                                 }
                             }
-                            Button(
-                                onClick = { savePresetToSlot(selectedPresetSlot) },
-                                colors = ButtonDefaults.buttonColors(containerColor = gold),
-                                contentPadding = PaddingValues(5.dp, 1.dp),
-                                modifier = Modifier.height(24.dp)
-                            ) {
+                            Button(onClick = { savePresetToSlot(selectedPresetSlot) }, colors = ButtonDefaults.buttonColors(containerColor = gold), contentPadding = PaddingValues(5.dp, 1.dp), modifier = Modifier.height(24.dp)) {
                                 Text("שמור", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
@@ -583,33 +562,20 @@ fun SynthAppUI(engine: SynthEngine) {
                 2 -> Column(Modifier.fillMaxSize(), Arrangement.SpaceEvenly) {
                     CompactSlider("Looper Vol", looperVolState, 0f..1f, "${(looperVolState * 100).toInt()}%", gold) { looperVolState = it; engine.looperVolume = it }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Button(
-                            onClick = {
-                                if (isLoopRecState) { engine.stopLoopRecording(); isLoopRecState = false }
-                                else { engine.startLoopRecording(); isLoopRecState = true; isLoopPlayState = false }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2),
-                            modifier = Modifier.weight(1f).height(42.dp)
-                        ) {
+                        Button(onClick = {
+                            if (isLoopRecState) { engine.stopLoopRecording(); isLoopRecState = false }
+                            else { engine.startLoopRecording(); isLoopRecState = true; isLoopPlayState = false }
+                        }, colors = ButtonDefaults.buttonColors(containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2), modifier = Modifier.weight(1f).height(42.dp)) {
                             Text(if (isLoopRecState) "עצור" else "הקלט לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
-                        Button(
-                            onClick = {
-                                if (isLoopPlayState) { engine.stopLoopPlayback(); isLoopPlayState = false }
-                                else { engine.startLoopPlayback(); isLoopPlayState = true }
-                            },
-                            enabled = engine.recordedNotes.isNotEmpty() && !isLoopRecState,
-                            colors = ButtonDefaults.buttonColors(containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2),
-                            modifier = Modifier.weight(1f).height(42.dp)
-                        ) {
+                        Button(onClick = {
+                            if (isLoopPlayState) { engine.stopLoopPlayback(); isLoopPlayState = false }
+                            else { engine.startLoopPlayback(); isLoopPlayState = true }
+                        }, enabled = engine.recordedNotes.isNotEmpty() && !isLoopRecState, colors = ButtonDefaults.buttonColors(containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2), modifier = Modifier.weight(1f).height(42.dp)) {
                             Text(if (isLoopPlayState) "עצור" else "נגן לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-                    OutlinedButton(
-                        onClick = { engine.clearLoop(); isLoopRecState = false; isLoopPlayState = false },
-                        modifier = Modifier.fillMaxWidth().height(38.dp),
-                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
-                    ) {
+                    OutlinedButton(onClick = { engine.clearLoop(); isLoopRecState = false; isLoopPlayState = false }, modifier = Modifier.fillMaxWidth().height(38.dp), border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))) {
                         Text("נקה לופר", color = Color.Gray, fontSize = 11.sp)
                     }
                 }
