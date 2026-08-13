@@ -115,6 +115,13 @@ class SynthEngine(private val context: Context) {
     var glideMs = 30f
     var octaveShift = 0
 
+    // חדשים
+    var pulseWidth = 0.5f
+    var driveAmount = 0.0f
+    var lfoRate = 0.0f
+    var lfoAmount = 0.0f
+    var subLevel = 0.0f
+
     val liveVisualizerBuffer = FloatArray(256)
     val looperVisualizerBuffer = FloatArray(256)
 
@@ -181,17 +188,20 @@ class SynthEngine(private val context: Context) {
                         attackMs = attackMs,
                         sustainLevel = sustainLevel,
                         releaseMs = releaseMs,
-                        echoMix = echoMix
+                        echoMix = echoMix,
+                        pulseWidth = pulseWidth,
+                        driveAmount = driveAmount,
+                        lfoRate = lfoRate,
+                        lfoAmount = lfoAmount,
+                        subLevel = subLevel
                     )
 
                     val rawMaster = frame.masterSample
                     val shortVal = (rawMaster * Short.MAX_VALUE * 0.85f).toInt().coerceIn(-32768, 32767).toShort()
                     
                     buffer[i] = shortVal
-
                     liveVisualizerBuffer[i] = frame.liveSample
                     looperVisualizerBuffer[i] = frame.looperSample
-
                     byteBuffer.putShort(shortVal)
                 }
 
@@ -251,17 +261,13 @@ class SynthEngine(private val context: Context) {
             return
         }
 
-        // Voice Stealing משופר
         slot = noteSlots.find { !it.active }
-
         if (slot == null) {
             slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
         }
-
         if (slot == null) {
             slot = noteSlots.filter { !it.isLooperNote }.minByOrNull { it.envelopeVolume }
         }
-
         if (slot == null) {
             slot = noteSlots.minByOrNull { it.envelopeVolume }
         }
@@ -457,7 +463,7 @@ class SynthEngine(private val context: Context) {
         header[29] = (byteRate shr 8 and 0xff).toByte()
         header[30] = (byteRate shr 16 and 0xff).toByte()
         header[31] = (byteRate shr 24 and 0xff).toByte()
-        header[32] = (2).toByte()
+        header[32] = 2
         header[33] = 0
         header[34] = 16
         header[35] = 0
@@ -489,7 +495,6 @@ class SynthEngine(private val context: Context) {
         randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
         randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
         randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
-
         randomAccessFile.close()
     }
 }
@@ -522,13 +527,18 @@ fun SynthAppUI(engine: SynthEngine) {
     var echoVal by remember { mutableFloatStateOf(0.25f) }
     var glideVal by remember { mutableFloatStateOf(30f) }
 
+    // חדשים
+    var pulseWidthVal by remember { mutableFloatStateOf(0.5f) }
+    var driveVal by remember { mutableFloatStateOf(0.0f) }
+    var lfoRateVal by remember { mutableFloatStateOf(0.0f) }
+    var lfoAmountVal by remember { mutableFloatStateOf(0.0f) }
+    var subVal by remember { mutableFloatStateOf(0.0f) }
+
     var currentOctave by remember { mutableIntStateOf(0) }
     var isRec by remember { mutableStateOf(false) }
-
     var isLoopRecState by remember { mutableStateOf(false) }
     var isLoopPlayState by remember { mutableStateOf(false) }
     var looperVolState by remember { mutableFloatStateOf(1.0f) }
-
     var selectedPresetSlot by remember { mutableIntStateOf(1) }
 
     val gold = Color(0xFFD4AF37)
@@ -541,11 +551,8 @@ fun SynthAppUI(engine: SynthEngine) {
     ) { uri ->
         uri?.let {
             val success = engine.exportRecordingToUri(context, it)
-            if (success) {
-                Toast.makeText(context, "ההקלטה נשמרה בהצלחה!", Toast.LENGTH_LONG).show()
-            } else {
-                Toast.makeText(context, "שגיאה בשמירת הקובץ", Toast.LENGTH_SHORT).show()
-            }
+            if (success) Toast.makeText(context, "ההקלטה נשמרה בהצלחה!", Toast.LENGTH_LONG).show()
+            else Toast.makeText(context, "שגיאה בשמירת הקובץ", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -554,37 +561,24 @@ fun SynthAppUI(engine: SynthEngine) {
             if (showToast) Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
             return
         }
-
-        vol = prefs.getFloat("p_${slot}_vol", 0.5f)
-        engine.volume = vol
-        attackVal = prefs.getFloat("p_${slot}_attack", 15f)
-        engine.attackMs = attackVal
-        sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f)
-        engine.sustainLevel = sustainVal
-        releaseVal = prefs.getFloat("p_${slot}_release", 200f)
-        engine.releaseMs = releaseVal
-        cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f)
-        engine.cutoffFreq = cutoffVal
-        resVal = prefs.getFloat("p_${slot}_res", 0.3f)
-        engine.resonance = resVal
-        echoVal = prefs.getFloat("p_${slot}_echo", 0.25f)
-        engine.echoMix = echoVal
-        glideVal = prefs.getFloat("p_${slot}_glide", 30f)
-        engine.glideMs = glideVal
+        vol = prefs.getFloat("p_${slot}_vol", 0.5f); engine.volume = vol
+        attackVal = prefs.getFloat("p_${slot}_attack", 15f); engine.attackMs = attackVal
+        sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f); engine.sustainLevel = sustainVal
+        releaseVal = prefs.getFloat("p_${slot}_release", 200f); engine.releaseMs = releaseVal
+        cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f); engine.cutoffFreq = cutoffVal
+        resVal = prefs.getFloat("p_${slot}_res", 0.3f); engine.resonance = resVal
+        echoVal = prefs.getFloat("p_${slot}_echo", 0.25f); engine.echoMix = echoVal
+        glideVal = prefs.getFloat("p_${slot}_glide", 30f); engine.glideMs = glideVal
 
         val freqsStr = prefs.getString("p_${slot}_freqs", null)
         if (freqsStr != null) {
             val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
-            if (list.size == frequencies.size) {
-                list.forEachIndexed { i, f -> frequencies[i] = f }
-            }
+            if (list.size == frequencies.size) list.forEachIndexed { i, f -> frequencies[i] = f }
         }
         if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
     }
 
-    LaunchedEffect(Unit) {
-        loadPresetFromSlot(1, showToast = false)
-    }
+    LaunchedEffect(Unit) { loadPresetFromSlot(1, showToast = false) }
 
     fun savePresetToSlot(slot: Int) {
         prefs.edit().apply {
@@ -615,32 +609,22 @@ fun SynthAppUI(engine: SynthEngine) {
         AlertDialog(
             onDismissRequest = { showTuningDialog = false },
             title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("כיוון תדרים (Hz)", fontSize = 14.sp, color = gold, fontWeight = FontWeight.Bold)
-                    OutlinedButton(
-                        onClick = { defaultFrequencies.forEachIndexed { i, f -> frequencies[i] = f } },
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                    ) { Text("איפוס", color = gold, fontSize = 9.sp) }
+                    OutlinedButton(onClick = { defaultFrequencies.forEachIndexed { i, f -> frequencies[i] = f } }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
+                        Text("איפוס", color = gold, fontSize = 9.sp)
+                    }
                 }
             },
             text = {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(vertical = 4.dp)
-                ) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
                     itemsIndexed(frequencies) { index, freq ->
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(noteNames[index], color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(4.dp))
                             OutlinedTextField(
                                 value = freq.toString(),
-                                onValueChange = { newValue ->
-                                    newValue.toFloatOrNull()?.let { frequencies[index] = it }
-                                },
+                                onValueChange = { newValue -> newValue.toFloatOrNull()?.let { frequencies[index] = it } },
                                 modifier = Modifier.width(68.dp),
                                 singleLine = true,
                                 textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = Color.White)
@@ -649,30 +633,17 @@ fun SynthAppUI(engine: SynthEngine) {
                     }
                 }
             },
-            confirmButton = {
-                Button(onClick = { showTuningDialog = false }) {
-                    Text("סגור")
-                }
-            },
+            confirmButton = { Button(onClick = { showTuningDialog = false }) { Text("סגור") } },
             containerColor = panelBg2
         )
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(darkBg)
-            .padding(10.dp),
+        modifier = Modifier.fillMaxSize().background(darkBg).padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- HEADER ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        // HEADER
+        Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("SIREN", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -690,79 +661,56 @@ fun SynthAppUI(engine: SynthEngine) {
                         if (isRec) {
                             engine.stopAndSaveRecording()
                             isRec = false
-                            val defaultFileName = "Siren_Recording_${System.currentTimeMillis()}.wav"
-                            createWavLauncher.launch(defaultFileName)
+                            createWavLauncher.launch("Siren_Recording_${System.currentTimeMillis()}.wav")
                         } else {
                             engine.startRecording()
                             isRec = true
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isRec) Color(0xFFFF1744) else panelBg2
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (isRec) Color(0xFFFF1744) else panelBg2),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     modifier = Modifier.height(32.dp)
                 ) {
-                    Box(modifier = Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, shape = CircleShape))
+                    Box(Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, CircleShape))
                     Spacer(Modifier.width(4.dp))
                     Text(if (isRec) "שמור WAV" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // --- OSCILLOSCOPE ---
+        // OSCILLOSCOPE
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(120.dp)
-                .background(panelBg, shape = RoundedCornerShape(10.dp))
-                .border(1.dp, Color(0xFF2A2A2A), shape = RoundedCornerShape(10.dp))
-                .padding(4.dp)
+            modifier = Modifier.fillMaxWidth().height(110.dp).background(panelBg, RoundedCornerShape(10.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(10.dp)).padding(4.dp)
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
+            Canvas(Modifier.fillMaxSize()) {
                 val dummy = renderTrigger
                 val w = size.width
                 val h = size.height
                 val halfH = h / 2f
-
                 val gridColor = Color(0xFF1F1F1F)
-                for (i in 1 until 8) {
-                    val x = w * (i.toFloat() / 8)
-                    drawLine(gridColor, start = Offset(x, 0f), end = Offset(x, h), strokeWidth = 1f)
-                }
-                for (i in 1 until 4) {
-                    val y = h * (i.toFloat() / 4)
-                    drawLine(gridColor, start = Offset(0f, y), end = Offset(w, y), strokeWidth = 1f)
-                }
-                drawLine(Color(0xFF2A2A2A), start = Offset(0f, halfH), end = Offset(w, halfH), strokeWidth = 1.5f)
+                for (i in 1 until 8) drawLine(gridColor, Offset(w * i / 8f, 0f), Offset(w * i / 8f, h), 1f)
+                for (i in 1 until 4) drawLine(gridColor, Offset(0f, h * i / 4f), Offset(w, h * i / 4f), 1f)
+                drawLine(Color(0xFF2A2A2A), Offset(0f, halfH), Offset(w, halfH), 1.5f)
 
                 val livePath = Path()
-                val liveCenterY = halfH / 2f
                 val liveStep = w / engine.liveVisualizerBuffer.size
                 engine.liveVisualizerBuffer.forEachIndexed { i, sample ->
                     val x = i * liveStep
-                    val y = liveCenterY + (sample * (halfH / 2f) * 0.85f)
+                    val y = halfH / 2f + sample * (halfH / 2f) * 0.85f
                     if (i == 0) livePath.moveTo(x, y) else livePath.lineTo(x, y)
                 }
-                drawPath(livePath, gold, style = Stroke(width = 2.5f))
+                drawPath(livePath, gold, style = Stroke(2.5f))
 
                 val looperPath = Path()
-                val looperCenterY = halfH + (halfH / 2f)
                 val looperStep = w / engine.looperVisualizerBuffer.size
                 engine.looperVisualizerBuffer.forEachIndexed { i, sample ->
                     val x = i * looperStep
-                    val y = looperCenterY + (sample * (halfH / 2f) * 0.85f)
+                    val y = halfH + halfH / 2f + sample * (halfH / 2f) * 0.85f
                     if (i == 0) looperPath.moveTo(x, y) else looperPath.lineTo(x, y)
                 }
-                drawPath(looperPath, Color.White.copy(alpha = 0.7f), style = Stroke(width = 2.5f))
+                drawPath(looperPath, Color.White.copy(alpha = 0.7f), style = Stroke(2.5f))
             }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 2.dp), verticalArrangement = Arrangement.SpaceBetween) {
                 Text("LIVE SCOPE", color = gold.copy(alpha = 0.8f), fontSize = 8.sp, fontWeight = FontWeight.Bold)
                 Text("LOOP SCOPE", color = Color.White.copy(alpha = 0.6f), fontSize = 8.sp, fontWeight = FontWeight.Bold)
             }
@@ -770,245 +718,145 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(6.dp))
 
-        // --- TABS ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(panelBg, shape = RoundedCornerShape(8.dp))
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+        // TABS
+        Row(Modifier.fillMaxWidth().background(panelBg, RoundedCornerShape(8.dp)).padding(3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             val tabs = listOf("🎛️ סאונד", "🎚️ פילטר ו-FX", "🔄 לופר")
             tabs.forEachIndexed { index, title ->
                 Button(
                     onClick = { selectedTab = index },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (selectedTab == index) panelBg2 else Color.Transparent
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (selectedTab == index) panelBg2 else Color.Transparent),
                     shape = RoundedCornerShape(6.dp),
                     contentPadding = PaddingValues(vertical = 4.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(
-                        title,
-                        color = if (selectedTab == index) gold else Color.Gray,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(title, color = if (selectedTab == index) gold else Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
         Spacer(Modifier.height(6.dp))
 
-        // --- TAB CONTENT ---
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .background(panelBg, shape = RoundedCornerShape(10.dp))
-                .padding(8.dp)
-        ) {
+        // CONTENT
+        Box(Modifier.fillMaxWidth().weight(1f).background(panelBg, RoundedCornerShape(10.dp)).padding(8.dp)) {
             when (selectedTab) {
-                0 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+                0 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
                     Column {
-                        Text("סוג גל (נגינה חיה)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("סוג גל", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(2.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
+                            val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise", "Pulse")
                             itemsIndexed(waves) { index, name ->
+                                val waveId = if (index == 5) 5 else index
                                 FilterChip(
-                                    selected = currentWave == index,
-                                    onClick = { currentWave = index; engine.waveformType = index },
+                                    selected = currentWave == waveId,
+                                    onClick = { currentWave = waveId; engine.waveformType = waveId },
                                     label = { Text(name, fontSize = 10.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = gold,
-                                        selectedLabelColor = Color.Black
-                                    )
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = gold, selectedLabelColor = Color.Black)
                                 )
                             }
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedButton(
-                                onClick = {
-                                    if (currentOctave > -2) {
-                                        currentOctave--
-                                        engine.octaveShift = currentOctave
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                                modifier = Modifier.height(28.dp)
-                            ) { Text("-1 Oct", fontSize = 9.sp, color = Color.White) }
-
+                            OutlinedButton(onClick = { if (currentOctave > -2) { currentOctave--; engine.octaveShift = currentOctave } }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp), modifier = Modifier.height(28.dp)) {
+                                Text("-1 Oct", fontSize = 9.sp, color = Color.White)
+                            }
                             Text(" Oct: $currentOctave ", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-
-                            OutlinedButton(
-                                onClick = {
-                                    if (currentOctave < 2) {
-                                        currentOctave++
-                                        engine.octaveShift = currentOctave
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                                modifier = Modifier.height(28.dp)
-                            ) { Text("+1 Oct", fontSize = 9.sp, color = Color.White) }
+                            OutlinedButton(onClick = { if (currentOctave < 2) { currentOctave++; engine.octaveShift = currentOctave } }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp), modifier = Modifier.height(28.dp)) {
+                                Text("+1 Oct", fontSize = 9.sp, color = Color.White)
+                            }
                         }
-
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                             (1..4).forEach { slot ->
                                 Button(
-                                    onClick = {
-                                        selectedPresetSlot = slot
-                                        loadPresetFromSlot(slot)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (selectedPresetSlot == slot) gold else panelBg2
-                                    ),
+                                    onClick = { selectedPresetSlot = slot; loadPresetFromSlot(slot) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = if (selectedPresetSlot == slot) gold else panelBg2),
                                     contentPadding = PaddingValues(0.dp),
                                     modifier = Modifier.size(26.dp)
-                                ) {
-                                    Text("$slot", fontSize = 10.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
-                                }
+                                ) { Text("$slot", fontSize = 10.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White) }
                             }
-                            Button(
-                                onClick = { savePresetToSlot(selectedPresetSlot) },
-                                colors = ButtonDefaults.buttonColors(containerColor = gold),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                modifier = Modifier.height(26.dp)
-                            ) {
+                            Button(onClick = { savePresetToSlot(selectedPresetSlot) }, colors = ButtonDefaults.buttonColors(containerColor = gold), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp), modifier = Modifier.height(26.dp)) {
                                 Text("שמור", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
 
-                    SynthSlider("ווליום נגינה", "${(vol * 100).toInt()}%", vol, accentColor = gold) { vol = it; engine.volume = it }
-                    SynthSlider("Attack (התקפה)", "${attackVal.toInt()}ms", attackVal, 5f..500f, gold) { attackVal = it; engine.attackMs = it }
-                    SynthSlider("Sustain (החזקה)", "${(sustainVal * 100).toInt()}%", sustainVal, 0f..1f, gold) { sustainVal = it; engine.sustainLevel = it }
-                    SynthSlider("Release (דעיכה)", "${releaseVal.toInt()}ms", releaseVal, 20f..2000f, gold) { releaseVal = it; engine.releaseMs = it }
+                    SynthSlider("ווליום", "${(vol * 100).toInt()}%", vol, accentColor = gold) { vol = it; engine.volume = it }
+                    SynthSlider("Attack", "${attackVal.toInt()}ms", attackVal, 5f..500f, gold) { attackVal = it; engine.attackMs = it }
+                    SynthSlider("Sustain", "${(sustainVal * 100).toInt()}%", sustainVal, 0f..1f, gold) { sustainVal = it; engine.sustainLevel = it }
+                    SynthSlider("Release", "${releaseVal.toInt()}ms", releaseVal, 20f..2000f, gold) { releaseVal = it; engine.releaseMs = it }
+                    SynthSlider("Pulse Width", "${(pulseWidthVal * 100).toInt()}%", pulseWidthVal, 0.05f..0.95f, gold) { pulseWidthVal = it; engine.pulseWidth = it }
+                    SynthSlider("Sub Osc", "${(subVal * 100).toInt()}%", subVal, 0f..1f, gold) { subVal = it; engine.subLevel = it }
                 }
 
-                1 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
-                    SynthSlider("Cutoff (חיתוך תדרים)", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
-                    SynthSlider("Resonance (תהודה)", "${(resVal * 100).toInt()}%", resVal, 0f..0.9f, gold) { resVal = it; engine.resonance = it }
-                    SynthSlider("Echo Mix (דיליי)", "${(echoVal * 100).toInt()}%", echoVal, 0f..0.6f, gold) { echoVal = it; engine.echoMix = it }
-                    SynthSlider("Glide (פליסנדו)", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
+                1 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
+                    SynthSlider("Cutoff", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
+                    SynthSlider("Resonance", "${(resVal * 100).toInt()}%", resVal, 0f..0.9f, gold) { resVal = it; engine.resonance = it }
+                    SynthSlider("Echo Mix", "${(echoVal * 100).toInt()}%", echoVal, 0f..0.6f, gold) { echoVal = it; engine.echoMix = it }
+                    SynthSlider("Glide", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
+                    SynthSlider("Drive", "${(driveVal * 100).toInt()}%", driveVal, 0f..1f, gold) { driveVal = it; engine.driveAmount = it }
+                    SynthSlider("LFO Rate", "${String.format("%.1f", lfoRateVal)}Hz", lfoRateVal, 0f..12f, gold) { lfoRateVal = it; engine.lfoRate = it }
+                    SynthSlider("LFO Amount", "${(lfoAmountVal * 100).toInt()}%", lfoAmountVal, 0f..1f, gold) { lfoAmountVal = it; engine.lfoAmount = it }
                 }
 
-                2 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
+                2 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
                     SynthSlider("עוצמת הלופר", "${(looperVolState * 100).toInt()}%", looperVolState, accentColor = gold) {
                         looperVolState = it
                         engine.looperVolume = it
                     }
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = {
-                                if (isLoopRecState) {
-                                    engine.stopLoopRecording()
-                                    isLoopRecState = false
-                                } else {
-                                    engine.startLoopRecording()
-                                    isLoopRecState = true
-                                    isLoopPlayState = false
-                                }
+                                if (isLoopRecState) { engine.stopLoopRecording(); isLoopRecState = false }
+                                else { engine.startLoopRecording(); isLoopRecState = true; isLoopPlayState = false }
                             },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2
-                            ),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2),
                             modifier = Modifier.weight(1f).height(48.dp)
-                        ) {
-                            Text(if (isLoopRecState) "עצור הקלטה" else "🔴 הקלט לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
+                        ) { Text(if (isLoopRecState) "עצור הקלטה" else "🔴 הקלט לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 
                         Button(
                             onClick = {
-                                if (isLoopPlayState) {
-                                    engine.stopLoopPlayback()
-                                    isLoopPlayState = false
-                                } else {
-                                    engine.startLoopPlayback()
-                                    isLoopPlayState = true
-                                }
+                                if (isLoopPlayState) { engine.stopLoopPlayback(); isLoopPlayState = false }
+                                else { engine.startLoopPlayback(); isLoopPlayState = true }
                             },
                             enabled = engine.recordedNotes.isNotEmpty() && !isLoopRecState,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2
-                            ),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2),
                             modifier = Modifier.weight(1f).height(48.dp)
-                        ) {
-                            Text(if (isLoopPlayState) "עצור ניגון" else "▶️ נגן לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
+                        ) { Text(if (isLoopPlayState) "עצור ניגון" else "▶️ נגן לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                     }
-
                     OutlinedButton(
-                        onClick = {
-                            engine.clearLoop()
-                            isLoopRecState = false
-                            isLoopPlayState = false
-                        },
+                        onClick = { engine.clearLoop(); isLoopRecState = false; isLoopPlayState = false },
                         modifier = Modifier.fillMaxWidth().height(42.dp),
                         border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
-                    ) {
-                        Text("🗑️ נקה לופר", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
+                    ) { Text("🗑️ נקה לופר", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                 }
             }
         }
 
         Spacer(Modifier.height(6.dp))
 
-        // --- KEYBOARD (גדול יותר) ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(155.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
+        // KEYBOARD
+        Row(Modifier.fillMaxWidth().height(155.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             frequencies.forEachIndexed { index, freq ->
                 var isPressed by remember { mutableStateOf(false) }
                 Card(
                     shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp, topStart = 4.dp, topEnd = 4.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isPressed) gold else Color(0xFFE8E8E8)
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .pointerInput(freq) {
-                            detectTapGestures(
-                                onPress = {
-                                    isPressed = true
-                                    engine.noteOn(freq)
-                                    tryAwaitRelease()
-                                    engine.noteOff(freq)
-                                    isPressed = false
-                                }
-                            )
-                        }
+                    colors = CardDefaults.cardColors(containerColor = if (isPressed) gold else Color(0xFFE8E8E8)),
+                    modifier = Modifier.weight(1f).fillMaxHeight().pointerInput(freq) {
+                        detectTapGestures(onPress = {
+                            isPressed = true
+                            engine.noteOn(freq)
+                            tryAwaitRelease()
+                            engine.noteOff(freq)
+                            isPressed = false
+                        })
+                    }
                 ) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        ) {
-                            Text(
-                                text = noteNames[index],
-                                color = if (isPressed) Color.Black else Color(0xFF1A1A1A),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                            Text(
-                                text = "${engine.getEffectiveFrequency(freq).toInt()}Hz",
-                                color = if (isPressed) Color.Black.copy(alpha = 0.7f) else Color(0xFF555555),
-                                fontSize = 9.sp
-                            )
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 8.dp)) {
+                            Text(noteNames[index], color = if (isPressed) Color.Black else Color(0xFF1A1A1A), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("${engine.getEffectiveFrequency(freq).toInt()}Hz", color = if (isPressed) Color.Black.copy(alpha = 0.7f) else Color(0xFF555555), fontSize = 9.sp)
                         }
                     }
                 }
@@ -1026,11 +874,8 @@ fun SynthSlider(
     accentColor: Color = Color(0xFFD4AF37),
     onValueChange: (Float) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 0.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 0.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             Text(valueDisplay, color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
@@ -1038,11 +883,7 @@ fun SynthSlider(
             value = value,
             valueRange = valueRange,
             onValueChange = onValueChange,
-            colors = SliderDefaults.colors(
-                thumbColor = accentColor,
-                activeTrackColor = accentColor,
-                inactiveTrackColor = Color(0xFF2A2A2A)
-            )
+            colors = SliderDefaults.colors(thumbColor = accentColor, activeTrackColor = accentColor, inactiveTrackColor = Color(0xFF2A2A2A))
         )
     }
 }
