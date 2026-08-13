@@ -1,6 +1,7 @@
 package com.microtonal.synth
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -309,6 +310,70 @@ class SynthEngine(private val context: Context) {
     }
 }
 
+// פונקציות עזר גלובליות מחוץ ל-UI כדי למנוע לחלוטין שגיאות קומפילציה של Composable
+private fun loadPresetData(
+    slot: Int,
+    showToast: Boolean,
+    context: Context,
+    prefs: SharedPreferences,
+    frequencies: MutableList<Float>,
+    engine: SynthEngine,
+    updateState: (Float, Float, Float, Float, Float, Float, Float, Float) -> Unit
+) {
+    if (!prefs.getBoolean("p_${slot}_exists", false)) {
+        if (showToast) Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val vol = prefs.getFloat("p_${slot}_vol", 0.5f); engine.volume = vol
+    val attack = prefs.getFloat("p_${slot}_attack", 15f); engine.attackMs = attack
+    val sustain = prefs.getFloat("p_${slot}_sustain", 0.8f); engine.sustainLevel = sustain
+    val release = prefs.getFloat("p_${slot}_release", 200f); engine.releaseMs = release
+    val cutoff = prefs.getFloat("p_${slot}_cutoff", 5000f); engine.cutoffFreq = cutoff
+    val res = prefs.getFloat("p_${slot}_res", 0.3f); engine.resonance = res
+    val echo = prefs.getFloat("p_${slot}_echo", 0.25f); engine.echoMix = echo
+    val glide = prefs.getFloat("p_${slot}_glide", 30f); engine.glideMs = glide
+
+    val freqsStr = prefs.getString("p_${slot}_freqs", null)
+    if (freqsStr != null) {
+        val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
+        if (list.size == frequencies.size) {
+            list.forEachIndexed { i, f -> frequencies[i] = f }
+        }
+    }
+    updateState(vol, attack, sustain, release, cutoff, res, echo, glide)
+    if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
+}
+
+private fun savePresetData(
+    slot: Int,
+    context: Context,
+    prefs: SharedPreferences,
+    frequencies: List<Float>,
+    vol: Float,
+    attackVal: Float,
+    sustainVal: Float,
+    releaseVal: Float,
+    cutoffVal: Float,
+    resVal: Float,
+    echoVal: Float,
+    glideVal: Float
+) {
+    prefs.edit().apply {
+        putFloat("p_${slot}_vol", vol)
+        putFloat("p_${slot}_attack", attackVal)
+        putFloat("p_${slot}_sustain", sustainVal)
+        putFloat("p_${slot}_release", releaseVal)
+        putFloat("p_${slot}_cutoff", cutoffVal)
+        putFloat("p_${slot}_res", resVal)
+        putFloat("p_${slot}_echo", echoVal)
+        putFloat("p_${slot}_glide", glideVal)
+        putString("p_${slot}_freqs", frequencies.joinToString(","))
+        putBoolean("p_${slot}_exists", true)
+        apply()
+    }
+    Toast.makeText(context, "פריסט $slot נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynthAppUI(engine: SynthEngine) {
@@ -354,43 +419,15 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 
     val loadPreset: (Int, Boolean) -> Unit = { slot, showToast ->
-        if (!prefs.getBoolean("p_${slot}_exists", false)) {
-            if (showToast) Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
-        } else {
-            vol = prefs.getFloat("p_${slot}_vol", 0.5f); engine.volume = vol
-            attackVal = prefs.getFloat("p_${slot}_attack", 15f); engine.attackMs = attackVal
-            sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f); engine.sustainLevel = sustainVal
-            releaseVal = prefs.getFloat("p_${slot}_release", 200f); engine.releaseMs = releaseVal
-            cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f); engine.cutoffFreq = cutoffVal
-            resVal = prefs.getFloat("p_${slot}_res", 0.3f); engine.resonance = resVal
-            echoVal = prefs.getFloat("p_${slot}_echo", 0.25f); engine.echoMix = echoVal
-            glideVal = prefs.getFloat("p_${slot}_glide", 30f); engine.glideMs = glideVal
-            val freqsStr = prefs.getString("p_${slot}_freqs", null)
-            if (freqsStr != null) {
-                val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
-                if (list.size == frequencies.size) list.forEachIndexed { i, f -> frequencies[i] = f }
-            }
-            if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
+        loadPresetData(slot, showToast, context, prefs, frequencies, engine) { v, a, sus, rel, cut, res, ech, gld ->
+            vol = v; attackVal = a; sustainVal = sus; releaseVal = rel; cutoffVal = cut; resVal = res; echoVal = ech; glideVal = gld
         }
     }
 
     LaunchedEffect(Unit) { loadPreset(1, false) }
 
     val savePreset: (Int) -> Unit = { slot ->
-        prefs.edit().apply {
-            putFloat("p_${slot}_vol", vol)
-            putFloat("p_${slot}_attack", attackVal)
-            putFloat("p_${slot}_sustain", sustainVal)
-            putFloat("p_${slot}_release", releaseVal)
-            putFloat("p_${slot}_cutoff", cutoffVal)
-            putFloat("p_${slot}_res", resVal)
-            putFloat("p_${slot}_echo", echoVal)
-            putFloat("p_${slot}_glide", glideVal)
-            putString("p_${slot}_freqs", frequencies.joinToString(","))
-            putBoolean("p_${slot}_exists", true)
-            apply()
-        }
-        Toast.makeText(context, "פריסט $slot נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
+        savePresetData(slot, context, prefs, frequencies, vol, attackVal, sustainVal, releaseVal, cutoffVal, resVal, echoVal, glideVal)
     }
 
     var renderTrigger by remember { mutableLongStateOf(0L) }
