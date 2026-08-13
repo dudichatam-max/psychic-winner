@@ -88,6 +88,12 @@ class NoteSlot {
     // מקדמי מעטפת מחושבים מראש לאופטימיזציה ב-DSP
     var attackCoeff: Double = 0.0
     var releaseCoeff: Double = 0.0
+
+    // --- המשתנים החדשים שהוספנו לאופטימיזציית הפילטר ---
+    var cachedG: Double = 0.0
+    var cachedH: Double = 0.0
+    var lastCutoff: Float = -1f
+    var lastRes: Float = -1f
 }
 
 data class LooperNoteEvent(
