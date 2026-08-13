@@ -81,6 +81,10 @@ class NoteSlot {
     var zdfState2: Double = 0.0
     var smoothedCutoff: Float = 5000f
     var smoothedRes: Float = 0.3f
+
+    // מקדמי מעטפת מחושבים מראש לאופטימיזציה ב-DSP
+    var attackCoeff: Double = 0.0
+    var releaseCoeff: Double = 0.0
 }
 
 data class LooperNoteEvent(
@@ -138,6 +142,9 @@ class SynthEngine(private val context: Context) {
             AudioFormat.ENCODING_PCM_16BIT
         )
 
+        // הגדלת חוצץ לטובת יציבות
+        val safeBufferSize = minBufferSize * 2
+
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -152,7 +159,7 @@ class SynthEngine(private val context: Context) {
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build()
             )
-            .setBufferSizeInBytes(minBufferSize)
+            .setBufferSizeInBytes(safeBufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
     }
@@ -162,6 +169,9 @@ class SynthEngine(private val context: Context) {
         audioTrack.play()
 
         Thread {
+            // תעדוף מקסימלי לתהליכון האודיו
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+
             val bufferSize = 256
             val buffer = ShortArray(bufferSize)
             val byteBuffer = ByteBuffer.allocate(bufferSize * 2).order(ByteOrder.LITTLE_ENDIAN)
@@ -283,6 +293,12 @@ class SynthEngine(private val context: Context) {
             slot.frozenRelease = release ?: releaseMs
             slot.zdfState1 = 0.0
             slot.zdfState2 = 0.0
+            
+            // חישוב מקדמי מעטפת מראש
+            val actualAttack = slot.frozenAttack
+            val actualRelease = slot.frozenRelease
+            slot.attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
+            slot.releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
         }
     }
 
