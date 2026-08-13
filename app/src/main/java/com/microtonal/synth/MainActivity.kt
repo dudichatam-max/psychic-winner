@@ -310,7 +310,7 @@ class SynthEngine(private val context: Context) {
     }
 }
 
-// פונקציות עזר גלובליות מחוץ ל-UI כדי למנוע לחלוטין שגיאות קומפילציה של Composable
+// פונקציות עזר גלובליות נקיות לחלוטין מחוץ ל-UI
 private fun loadPresetData(
     slot: Int,
     showToast: Boolean,
@@ -418,16 +418,11 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-    val loadPreset: (Int, Boolean) -> Unit = { slot, showToast ->
-        loadPresetData(slot, showToast, context, prefs, frequencies, engine) { v, a, sus, rel, cut, res, ech, gld ->
+    // טעינת פריסט ראשונית
+    LaunchedEffect(Unit) {
+        loadPresetData(1, false, context, prefs, frequencies, engine) { v, a, sus, rel, cut, res, ech, gld ->
             vol = v; attackVal = a; sustainVal = sus; releaseVal = rel; cutoffVal = cut; resVal = res; echoVal = ech; glideVal = gld
         }
-    }
-
-    LaunchedEffect(Unit) { loadPreset(1, false) }
-
-    val savePreset: (Int) -> Unit = { slot ->
-        savePresetData(slot, context, prefs, frequencies, vol, attackVal, sustainVal, releaseVal, cutoffVal, resVal, echoVal, glideVal)
     }
 
     var renderTrigger by remember { mutableLongStateOf(0L) }
@@ -574,11 +569,28 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
                             (1..4).forEach { slot ->
-                                Button(onClick = { selectedPresetSlot = slot; loadPreset(slot, true) }, colors = ButtonDefaults.buttonColors(containerColor = if (selectedPresetSlot == slot) gold else panelBg2), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(24.dp)) {
+                                Button(
+                                    onClick = {
+                                        selectedPresetSlot = slot
+                                        loadPresetData(slot, true, context, prefs, frequencies, engine) { v, a, sus, rel, cut, res, ech, gld ->
+                                            vol = v; attackVal = a; sustainVal = sus; releaseVal = rel; cutoffVal = cut; resVal = res; echoVal = ech; glideVal = gld
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = if (selectedPresetSlot == slot) gold else panelBg2),
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.size(24.dp)
+                                ) {
                                     Text("$slot", fontSize = 9.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
                                 }
                             }
-                            Button(onClick = { savePreset(selectedPresetSlot) }, colors = ButtonDefaults.buttonColors(containerColor = gold), contentPadding = PaddingValues(5.dp, 1.dp), modifier = Modifier.height(24.dp)) {
+                            Button(
+                                onClick = {
+                                    savePresetData(selectedPresetSlot, context, prefs, frequencies, vol, attackVal, sustainVal, releaseVal, cutoffVal, resVal, echoVal, glideVal)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = gold),
+                                contentPadding = PaddingValues(5.dp, 1.dp),
+                                modifier = Modifier.height(24.dp)
+                            ) {
                                 Text("שמור", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
