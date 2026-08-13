@@ -678,7 +678,7 @@ fun SynthAppUI(engine: SynthEngine) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF10141D))
+            .background(Color.Black)
             .padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
