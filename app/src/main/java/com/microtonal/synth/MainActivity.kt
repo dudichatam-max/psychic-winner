@@ -138,8 +138,8 @@ class SynthEngine(private val context: Context) {
     // משתנה עזר עבור מנגנון ה-Glide
     private var lastPlayedFreq: Float = 440f
 
-    val liveVisualizerBuffer = FloatArray(256)
-    val looperVisualizerBuffer = FloatArray(256)
+    val liveVisualizerBuffer = FloatArray(512)
+    val looperVisualizerBuffer = FloatArray(512)
 
     val recordedNotes = java.util.concurrent.CopyOnWriteArrayList<LooperNoteEvent>()
     private var isLoopRecording = false
