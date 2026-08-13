@@ -378,10 +378,17 @@ fun SynthAppUI(engine: SynthEngine) {
 
     fun savePresetToSlot(slot: Int) {
         prefs.edit().apply {
-            putFloat("p_\( {slot}_vol", vol); putFloat("p_ \){slot}_attack", attackVal); putFloat("p_${slot}_sustain", sustainVal)
-            putFloat("p_\( {slot}_release", releaseVal); putFloat("p_ \){slot}_cutoff", cutoffVal); putFloat("p_${slot}_res", resVal)
-            putFloat("p_\( {slot}_echo", echoVal); putFloat("p_ \){slot}_glide", glideVal)
-            putString("p_\( {slot}_freqs", frequencies.joinToString(",")); putBoolean("p_ \){slot}_exists", true); apply()
+            putFloat("p_${slot}_vol", vol)
+            putFloat("p_${slot}_attack", attackVal)
+            putFloat("p_${slot}_sustain", sustainVal)
+            putFloat("p_${slot}_release", releaseVal)
+            putFloat("p_${slot}_cutoff", cutoffVal)
+            putFloat("p_${slot}_res", resVal)
+            putFloat("p_${slot}_echo", echoVal)
+            putFloat("p_${slot}_glide", glideVal)
+            putString("p_${slot}_freqs", frequencies.joinToString(","))
+            putBoolean("p_${slot}_exists", true)
+            apply()
         }
         Toast.makeText(context, "פריסט $slot נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
     }
@@ -418,7 +425,6 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 
     Column(Modifier.fillMaxSize().background(darkBg).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        // Header
         Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
             Text("SIREN", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -438,7 +444,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // Scope
         Box(Modifier.fillMaxWidth().height(100.dp).background(panelBg, RoundedCornerShape(8.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(8.dp)).padding(3.dp)) {
             Canvas(Modifier.fillMaxSize()) {
                 val w = size.width; val h = size.height; val halfH = h / 2f
@@ -466,7 +471,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(5.dp))
 
-        // Tabs
         Row(Modifier.fillMaxWidth().background(panelBg, RoundedCornerShape(7.dp)).padding(2.dp), Arrangement.SpaceBetween) {
             listOf("סאונד", "פילטר+FX", "לופר").forEachIndexed { index, title ->
                 Button(onClick = { selectedTab = index },
@@ -479,7 +483,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(5.dp))
 
-        // Content
         Box(Modifier.fillMaxWidth().weight(1f).background(panelBg, RoundedCornerShape(8.dp)).padding(6.dp)) {
             when (selectedTab) {
                 0 -> Column(Modifier.fillMaxSize(), Arrangement.SpaceBetween) {
@@ -564,7 +567,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(5.dp))
 
-        // Keyboard
         Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             frequencies.forEachIndexed { index, freq ->
                 var isPressed by remember { mutableStateOf(false) }
