@@ -157,8 +157,9 @@ class DspEngine(private val sampleRate: Int = 44100) {
             val bp = g * hp + slot.zdfState1
             val lp = g * bp + slot.zdfState2
 
-            slot.zdfState1 = g * hp + bp
-            slot.zdfState2 = g * bp + lp
+            // שיפור: הגנה מפני Denormals במצבי הפילטר
+            slot.zdfState1 = avoidDenormal(g * hp + bp)
+            slot.zdfState2 = avoidDenormal(g * bp + lp)
 
             voiceSample = lp
 
@@ -182,7 +183,9 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
         // סינון עדין על ההד (Low-pass)
         echoSample = echoSample * 0.82 + delayFilterState * 0.18
-        delayFilterState = echoSample
+        
+        // שיפור: הגנה מפני Denormals במצב הדיליי
+        delayFilterState = avoidDenormal(echoSample)
 
         // Feedback
         val feedback = 0.42
@@ -242,6 +245,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
             else -> fastNoise() // PRNG מהיר בסיביות
         }
+    }
+
+    // --- הגנה מפני מספרים תת-נורמליים (Denormals) ---
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun avoidDenormal(value: Double): Double {
+        return if (abs(value) < 1e-15) 0.0 else value
     }
 
     // Fast Algebraic Cubic Saturator (במקום tanh)
