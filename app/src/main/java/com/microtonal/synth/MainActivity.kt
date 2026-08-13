@@ -62,14 +62,14 @@ class MainActivity : ComponentActivity() {
 }
 
 class NoteSlot {
-    var active: Boolean = false
-    var baseFreq: Float = 440f
-    var targetFreq: Float = 440f
-    var currentFreq: Float = 440f
+    @Volatile var active: Boolean = false
+    @Volatile var baseFreq: Float = 440f
+    @Volatile var targetFreq: Float = 440f
+    @Volatile var currentFreq: Float = 440f
     var phase: Double = 0.0
-    var envelopeVolume: Double = 0.0
-    var isReleasing: Boolean = false
-    var waveform: Int = 0
+    @Volatile var envelopeVolume: Double = 0.0
+    @Volatile var isReleasing: Boolean = false
+    @Volatile var waveform: Int = 0
 
     var isLooperNote: Boolean = false
     var frozenCutoff: Float = 5000f
@@ -109,17 +109,21 @@ class SynthEngine(private val context: Context) {
     private val maxVoices = 12
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
-    var waveformType = 3
-    var volume = 0.5f
-    var looperVolume = 1.0f
-    var attackMs = 15f
-    var sustainLevel = 0.8f
-    var releaseMs = 200f
-    var cutoffFreq = 5000f
-    var resonance = 0.3f
-    var echoMix = 0.25f
-    var glideMs = 30f
-    var octaveShift = 0
+    // שימוש ב-Volatile להבטחת סנכרון בזמן אמת מול ה-Audio Thread
+    @Volatile var waveformType = 3
+    @Volatile var volume = 0.5f
+    @Volatile var looperVolume = 1.0f
+    @Volatile var attackMs = 15f
+    @Volatile var sustainLevel = 0.8f
+    @Volatile var releaseMs = 200f
+    @Volatile var cutoffFreq = 5000f
+    @Volatile var resonance = 0.3f
+    @Volatile var echoMix = 0.25f
+    @Volatile var glideMs = 30f
+    @Volatile var octaveShift = 0
+
+    // משתנה עזר עבור מנגנון ה-Glide
+    private var lastPlayedFreq: Float = 440f
 
     val liveVisualizerBuffer = FloatArray(256)
     val looperVisualizerBuffer = FloatArray(256)
@@ -217,7 +221,7 @@ class SynthEngine(private val context: Context) {
                 }
 
                 if (isRecording) {
-                    recordedAudioStream?.write(byteBuffer.array())
+                    recordedAudioStream?.write(byteBuffer.array(), 0, byteBuffer.capacity())
                 }
 
                 audioTrack.write(buffer, 0, buffer.size)
@@ -236,93 +240,98 @@ class SynthEngine(private val context: Context) {
         return baseFreq * Math.pow(2.0, octaveShift.toDouble()).toFloat()
     }
 
-    
+    // עדכון סוג הגל בזמן אמת לנגינה חיה בלבד
+    fun setLiveWaveform(wave: Int) {
+        waveformType = wave
+        noteSlots.filter { it.active && !it.isLooperNote }.forEach { it.waveform = wave }
+    }
+
     fun noteOn(
-    baseFreq: Float,
-    isLooper: Boolean = false,
-    wave: Int? = null,
-    cutoff: Float? = null,
-    res: Float? = null,
-    attack: Float? = null,
-    sustain: Float? = null,
-    release: Float? = null
-) {
-    val freq = getEffectiveFrequency(baseFreq)
+        baseFreq: Float,
+        isLooper: Boolean = false,
+        wave: Int? = null,
+        cutoff: Float? = null,
+        res: Float? = null,
+        attack: Float? = null,
+        sustain: Float? = null,
+        release: Float? = null
+    ) {
+        val freq = getEffectiveFrequency(baseFreq)
 
-    if (isLoopRecording && !isLooper) {
-        val now = System.currentTimeMillis() - loopStartTime
-        recordedNotes.add(
-            LooperNoteEvent(
-                timestampMs = now,
-                isNoteOn = true,
-                freq = baseFreq,
-                wave = waveformType,
-                cutoff = cutoffFreq,
-                res = resonance,
-                attack = attackMs,
-                sustain = sustainLevel,
-                release = releaseMs
+        if (isLoopRecording && !isLooper) {
+            val now = System.currentTimeMillis() - loopStartTime
+            recordedNotes.add(
+                LooperNoteEvent(
+                    timestampMs = now,
+                    isNoteOn = true,
+                    freq = baseFreq,
+                    wave = waveformType,
+                    cutoff = cutoffFreq,
+                    res = resonance,
+                    attack = attackMs,
+                    sustain = sustainLevel,
+                    release = releaseMs
+                )
             )
-        )
-    }
-
-    var slot = noteSlots.find { it.active && it.baseFreq == baseFreq && it.isLooperNote == isLooper }
-    if (slot != null) {
-        slot.isReleasing = false
-        slot.targetFreq = freq
-        
-        // תיקון 1: הגנה מפני התנגשות בין תהליכונים
-        // אנו מוודאים שהתו חוזר למצב פעיל למקרה ששרשור השמע בדיוק סגר אותו, 
-        // ומעניקים לווליום דחיפה מזערית כדי להתחיל תקיפה מחדש ולא להישאר תקוע על 0
-        slot.active = true
-        if (slot.envelopeVolume < 0.001) {
-            slot.envelopeVolume = 0.001 
         }
-        return
+
+        var slot = noteSlots.find { it.active && it.baseFreq == baseFreq && it.isLooperNote == isLooper }
+        if (slot != null) {
+            slot.isReleasing = false
+            slot.targetFreq = freq
+            // עדכון סוג הגל גם בתו אקטיבי שמתחדש
+            slot.waveform = wave ?: waveformType
+            slot.active = true
+            if (slot.envelopeVolume < 0.001) {
+                slot.envelopeVolume = 0.001 
+            }
+            return
+        }
+
+        // Voice Stealing
+        slot = noteSlots.find { !it.active }
+
+        if (slot == null) {
+            slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
+        }
+
+        if (slot == null) {
+            slot = noteSlots.filter { !it.isLooperNote }.minByOrNull { it.envelopeVolume }
+        }
+
+        if (slot == null) {
+            slot = noteSlots.minByOrNull { it.envelopeVolume }
+        }
+
+        if (slot != null) {
+            // חישוב Glide: גלישה מתדר התו הקודם במידה ומדובר בנגינה חיה ו-Glide פועל
+            val startFreq = if (!isLooper && glideMs > 0f) lastPlayedFreq else freq
+            if (!isLooper) lastPlayedFreq = freq
+
+            slot.baseFreq = baseFreq
+            slot.targetFreq = freq
+            slot.currentFreq = startFreq
+            slot.phase = 0.0
+            slot.envelopeVolume = 0.0
+            slot.isReleasing = false
+            slot.waveform = wave ?: waveformType
+            slot.isLooperNote = isLooper
+            slot.frozenCutoff = cutoff ?: cutoffFreq
+            slot.frozenRes = res ?: resonance
+            slot.frozenAttack = attack ?: attackMs
+            slot.frozenSustain = sustain ?: sustainLevel
+            slot.frozenRelease = release ?: releaseMs
+            slot.zdfState1 = 0.0
+            slot.zdfState2 = 0.0
+            
+            val actualAttack = slot.frozenAttack
+            val actualRelease = slot.frozenRelease
+            slot.attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
+            slot.releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
+
+            slot.active = true 
+        }
     }
-
-    // Voice Stealing
-    slot = noteSlots.find { !it.active }
-
-    if (slot == null) {
-        slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
-    }
-
-    if (slot == null) {
-        slot = noteSlots.filter { !it.isLooperNote }.minByOrNull { it.envelopeVolume }
-    }
-
-    if (slot == null) {
-        slot = noteSlots.minByOrNull { it.envelopeVolume }
-    }
-
-    if (slot != null) {
-        // תיקון 2: מגדירים את כל המשתנים קודם כדי למנוע סאונד "שבור"
-        slot.baseFreq = baseFreq
-        slot.targetFreq = freq
-        slot.currentFreq = freq
-        slot.phase = 0.0
-        slot.envelopeVolume = 0.0
-        slot.isReleasing = false
-        slot.waveform = wave ?: waveformType
-        slot.isLooperNote = isLooper
-        slot.frozenCutoff = cutoff ?: cutoffFreq
-        slot.frozenRes = res ?: resonance
-        slot.frozenAttack = attack ?: attackMs
-        slot.frozenSustain = sustain ?: sustainLevel
-        slot.frozenRelease = release ?: releaseMs
-        slot.zdfState1 = 0.0
-        slot.zdfState2 = 0.0
-        
-        val actualAttack = slot.frozenAttack
-        val actualRelease = slot.frozenRelease
-        slot.attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
-        slot.releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
-
-        // רק בסוף, כשהכל מוכן, אנו נותנים אישור למנוע האודיו לגשת אל התו החדש
-        slot.active = true 
-    }
-}
 
     fun noteOff(baseFreq: Float, isLooper: Boolean = false) {
         if (isLoopRecording && !isLooper) {
@@ -609,6 +618,10 @@ fun SynthAppUI(engine: SynthEngine) {
         engine.echoMix = echoVal
         glideVal = prefs.getFloat("p_${slot}_glide", 30f)
         engine.glideMs = glideVal
+        currentWave = prefs.getInt("p_${slot}_wave", 3)
+        engine.setLiveWaveform(currentWave)
+        currentOctave = prefs.getInt("p_${slot}_octave", 0)
+        engine.octaveShift = currentOctave
 
         val freqsStr = prefs.getString("p_${slot}_freqs", null)
         if (freqsStr != null) {
@@ -634,6 +647,8 @@ fun SynthAppUI(engine: SynthEngine) {
             putFloat("p_${slot}_res", resVal)
             putFloat("p_${slot}_echo", echoVal)
             putFloat("p_${slot}_glide", glideVal)
+            putInt("p_${slot}_wave", currentWave)
+            putInt("p_${slot}_octave", currentOctave)
             putString("p_${slot}_freqs", frequencies.joinToString(","))
             putBoolean("p_${slot}_exists", true)
             apply()
@@ -650,6 +665,10 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 
     if (showTuningDialog) {
+        val freqTexts = remember {
+            mutableStateListOf(*frequencies.map { it.toString() }.toTypedArray())
+        }
+
         AlertDialog(
             onDismissRequest = { showTuningDialog = false },
             title = {
@@ -660,7 +679,12 @@ fun SynthAppUI(engine: SynthEngine) {
                 ) {
                     Text("כיוון תדרים (Hz)", fontSize = 14.sp, color = gold, fontWeight = FontWeight.Bold)
                     OutlinedButton(
-                        onClick = { defaultFrequencies.forEachIndexed { i, f -> frequencies[i] = f } },
+                        onClick = {
+                            defaultFrequencies.forEachIndexed { i, f ->
+                                frequencies[i] = f
+                                freqTexts[i] = f.toString()
+                            }
+                        },
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
                     ) { Text("איפוס", color = gold, fontSize = 9.sp) }
                 }
@@ -670,13 +694,14 @@ fun SynthAppUI(engine: SynthEngine) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.padding(vertical = 4.dp)
                 ) {
-                    itemsIndexed(frequencies) { index, freq ->
+                    itemsIndexed(frequencies) { index, _ ->
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(noteNames[index], color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(4.dp))
                             OutlinedTextField(
-                                value = freq.toString(),
+                                value = freqTexts[index],
                                 onValueChange = { newValue ->
+                                    freqTexts[index] = newValue
                                     newValue.toFloatOrNull()?.let { frequencies[index] = it }
                                 },
                                 modifier = Modifier.width(68.dp),
@@ -857,7 +882,10 @@ fun SynthAppUI(engine: SynthEngine) {
                             itemsIndexed(waves) { index, name ->
                                 FilterChip(
                                     selected = currentWave == index,
-                                    onClick = { currentWave = index; engine.waveformType = index },
+                                    onClick = {
+                                        currentWave = index
+                                        engine.setLiveWaveform(index) // עדכון מיידי של תווים פעילים בלייב בלבד
+                                    },
                                     label = { Text(name, fontSize = 10.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = gold,
@@ -934,8 +962,10 @@ fun SynthAppUI(engine: SynthEngine) {
 
                 1 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
                     SynthSlider("Cutoff (חיתוך תדרים)", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
-                    SynthSlider("Resonance (תהודה)", "${(resVal * 100).toInt()}%", resVal, 0f..0.9f, gold) { resVal = it; engine.resonance = it }
-                    SynthSlider("Echo Mix (דיליי)", "${(echoVal * 100).toInt()}%", echoVal, 0f..0.6f, gold) { echoVal = it; engine.echoMix = it }
+                    // תוקן לטווח מלא של 0f..1f (100%)
+                    SynthSlider("Resonance (תהודה)", "${(resVal * 100).toInt()}%", resVal, 0f..1f, gold) { resVal = it; engine.resonance = it }
+                    // תוקן לטווח מלא של 0f..1f (100%)
+                    SynthSlider("Echo Mix (דיליי)", "${(echoVal * 100).toInt()}%", echoVal, 0f..1f, gold) { echoVal = it; engine.echoMix = it }
                     SynthSlider("Glide (פליסנדו)", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
                 }
 
@@ -1055,6 +1085,7 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 }
 
+// רכיב סליידר משודרג המאפשר גם הזנה ידנית בלחיצה על הטקסט המספרי
 @Composable
 fun SynthSlider(
     label: String,
@@ -1064,13 +1095,67 @@ fun SynthSlider(
     accentColor: Color = Color(0xFFD4AF37),
     onValueChange: (Float) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 0.dp)) {
+    var showInputDialog by remember { mutableStateOf(false) }
+    var textInput by remember { mutableStateOf(value.toString()) }
+
+    if (showInputDialog) {
+        AlertDialog(
+            onDismissRequest = { showInputDialog = false },
+            title = {
+                Text("הזנת ערך עבור $label", fontSize = 14.sp, color = accentColor, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text("הכנס ערך בין ${valueRange.start} ל-${valueRange.endInclusive}:", color = Color.White, fontSize = 11.sp)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = textInput,
+                        onValueChange = { textInput = it },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 12.sp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    textInput.toFloatOrNull()?.let { inputVal ->
+                        onValueChange(inputVal.coerceIn(valueRange))
+                    }
+                    showInputDialog = false
+                }) {
+                    Text("אישור")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showInputDialog = false }) {
+                    Text("ביטול")
+                }
+            },
+            containerColor = Color(0xFF1A1A1A)
+        )
+    }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Text(valueDisplay, color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            
+            // לחיצה על הערך המספרי פותחת דיאלוג להזנה ידנית
+            Text(
+                text = valueDisplay,
+                color = accentColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.pointerInput(Unit) {
+                    detectTapGestures(onTap = {
+                        textInput = String.format("%.2f", value)
+                        showInputDialog = true
+                    })
+                }
+            )
         }
         Slider(
             value = value,
