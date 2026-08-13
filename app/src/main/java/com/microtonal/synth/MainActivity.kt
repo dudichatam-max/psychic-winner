@@ -353,32 +353,30 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-    @Composable
-    fun loadPresetFromSlot(slot: Int, showToast: Boolean = true) {
+    val loadPreset: (Int, Boolean) -> Unit = { slot, showToast ->
         if (!prefs.getBoolean("p_${slot}_exists", false)) {
             if (showToast) Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
-            return
+        } else {
+            vol = prefs.getFloat("p_${slot}_vol", 0.5f); engine.volume = vol
+            attackVal = prefs.getFloat("p_${slot}_attack", 15f); engine.attackMs = attackVal
+            sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f); engine.sustainLevel = sustainVal
+            releaseVal = prefs.getFloat("p_${slot}_release", 200f); engine.releaseMs = releaseVal
+            cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f); engine.cutoffFreq = cutoffVal
+            resVal = prefs.getFloat("p_${slot}_res", 0.3f); engine.resonance = resVal
+            echoVal = prefs.getFloat("p_${slot}_echo", 0.25f); engine.echoMix = echoVal
+            glideVal = prefs.getFloat("p_${slot}_glide", 30f); engine.glideMs = glideVal
+            val freqsStr = prefs.getString("p_${slot}_freqs", null)
+            if (freqsStr != null) {
+                val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
+                if (list.size == frequencies.size) list.forEachIndexed { i, f -> frequencies[i] = f }
+            }
+            if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
         }
-        vol = prefs.getFloat("p_${slot}_vol", 0.5f); engine.volume = vol
-        attackVal = prefs.getFloat("p_${slot}_attack", 15f); engine.attackMs = attackVal
-        sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f); engine.sustainLevel = sustainVal
-        releaseVal = prefs.getFloat("p_${slot}_release", 200f); engine.releaseMs = releaseVal
-        cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f); engine.cutoffFreq = cutoffVal
-        resVal = prefs.getFloat("p_${slot}_res", 0.3f); engine.resonance = resVal
-        echoVal = prefs.getFloat("p_${slot}_echo", 0.25f); engine.echoMix = echoVal
-        glideVal = prefs.getFloat("p_${slot}_glide", 30f); engine.glideMs = glideVal
-        val freqsStr = prefs.getString("p_${slot}_freqs", null)
-        if (freqsStr != null) {
-            val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
-            if (list.size == frequencies.size) list.forEachIndexed { i, f -> frequencies[i] = f }
-        }
-        if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
     }
 
-    LaunchedEffect(Unit) { loadPresetFromSlot(1, false) }
+    LaunchedEffect(Unit) { loadPreset(1, false) }
 
-    @Composable
-    fun savePresetToSlot(slot: Int) {
+    val savePreset: (Int) -> Unit = { slot ->
         prefs.edit().apply {
             putFloat("p_${slot}_vol", vol)
             putFloat("p_${slot}_attack", attackVal)
@@ -539,11 +537,11 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
                             (1..4).forEach { slot ->
-                                Button(onClick = { selectedPresetSlot = slot; loadPresetFromSlot(slot) }, colors = ButtonDefaults.buttonColors(containerColor = if (selectedPresetSlot == slot) gold else panelBg2), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(24.dp)) {
+                                Button(onClick = { selectedPresetSlot = slot; loadPreset(slot, true) }, colors = ButtonDefaults.buttonColors(containerColor = if (selectedPresetSlot == slot) gold else panelBg2), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(24.dp)) {
                                     Text("$slot", fontSize = 9.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
                                 }
                             }
-                            Button(onClick = { savePresetToSlot(selectedPresetSlot) }, colors = ButtonDefaults.buttonColors(containerColor = gold), contentPadding = PaddingValues(5.dp, 1.dp), modifier = Modifier.height(24.dp)) {
+                            Button(onClick = { savePreset(selectedPresetSlot) }, colors = ButtonDefaults.buttonColors(containerColor = gold), contentPadding = PaddingValues(5.dp, 1.dp), modifier = Modifier.height(24.dp)) {
                                 Text("שמור", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
