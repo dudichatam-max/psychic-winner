@@ -141,7 +141,7 @@ class SynthEngine(private val context: Context) {
     val liveVisualizerBuffer = FloatArray(256)
     val looperVisualizerBuffer = FloatArray(256)
 
-    val recordedNotes = mutableListOf<LooperNoteEvent>()
+    val recordedNotes = java.util.concurrent.CopyOnWriteArrayList<LooperNoteEvent>()
     private var isLoopRecording = false
     private var isLoopPlaying = false
     private var loopStartTime = 0L
