@@ -5,13 +5,16 @@ import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.tan
 
-data class DspFrame(
-    val liveSample: Float,
-    val looperSample: Float,
-    val masterSample: Float
+class DspFrame(
+    var liveSample: Float = 0f,
+    var looperSample: Float = 0f,
+    var masterSample: Float = 0f
 )
 
 class DspEngine(private val sampleRate: Int = 44100) {
+
+    // שימוש מחדש באובייקט פלט יחיד למניעת עומס על ה-Garbage Collector
+    private val reusableFrame = DspFrame()
 
     private val delayBuffer = FloatArray(sampleRate)
     private var delayWritePos = 0
@@ -97,13 +100,18 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
             val phaseNorm = slot.phase / (2.0 * PI)
 
-            // מעטפת ADSR
-            val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
+            // מעטפת ADSR (שימוש במקדמים מחושבים מראש למניעת חישובי Math.exp יקרים בלולאה)
             val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
-            val actualRelease = if (slot.isLooperNote) slot.frozenRelease else releaseMs
 
-            val attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
-            val releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
+            val attackCoeff = if (slot.attackCoeff > 0.0) slot.attackCoeff else {
+                val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
+                1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
+            }
+
+            val releaseCoeff = if (slot.releaseCoeff > 0.0) slot.releaseCoeff else {
+                val actualRelease = if (slot.isLooperNote) slot.frozenRelease else releaseMs
+                Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
+            }
 
             if (!slot.isReleasing) {
                 slot.envelopeVolume += (actualSustain.toDouble() - slot.envelopeVolume) * attackCoeff
@@ -155,35 +163,36 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
         var totalSample = (liveChannelMix * smoothedLiveVol) + (looperChannelMix * smoothedLooperVol)
 
-        // אפקט דיליי
-        // --- דיליי מוזיקלי עם Feedback + סינון ---
-val delaySamples = (sampleRate * 0.28).toInt()  // קצת יותר ארוך
-val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
-var echoSample = delayBuffer[delayReadPos].toDouble()
+        // אפקט דיליי מוזיקלי עם Feedback + סינון
+        val delaySamples = (sampleRate * 0.28).toInt()
+        val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
+        var echoSample = delayBuffer[delayReadPos].toDouble()
 
-// סינון עדין על ההד (Low-pass) כדי שיהיה יותר חם
-echoSample = echoSample * 0.82 + delayFilterState * 0.18
-delayFilterState = echoSample
+        // סינון עדין על ההד (Low-pass)
+        echoSample = echoSample * 0.82 + delayFilterState * 0.18
+        delayFilterState = echoSample
 
-// Feedback נעים (לא מתכתי)
-val feedback = 0.42
-delayBuffer[delayWritePos] = (totalSample + echoSample * feedback).toFloat()
-delayWritePos = (delayWritePos + 1) % delayBuffer.size
+        // Feedback
+        val feedback = 0.42
+        delayBuffer[delayWritePos] = (totalSample + echoSample * feedback).toFloat()
+        delayWritePos = (delayWritePos + 1) % delayBuffer.size
 
-totalSample += echoSample * smoothedEchoMix
+        totalSample += echoSample * smoothedEchoMix
+
         // DC Blocker
         val dcSample = totalSample - dcX1 + 0.995 * dcY1
         dcX1 = totalSample
         dcY1 = if (dcSample.isNaN() || dcSample.isInfinite()) 0.0 else dcSample
 
-        // --- OPTIMIZATION 3: FAST CUBIC SOFT CLIPPER ---
+        // Fast Cubic Soft Clipper
         val masterSample = softSaturate(dcY1 * 0.52).toFloat()
 
-        return DspFrame(
-            liveSample = finalLiveSample,
-            looperSample = finalLooperSample,
-            masterSample = masterSample
-        )
+        // עדכון האובייקט הקיים והחזרתו ללא יצירת אובייקט חדש בזיכרון
+        reusableFrame.liveSample = finalLiveSample
+        reusableFrame.looperSample = finalLooperSample
+        reusableFrame.masterSample = masterSample
+
+        return reusableFrame
     }
 
     // --- PolyBLEP Anti-Aliasing Logic ---
@@ -224,11 +233,10 @@ totalSample += echoSample * smoothedEchoMix
     }
 
     // Fast Algebraic Cubic Saturator (במקום tanh)
-@Suppress("NOTHING_TO_INLINE")
-private inline fun softSaturate(x: Double): Double {
-    // Soft saturation יותר מוזיקלי וחם
-    val driven = x * 1.35
-    val x2 = driven * driven
-    return driven * (27.0 + x2) / (27.0 + 9.0 * x2)
-}
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun softSaturate(x: Double): Double {
+        val driven = x * 1.35
+        val x2 = driven * driven
+        return driven * (27.0 + x2) / (27.0 + 9.0 * x2)
+    }
 }
