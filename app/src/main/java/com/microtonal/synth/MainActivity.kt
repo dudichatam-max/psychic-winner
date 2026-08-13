@@ -43,7 +43,6 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
-class MainActivity : ComponentActivity() {
     private lateinit var synthEngine: SynthEngine
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,7 +58,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         } catch (e: Exception) {
-            // הצגת השגיאה המדויקת על המסך כדי שנוכל לדעת מה גורם לקריסה
             setContent {
                 MaterialTheme {
                     Surface(
@@ -90,21 +88,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-
-    override fun onDestroy() {
-        super.onDestroy()
-        try {
-            synthEngine.stop()
-        } catch (_: Exception) {}
-    }
-}
-
-    override fun onDestroy() {
-        super.onDestroy()
-        synthEngine.stop()
-    }
-}
-
 class NoteSlot {
     @Volatile var active: Boolean = false
     @Volatile var baseFreq: Float = 440f
@@ -127,11 +110,9 @@ class NoteSlot {
     var smoothedCutoff: Float = 5000f
     var smoothedRes: Float = 0.3f
 
-    // מקדמי מעטפת מחושבים מראש לאופטימיזציה ב-DSP
     var attackCoeff: Double = 0.0
     var releaseCoeff: Double = 0.0
 
-    // --- המשתנים החדשים שהוספנו לאופטימיזציית הפילטר ---
     var cachedG: Double = 0.0
     var cachedH: Double = 0.0
     var lastCutoff: Float = -1f
@@ -153,18 +134,15 @@ data class LooperNoteEvent(
 class SynthEngine(private val context: Context) {
     var sampleRate: Int = 44100
     private var bufferSizeFrames: Int = 512
-    private val dspEngine: DspEngine
+    private val dspEngine: DspEngine = DspEngine(sampleRate)
     @Volatile private var isRunning = true
 
-    // שיפור ביצועים: הורדת מספר הקולות המרבי מ-12 ל-8
     private val maxVoices = 8
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
-    // תור להעברת נתוני אודיו להקלטה בנפרד מה-Audio Thread
     private val recordingQueue = LinkedBlockingQueue<ByteArray>()
     private var recordingWriterThread: Thread? = null
 
-    // שימוש ב-Volatile להבטחת סנכרון בזמן אמת מול ה-Audio Thread
     @Volatile var waveformType = 3
     @Volatile var volume = 0.5f
     @Volatile var looperVolume = 1.0f
@@ -177,7 +155,6 @@ class SynthEngine(private val context: Context) {
     @Volatile var glideMs = 30f
     @Volatile var octaveShift = 0
 
-    // משתנה עזר עבור מנגנון ה-Glide
     private var lastPlayedFreq: Float = 440f
 
     val liveVisualizerBuffer = FloatArray(256)
@@ -196,8 +173,7 @@ class SynthEngine(private val context: Context) {
 
     private val audioTrack: AudioTrack
 
-        init {
-        // שאילת נתוני החומרה הטבעיים של המכשיר להפחתת Latency
+    init {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val nativeSampleRateStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
         val nativeBufferSizeStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
@@ -205,19 +181,15 @@ class SynthEngine(private val context: Context) {
         sampleRate = nativeSampleRateStr?.toIntOrNull() ?: 44100
         bufferSizeFrames = nativeBufferSizeStr?.toIntOrNull() ?: 256
 
-        dspEngine = DspEngine(sampleRate)
-
         val minBufferSize = AudioTrack.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
 
-        // וידוא שגודל ה-Buffer תקין וחיובי (מונע שגיאות קוד שגיאה שליליות)
         val validMinBuffer = if (minBufferSize > 0) minBufferSize else 4096
         val safeBufferSize = maxOf(validMinBuffer, bufferSizeFrames * 2)
 
-        // אתחול בטוח עם מנגנון הגנה (Fallback) למניעת קריסת אפליקציה
         audioTrack = try {
             AudioTrack.Builder()
                 .setAudioAttributes(
@@ -238,7 +210,6 @@ class SynthEngine(private val context: Context) {
                 .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
                 .build()
         } catch (e: Exception) {
-            // גיבוי: במקרה שהמכשיר דוחה Low Latency, עוברים למצב רגיל ויציב לחלוטין
             AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
@@ -259,7 +230,6 @@ class SynthEngine(private val context: Context) {
                 .build()
         }
     }
-
 
     fun start() {
         isRunning = true
@@ -301,7 +271,6 @@ class SynthEngine(private val context: Context) {
                     byteBuffer.putShort(shortVal)
                 }
 
-                // פתרון הבעיה: שכפול מהיר של הנתונים לתור בזיכרון בלבד (ללא I/O לקובץ)
                 if (isRecording) {
                     recordingQueue.offer(byteBuffer.array().clone())
                 }
@@ -314,15 +283,16 @@ class SynthEngine(private val context: Context) {
     fun stop() {
         isRunning = false
         stopLoopPlayback()
-        audioTrack.stop()
-        audioTrack.release()
+        try {
+            audioTrack.stop()
+            audioTrack.release()
+        } catch (_: Exception) {}
     }
 
     fun getEffectiveFrequency(baseFreq: Float): Float {
         return baseFreq * Math.pow(2.0, octaveShift.toDouble()).toFloat()
     }
 
-    // עדכון סוג הגל בזמן אמת לנגינה חיה בלבד
     fun setLiveWaveform(wave: Int) {
         waveformType = wave
         noteSlots.filter { it.active && !it.isLooperNote }.forEach { it.waveform = wave }
@@ -361,7 +331,6 @@ class SynthEngine(private val context: Context) {
         if (slot != null) {
             slot.isReleasing = false
             slot.targetFreq = freq
-            // עדכון סוג הגל גם בתו אקטיבי שמתחדש
             slot.waveform = wave ?: waveformType
             slot.active = true
             if (slot.envelopeVolume < 0.001) {
@@ -370,23 +339,12 @@ class SynthEngine(private val context: Context) {
             return
         }
 
-        // Voice Stealing
         slot = noteSlots.find { !it.active }
-
-        if (slot == null) {
-            slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
-        }
-
-        if (slot == null) {
-            slot = noteSlots.filter { !it.isLooperNote }.minByOrNull { it.envelopeVolume }
-        }
-
-        if (slot == null) {
-            slot = noteSlots.minByOrNull { it.envelopeVolume }
-        }
+            ?: noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
+            ?: noteSlots.filter { !it.isLooperNote }.minByOrNull { it.envelopeVolume }
+            ?: noteSlots.minByOrNull { it.envelopeVolume }
 
         if (slot != null) {
-            // חישוב Glide: גלישה מתדר התו הקודם במידה ומדובר בנגינה חיה ו-Glide פועל
             val startFreq = if (!isLooper && glideMs > 0f) lastPlayedFreq else freq
             if (!isLooper) lastPlayedFreq = freq
 
@@ -512,7 +470,6 @@ class SynthEngine(private val context: Context) {
             recordingQueue.clear()
             isRecording = true
 
-            // Thread ייעודי בקידומת נמוכה לטיפול בכתיבה לקובץ ברקע
             recordingWriterThread = Thread {
                 while (isRecording || recordingQueue.isNotEmpty()) {
                     try {
@@ -535,7 +492,6 @@ class SynthEngine(private val context: Context) {
         if (!isRecording) return wavFile
         isRecording = false
         try {
-            // המתנה קצרה לסיום ריקון התור לדיסק
             recordingWriterThread?.join(1000)
             recordingWriterThread = null
             val stream = recordedAudioStream
@@ -829,7 +785,6 @@ fun SynthAppUI(engine: SynthEngine) {
             .padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- HEADER ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -874,7 +829,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- OSCILLOSCOPE ---
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -934,7 +888,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(6.dp))
 
-        // --- TABS ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -965,7 +918,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(6.dp))
 
-        // --- TAB CONTENT ---
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1131,7 +1083,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(6.dp))
 
-        // --- KEYBOARD ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1184,7 +1135,6 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 }
 
-// רכיב סליידר משודרג המאפשר גם הזנה ידנית בלחיצה על הטקסט המספרי
 @Composable
 fun SynthSlider(
     label: String,
@@ -1241,8 +1191,6 @@ fun SynthSlider(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-
-            // לחיצה על הערך המספרי פותחת דיאלוג להזנה ידנית
             Text(
                 text = valueDisplay,
                 color = accentColor,
