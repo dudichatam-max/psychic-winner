@@ -110,7 +110,7 @@ data class LooperNoteEvent(
 
 class SynthEngine(private val context: Context) {
     var sampleRate: Int = 44100
-    private var bufferSizeFrames: Int = 256
+    private var bufferSizeFrames: Int = 512
     private val dspEngine: DspEngine
     @Volatile private var isRunning = true
 
@@ -200,7 +200,7 @@ class SynthEngine(private val context: Context) {
         Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
 
-            val bufferSize = 256
+            val bufferSize = 512
             val buffer = ShortArray(bufferSize)
             val byteBuffer = ByteBuffer.allocate(bufferSize * 2).order(ByteOrder.LITTLE_ENDIAN)
 
