@@ -317,6 +317,7 @@ fun SynthAppUI(engine: SynthEngine) {
     val defaultFrequencies = remember { listOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 475.00f) }
     val frequencies = remember { mutableStateListOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 475.00f) }
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
+    val waveNames = listOf("Sine", "Square", "Triangle", "Saw", "Noise", "Pulse")
 
     var showTuningDialog by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -353,7 +354,6 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-    // טעינת פריסט ראשונית בבטחה
     LaunchedEffect(Unit) {
         if (prefs.getBoolean("p_1_exists", false)) {
             vol = prefs.getFloat("p_1_vol", 0.5f); engine.volume = vol
@@ -491,7 +491,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         Text("סוג גל", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(2.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            listOf("Sine", "Square", "Triangle", "Saw", "Noise", "Pulse").forEachIndexed { index, name ->
+                            itemsIndexed(waveNames) { index, name ->
                                 val id = if (index == 5) 5 else index
                                 FilterChip(
                                     selected = currentWave == id,
