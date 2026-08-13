@@ -17,6 +17,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
     private var delayWritePos = 0
     private var dcX1 = 0.0
     private var dcY1 = 0.0
+    private var delayFilterState = 0.0
     private var currentHeadroom = 1.0
 
     // החלקת פרמטרים גלובלית למניעת Zipper Noise
@@ -155,15 +156,21 @@ class DspEngine(private val sampleRate: Int = 44100) {
         var totalSample = (liveChannelMix * smoothedLiveVol) + (looperChannelMix * smoothedLooperVol)
 
         // אפקט דיליי
-        val delaySamples = (sampleRate * 0.25).toInt()
-        val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
-        val echoSample = delayBuffer[delayReadPos].toDouble()
+        // --- דיליי מוזיקלי עם Feedback + סינון ---
+val delaySamples = (sampleRate * 0.28).toInt()  // קצת יותר ארוך
+val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
+var echoSample = delayBuffer[delayReadPos].toDouble()
 
-        delayBuffer[delayWritePos] = (totalSample + echoSample * 0.35).toFloat()
-        delayWritePos = (delayWritePos + 1) % delayBuffer.size
+// סינון עדין על ההד (Low-pass) כדי שיהיה יותר חם
+echoSample = echoSample * 0.82 + delayFilterState * 0.18
+delayFilterState = echoSample
 
-        totalSample += echoSample * smoothedEchoMix
+// Feedback נעים (לא מתכתי)
+val feedback = 0.42
+delayBuffer[delayWritePos] = (totalSample + echoSample * feedback).toFloat()
+delayWritePos = (delayWritePos + 1) % delayBuffer.size
 
+totalSample += echoSample * smoothedEchoMix
         // DC Blocker
         val dcSample = totalSample - dcX1 + 0.995 * dcY1
         dcX1 = totalSample
