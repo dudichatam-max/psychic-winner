@@ -677,37 +677,3 @@ fun CompactSlider(
         )
     }
 }
-        )
-    }
-
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text(text = label, color = color) },
-            text = {
-                OutlinedTextField(
-                    value = textValue,
-                    onValueChange = { textValue = it },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    val parsed = textValue.toFloatOrNull()
-                    if (parsed != null) {
-                        onChange(parsed.coerceIn(range.start, range.endInclusive))
-                    }
-                    showDialog = false
-                }) {
-                    Text("אישור")
-                }
-            },
-            dismissButton = {
-                Button(onClick = { showDialog = false }) {
-                    Text("ביטול")
-                }
-            }
-        )
-    }
-}
