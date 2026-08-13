@@ -413,8 +413,13 @@ fun SynthAppUI(engine: SynthEngine) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(noteNames[index], color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(4.dp))
-                            OutlinedTextField(value = freq.toString(), onValueChange = { it.toFloatOrNull()?.let { v -> frequencies[index] = v } },
-                                modifier = Modifier.width(68.dp), singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = Color.White))
+                            OutlinedTextField(
+                                value = freq.toString(),
+                                onValueChange = { it.toFloatOrNull()?.let { v -> frequencies[index] = v } },
+                                modifier = Modifier.width(68.dp),
+                                singleLine = true,
+                                textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = Color.White)
+                            )
                         }
                     }
                 }
@@ -428,15 +433,29 @@ fun SynthAppUI(engine: SynthEngine) {
         Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
             Text("SIREN", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick = { showTuningDialog = true }, contentPadding = PaddingValues(8.dp, 2.dp), modifier = Modifier.height(30.dp),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))) {
+                OutlinedButton(
+                    onClick = { showTuningDialog = true },
+                    contentPadding = PaddingValues(8.dp, 2.dp),
+                    modifier = Modifier.height(30.dp),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
+                ) {
                     Text("⚙️ תדרים", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
-                Button(onClick = {
-                    if (isRec) { engine.stopAndSaveRecording(); isRec = false; createWavLauncher.launch("Siren_${System.currentTimeMillis()}.wav") }
-                    else { engine.startRecording(); isRec = true }
-                }, colors = ButtonDefaults.buttonColors(containerColor = if (isRec) Color(0xFFFF1744) else panelBg2),
-                    contentPadding = PaddingValues(10.dp, 2.dp), modifier = Modifier.height(30.dp)) {
+                Button(
+                    onClick = {
+                        if (isRec) {
+                            engine.stopAndSaveRecording()
+                            isRec = false
+                            createWavLauncher.launch("Siren_${System.currentTimeMillis()}.wav")
+                        } else {
+                            engine.startRecording()
+                            isRec = true
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = if (isRec) Color(0xFFFF1744) else panelBg2),
+                    contentPadding = PaddingValues(10.dp, 2.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
                     Box(Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, CircleShape))
                     Spacer(Modifier.width(4.dp))
                     Text(if (isRec) "שמור" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -446,19 +465,23 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Box(Modifier.fillMaxWidth().height(100.dp).background(panelBg, RoundedCornerShape(8.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(8.dp)).padding(3.dp)) {
             Canvas(Modifier.fillMaxSize()) {
-                val w = size.width; val h = size.height; val halfH = h / 2f
+                val w = size.width
+                val h = size.height
+                val halfH = h / 2f
                 for (i in 1 until 8) drawLine(Color(0xFF1F1F1F), Offset(w * i / 8f, 0f), Offset(w * i / 8f, h), 1f)
                 drawLine(Color(0xFF2A2A2A), Offset(0f, halfH), Offset(w, halfH), 1.5f)
                 val livePath = Path()
                 val step = w / engine.liveVisualizerBuffer.size
                 engine.liveVisualizerBuffer.forEachIndexed { i, s ->
-                    val x = i * step; val y = halfH / 2 + s * halfH / 2 * 0.85f
+                    val x = i * step
+                    val y = halfH / 2 + s * halfH / 2 * 0.85f
                     if (i == 0) livePath.moveTo(x, y) else livePath.lineTo(x, y)
                 }
                 drawPath(livePath, gold, style = Stroke(2.2f))
                 val loopPath = Path()
                 engine.looperVisualizerBuffer.forEachIndexed { i, s ->
-                    val x = i * step; val y = halfH + halfH / 2 + s * halfH / 2 * 0.85f
+                    val x = i * step
+                    val y = halfH + halfH / 2 + s * halfH / 2 * 0.85f
                     if (i == 0) loopPath.moveTo(x, y) else loopPath.lineTo(x, y)
                 }
                 drawPath(loopPath, Color.White.copy(0.65f), style = Stroke(2.2f))
@@ -473,9 +496,13 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Row(Modifier.fillMaxWidth().background(panelBg, RoundedCornerShape(7.dp)).padding(2.dp), Arrangement.SpaceBetween) {
             listOf("סאונד", "פילטר+FX", "לופר").forEachIndexed { index, title ->
-                Button(onClick = { selectedTab = index },
+                Button(
+                    onClick = { selectedTab = index },
                     colors = ButtonDefaults.buttonColors(containerColor = if (selectedTab == index) panelBg2 else Color.Transparent),
-                    shape = RoundedCornerShape(5.dp), contentPadding = PaddingValues(vertical = 3.dp), modifier = Modifier.weight(1f)) {
+                    shape = RoundedCornerShape(5.dp),
+                    contentPadding = PaddingValues(vertical = 3.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
                     Text(title, color = if (selectedTab == index) gold else Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
@@ -492,73 +519,97 @@ fun SynthAppUI(engine: SynthEngine) {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                             listOf("Sine", "Square", "Triangle", "Saw", "Noise", "Pulse").forEachIndexed { index, name ->
                                 val id = if (index == 5) 5 else index
-                                FilterChip(selected = currentWave == id, onClick = { currentWave = id; engine.waveformType = id },
+                                FilterChip(
+                                    selected = currentWave == id,
+                                    onClick = { currentWave = id; engine.waveformType = id },
                                     label = { Text(name, fontSize = 9.sp) },
                                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = gold, selectedLabelColor = Color.Black),
-                                    modifier = Modifier.height(28.dp))
+                                    modifier = Modifier.height(28.dp)
+                                )
                             }
                         }
                     }
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedButton(onClick = { if (currentOctave > -2) { currentOctave--; engine.octaveShift = currentOctave } },
-                                contentPadding = PaddingValues(4.dp, 1.dp), modifier = Modifier.height(26.dp)) { Text("-1", fontSize = 9.sp, color = Color.White) }
+                            OutlinedButton(
+                                onClick = { if (currentOctave > -2) { currentOctave--; engine.octaveShift = currentOctave } },
+                                contentPadding = PaddingValues(4.dp, 1.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) { Text("-1", fontSize = 9.sp, color = Color.White) }
                             Text(" $currentOctave ", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            OutlinedButton(onClick = { if (currentOctave < 2) { currentOctave++; engine.octaveShift = currentOctave } },
-                                contentPadding = PaddingValues(4.dp, 1.dp), modifier = Modifier.height(26.dp)) { Text("+1", fontSize = 9.sp, color = Color.White) }
+                            OutlinedButton(
+                                onClick = { if (currentOctave < 2) { currentOctave++; engine.octaveShift = currentOctave } },
+                                contentPadding = PaddingValues(4.dp, 1.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) { Text("+1", fontSize = 9.sp, color = Color.White) }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
                             (1..4).forEach { slot ->
-                                Button(onClick = { selectedPresetSlot = slot; loadPresetFromSlot(slot) },
+                                Button(
+                                    onClick = { selectedPresetSlot = slot; loadPresetFromSlot(slot) },
                                     colors = ButtonDefaults.buttonColors(containerColor = if (selectedPresetSlot == slot) gold else panelBg2),
-                                    contentPadding = PaddingValues(0.dp), modifier = Modifier.size(24.dp)) {
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.size(24.dp)
+                                ) {
                                     Text("$slot", fontSize = 9.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
                                 }
                             }
-                            Button(onClick = { savePresetToSlot(selectedPresetSlot) }, colors = ButtonDefaults.buttonColors(containerColor = gold),
-                                contentPadding = PaddingValues(5.dp, 1.dp), modifier = Modifier.height(24.dp)) {
+                            Button(
+                                onClick = { savePresetToSlot(selectedPresetSlot) },
+                                colors = ButtonDefaults.buttonColors(containerColor = gold),
+                                contentPadding = PaddingValues(5.dp, 1.dp),
+                                modifier = Modifier.height(24.dp)
+                            ) {
                                 Text("שמור", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
-                    CompactSlider("ווליום", vol, 0f..1f, "${(vol*100).toInt()}%", gold) { vol = it; engine.volume = it }
+                    CompactSlider("ווליום", vol, 0f..1f, "${(vol * 100).toInt()}%", gold) { vol = it; engine.volume = it }
                     CompactSlider("Attack", attackVal, 5f..500f, "${attackVal.toInt()}ms", gold) { attackVal = it; engine.attackMs = it }
-                    CompactSlider("Sustain", sustainVal, 0f..1f, "${(sustainVal*100).toInt()}%", gold) { sustainVal = it; engine.sustainLevel = it }
+                    CompactSlider("Sustain", sustainVal, 0f..1f, "${(sustainVal * 100).toInt()}%", gold) { sustainVal = it; engine.sustainLevel = it }
                     CompactSlider("Release", releaseVal, 20f..2000f, "${releaseVal.toInt()}ms", gold) { releaseVal = it; engine.releaseMs = it }
-                    CompactSlider("Pulse Width", pulseWidthVal, 0.05f..0.95f, "${(pulseWidthVal*100).toInt()}%", gold) { pulseWidthVal = it; engine.pulseWidth = it }
-                    CompactSlider("Sub Osc", subVal, 0f..1f, "${(subVal*100).toInt()}%", gold) { subVal = it; engine.subLevel = it }
+                    CompactSlider("Pulse Width", pulseWidthVal, 0.05f..0.95f, "${(pulseWidthVal * 100).toInt()}%", gold) { pulseWidthVal = it; engine.pulseWidth = it }
+                    CompactSlider("Sub Osc", subVal, 0f..1f, "${(subVal * 100).toInt()}%", gold) { subVal = it; engine.subLevel = it }
                 }
                 1 -> Column(Modifier.fillMaxSize(), Arrangement.SpaceEvenly) {
                     CompactSlider("Cutoff", cutoffVal, 200f..12000f, "${cutoffVal.toInt()}Hz", gold) { cutoffVal = it; engine.cutoffFreq = it }
-                    CompactSlider("Resonance", resVal, 0f..0.9f, "${(resVal*100).toInt()}%", gold) { resVal = it; engine.resonance = it }
-                    CompactSlider("Echo", echoVal, 0f..0.6f, "${(echoVal*100).toInt()}%", gold) { echoVal = it; engine.echoMix = it }
+                    CompactSlider("Resonance", resVal, 0f..0.9f, "${(resVal * 100).toInt()}%", gold) { resVal = it; engine.resonance = it }
+                    CompactSlider("Echo", echoVal, 0f..0.6f, "${(echoVal * 100).toInt()}%", gold) { echoVal = it; engine.echoMix = it }
                     CompactSlider("Glide", glideVal, 0f..200f, "${glideVal.toInt()}ms", gold) { glideVal = it; engine.glideMs = it }
-                    CompactSlider("Drive", driveVal, 0f..1f, "${(driveVal*100).toInt()}%", gold) { driveVal = it; engine.driveAmount = it }
+                    CompactSlider("Drive", driveVal, 0f..1f, "${(driveVal * 100).toInt()}%", gold) { driveVal = it; engine.driveAmount = it }
                     CompactSlider("LFO Rate", lfoRateVal, 0f..12f, String.format("%.1f", lfoRateVal) + "Hz", gold) { lfoRateVal = it; engine.lfoRate = it }
-                    CompactSlider("LFO Amount", lfoAmountVal, 0f..1f, "${(lfoAmountVal*100).toInt()}%", gold) { lfoAmountVal = it; engine.lfoAmount = it }
+                    CompactSlider("LFO Amount", lfoAmountVal, 0f..1f, "${(lfoAmountVal * 100).toInt()}%", gold) { lfoAmountVal = it; engine.lfoAmount = it }
                 }
                 2 -> Column(Modifier.fillMaxSize(), Arrangement.SpaceEvenly) {
-                    CompactSlider("Looper Vol", looperVolState, 0f..1f, "${(looperVolState*100).toInt()}%", gold) { looperVolState = it; engine.looperVolume = it }
+                    CompactSlider("Looper Vol", looperVolState, 0f..1f, "${(looperVolState * 100).toInt()}%", gold) { looperVolState = it; engine.looperVolume = it }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Button(onClick = {
-                            if (isLoopRecState) { engine.stopLoopRecording(); isLoopRecState = false }
-                            else { engine.startLoopRecording(); isLoopRecState = true; isLoopPlayState = false }
-                        }, colors = ButtonDefaults.buttonColors(containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2),
-                            modifier = Modifier.weight(1f).height(42.dp)) {
+                        Button(
+                            onClick = {
+                                if (isLoopRecState) { engine.stopLoopRecording(); isLoopRecState = false }
+                                else { engine.startLoopRecording(); isLoopRecState = true; isLoopPlayState = false }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2),
+                            modifier = Modifier.weight(1f).height(42.dp)
+                        ) {
                             Text(if (isLoopRecState) "עצור" else "הקלט לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
-                        Button(onClick = {
-                            if (isLoopPlayState) { engine.stopLoopPlayback(); isLoopPlayState = false }
-                            else { engine.startLoopPlayback(); isLoopPlayState = true }
-                        }, enabled = engine.recordedNotes.isNotEmpty() && !isLoopRecState,
+                        Button(
+                            onClick = {
+                                if (isLoopPlayState) { engine.stopLoopPlayback(); isLoopPlayState = false }
+                                else { engine.startLoopPlayback(); isLoopPlayState = true }
+                            },
+                            enabled = engine.recordedNotes.isNotEmpty() && !isLoopRecState,
                             colors = ButtonDefaults.buttonColors(containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2),
-                            modifier = Modifier.weight(1f).height(42.dp)) {
+                            modifier = Modifier.weight(1f).height(42.dp)
+                        ) {
                             Text(if (isLoopPlayState) "עצור" else "נגן לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-                    OutlinedButton(onClick = { engine.clearLoop(); isLoopRecState = false; isLoopPlayState = false },
+                    OutlinedButton(
+                        onClick = { engine.clearLoop(); isLoopRecState = false; isLoopPlayState = false },
                         modifier = Modifier.fillMaxWidth().height(38.dp),
-                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))) {
+                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
+                    ) {
                         Text("נקה לופר", color = Color.Gray, fontSize = 11.sp)
                     }
                 }
@@ -570,13 +621,19 @@ fun SynthAppUI(engine: SynthEngine) {
         Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             frequencies.forEachIndexed { index, freq ->
                 var isPressed by remember { mutableStateOf(false) }
-                Card(shape = RoundedCornerShape(bottomStart = 7.dp, bottomEnd = 7.dp, topStart = 3.dp, topEnd = 3.dp),
+                Card(
+                    shape = RoundedCornerShape(bottomStart = 7.dp, bottomEnd = 7.dp, topStart = 3.dp, topEnd = 3.dp),
                     colors = CardDefaults.cardColors(containerColor = if (isPressed) gold else Color(0xFFE8E8E8)),
                     modifier = Modifier.weight(1f).fillMaxHeight().pointerInput(freq) {
                         detectTapGestures(onPress = {
-                            isPressed = true; engine.noteOn(freq); tryAwaitRelease(); engine.noteOff(freq); isPressed = false
+                            isPressed = true
+                            engine.noteOn(freq)
+                            tryAwaitRelease()
+                            engine.noteOff(freq)
+                            isPressed = false
                         })
-                    }) {
+                    }
+                ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 7.dp)) {
                             Text(noteNames[index], color = if (isPressed) Color.Black else Color(0xFF1A1A1A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -601,34 +658,12 @@ fun CompactSlider(
     var showDialog by remember { mutableStateOf(false) }
     var textValue by remember { mutableStateOf("") }
 
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text(label, color = color) },
-            text = {
-                OutlinedTextField(
-                    value = textValue,
-                    onValueChange = { textValue = it },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    textValue.toFloatOrNull()?.let { v ->
-                        onChange(v.coerceIn(range.start, range.endInclusive))
-                    }
-                    showDialog = false
-                }) { Text("אישור") }
-            },
-            dismissButton = {
-                Button(onClick = { showDialog = false }) { Text("ביטול") }
-            }
-        )
-    }
-
     Column(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             Text(
                 text = display,
@@ -645,8 +680,43 @@ fun CompactSlider(
             value = value,
             onValueChange = onChange,
             valueRange = range,
-            colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color, inactiveTrackColor = Color(0xFF2A2A2A)),
+            colors = SliderDefaults.colors(
+                thumbColor = color,
+                activeTrackColor = color,
+                inactiveTrackColor = Color(0xFF2A2A2A)
+            ),
             modifier = Modifier.height(20.dp)
+        )
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(text = label, color = color) },
+            text = {
+                OutlinedTextField(
+                    value = textValue,
+                    onValueChange = { textValue = it },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val parsed = textValue.toFloatOrNull()
+                    if (parsed != null) {
+                        onChange(parsed.coerceIn(range.start, range.endInclusive))
+                    }
+                    showDialog = false
+                }) {
+                    Text("אישור")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showDialog = false }) {
+                    Text("ביטול")
+                }
+            }
         )
     }
 }
