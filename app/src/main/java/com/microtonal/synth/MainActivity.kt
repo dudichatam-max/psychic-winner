@@ -77,7 +77,6 @@ class NoteSlot {
     var frozenSustain: Float = 0.8f
     var frozenRelease: Float = 200f
 
-    // משתנים מעודכנים עבור פילטר ה-ZDF והחלקת הסאונד
     var zdfState1: Double = 0.0
     var zdfState2: Double = 0.0
     var smoothedCutoff: Float = 5000f
@@ -252,29 +251,17 @@ class SynthEngine(private val context: Context) {
             return
         }
 
-        // 1. חיפוש ערוץ פנוי
-slot = noteSlots.find { !it.active }
+        // Voice Stealing משופר
+        slot = noteSlots.find { !it.active }
 
-// 2. אם הכל תפוס – קודם כל גנוב קול שכבר בדעיכה (Release) והכי חלש
-if (slot == null) {
-    slot = noteSlots
-        .filter { it.isReleasing }
-        .minByOrNull { it.envelopeVolume }
-}
+        if (slot == null) {
+            slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
+        }
 
-// 3. אם עדיין אין – גנוב את הקול הכי חלש שאינו לופר
-if (slot == null) {
-    slot = noteSlots
-        .filter { !it.isLooperNote }
-        .minByOrNull { it.envelopeVolume }
-}
+        if (slot == null) {
+            slot = noteSlots.filter { !it.isLooperNote }.minByOrNull { it.envelopeVolume }
+        }
 
-// 4. במקרה קיצון – גנוב את הקול הכי חלש בכלל
-if (slot == null) {
-    slot = noteSlots.minByOrNull { it.envelopeVolume }
-}
-
-        // 3. אם עדיין אין ערוץ, גנוב את התו החלש ביותר באופן כללי
         if (slot == null) {
             slot = noteSlots.minByOrNull { it.envelopeVolume }
         }
@@ -294,8 +281,6 @@ if (slot == null) {
             slot.frozenAttack = attack ?: attackMs
             slot.frozenSustain = sustain ?: sustainLevel
             slot.frozenRelease = release ?: releaseMs
-            
-            // איפוס פילטר ה-ZDF המשודרג
             slot.zdfState1 = 0.0
             slot.zdfState2 = 0.0
         }
@@ -472,7 +457,7 @@ if (slot == null) {
         header[29] = (byteRate shr 8 and 0xff).toByte()
         header[30] = (byteRate shr 16 and 0xff).toByte()
         header[31] = (byteRate shr 24 and 0xff).toByte()
-        header[32] = (1 * 16 / 8).toByte()
+        header[32] = (2).toByte()
         header[33] = 0
         header[34] = 16
         header[35] = 0
@@ -546,6 +531,11 @@ fun SynthAppUI(engine: SynthEngine) {
 
     var selectedPresetSlot by remember { mutableIntStateOf(1) }
 
+    val gold = Color(0xFFD4AF37)
+    val darkBg = Color(0xFF0A0A0A)
+    val panelBg = Color(0xFF141414)
+    val panelBg2 = Color(0xFF1A1A1A)
+
     val createWavLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("audio/wav")
     ) { uri ->
@@ -567,25 +557,18 @@ fun SynthAppUI(engine: SynthEngine) {
 
         vol = prefs.getFloat("p_${slot}_vol", 0.5f)
         engine.volume = vol
-
         attackVal = prefs.getFloat("p_${slot}_attack", 15f)
         engine.attackMs = attackVal
-
         sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f)
         engine.sustainLevel = sustainVal
-
         releaseVal = prefs.getFloat("p_${slot}_release", 200f)
         engine.releaseMs = releaseVal
-
         cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f)
         engine.cutoffFreq = cutoffVal
-
         resVal = prefs.getFloat("p_${slot}_res", 0.3f)
         engine.resonance = resVal
-
         echoVal = prefs.getFloat("p_${slot}_echo", 0.25f)
         engine.echoMix = echoVal
-
         glideVal = prefs.getFloat("p_${slot}_glide", 30f)
         engine.glideMs = glideVal
 
@@ -637,11 +620,11 @@ fun SynthAppUI(engine: SynthEngine) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("כיוון תדרים (Hz)", fontSize = 14.sp, color = Color(0xFFFFD700), fontWeight = FontWeight.Bold)
+                    Text("כיוון תדרים (Hz)", fontSize = 14.sp, color = gold, fontWeight = FontWeight.Bold)
                     OutlinedButton(
                         onClick = { defaultFrequencies.forEachIndexed { i, f -> frequencies[i] = f } },
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                    ) { Text("איפוס", color = Color(0xFFFFD700), fontSize = 9.sp) }
+                    ) { Text("איפוס", color = gold, fontSize = 9.sp) }
                 }
             },
             text = {
@@ -671,14 +654,14 @@ fun SynthAppUI(engine: SynthEngine) {
                     Text("סגור")
                 }
             },
-            containerColor = Color(0xFF1E1E1E)
+            containerColor = panelBg2
         )
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0A0A))
+            .background(darkBg)
             .padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -690,16 +673,16 @@ fun SynthAppUI(engine: SynthEngine) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("SIREN", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("SIREN", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(
                     onClick = { showTuningDialog = true },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                     modifier = Modifier.height(32.dp),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFFFD700)))
+                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
                 ) {
-                    Text("⚙️ תדרים", color = Color(0xFFFFD700), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("⚙️ תדרים", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Button(
@@ -715,7 +698,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isRec) Color(0xFFFF1744) else Color(0xFF1E2638)
+                        containerColor = if (isRec) Color(0xFFFF1744) else panelBg2
                     ),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     modifier = Modifier.height(32.dp)
@@ -727,13 +710,13 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- STUDIO DUAL-OSCILLOSCOPE DISPLAY ---
+        // --- OSCILLOSCOPE ---
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(125.dp)
-                .background(Color(0xFF080B10), shape = RoundedCornerShape(10.dp))
-                .border(1.dp, Color(0xFF1E2738), shape = RoundedCornerShape(10.dp))
+                .height(120.dp)
+                .background(panelBg, shape = RoundedCornerShape(10.dp))
+                .border(1.dp, Color(0xFF2A2A2A), shape = RoundedCornerShape(10.dp))
                 .padding(4.dp)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -742,20 +725,17 @@ fun SynthAppUI(engine: SynthEngine) {
                 val h = size.height
                 val halfH = h / 2f
 
-                val gridColor = Color(0xFF131D28)
-                val cols = 8
-                val rows = 4
-                for (i in 1 until cols) {
-                    val x = w * (i.toFloat() / cols)
+                val gridColor = Color(0xFF1F1F1F)
+                for (i in 1 until 8) {
+                    val x = w * (i.toFloat() / 8)
                     drawLine(gridColor, start = Offset(x, 0f), end = Offset(x, h), strokeWidth = 1f)
                 }
-                for (i in 1 until rows) {
-                    val y = h * (i.toFloat() / rows)
+                for (i in 1 until 4) {
+                    val y = h * (i.toFloat() / 4)
                     drawLine(gridColor, start = Offset(0f, y), end = Offset(w, y), strokeWidth = 1f)
                 }
-                drawLine(Color(0xFF1E2E3E), start = Offset(0f, halfH), end = Offset(w, halfH), strokeWidth = 1.5f)
+                drawLine(Color(0xFF2A2A2A), start = Offset(0f, halfH), end = Offset(w, halfH), strokeWidth = 1.5f)
 
-                // Live Visualizer (Neon Cyan)
                 val livePath = Path()
                 val liveCenterY = halfH / 2f
                 val liveStep = w / engine.liveVisualizerBuffer.size
@@ -764,9 +744,8 @@ fun SynthAppUI(engine: SynthEngine) {
                     val y = liveCenterY + (sample * (halfH / 2f) * 0.85f)
                     if (i == 0) livePath.moveTo(x, y) else livePath.lineTo(x, y)
                 }
-                drawPath(livePath, Color(0xFF00E5FF), style = Stroke(width = 3.5f))
+                drawPath(livePath, gold, style = Stroke(width = 2.5f))
 
-                // Looper Visualizer (Neon Red)
                 val looperPath = Path()
                 val looperCenterY = halfH + (halfH / 2f)
                 val looperStep = w / engine.looperVisualizerBuffer.size
@@ -775,7 +754,7 @@ fun SynthAppUI(engine: SynthEngine) {
                     val y = looperCenterY + (sample * (halfH / 2f) * 0.85f)
                     if (i == 0) looperPath.moveTo(x, y) else looperPath.lineTo(x, y)
                 }
-                drawPath(looperPath, Color(0xFFFF2A55), style = Stroke(width = 3.5f))
+                drawPath(looperPath, Color.White.copy(alpha = 0.7f), style = Stroke(width = 2.5f))
             }
 
             Column(
@@ -784,18 +763,18 @@ fun SynthAppUI(engine: SynthEngine) {
                     .padding(horizontal = 6.dp, vertical = 2.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("LIVE SCOPE", color = Color(0xFF00E5FF).copy(alpha = 0.7f), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                Text("LOOP SCOPE", color = Color(0xFFFF2A55).copy(alpha = 0.7f), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                Text("LIVE SCOPE", color = gold.copy(alpha = 0.8f), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                Text("LOOP SCOPE", color = Color.White.copy(alpha = 0.6f), fontSize = 8.sp, fontWeight = FontWeight.Bold)
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
 
-        // --- TAB SELECTION BAR ---
+        // --- TABS ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF181E2B), shape = RoundedCornerShape(8.dp))
+                .background(panelBg, shape = RoundedCornerShape(8.dp))
                 .padding(3.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -804,7 +783,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 Button(
                     onClick = { selectedTab = index },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (selectedTab == index) Color(0xFF26334A) else Color.Transparent
+                        containerColor = if (selectedTab == index) panelBg2 else Color.Transparent
                     ),
                     shape = RoundedCornerShape(6.dp),
                     contentPadding = PaddingValues(vertical = 4.dp),
@@ -812,7 +791,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 ) {
                     Text(
                         title,
-                        color = if (selectedTab == index) Color(0xFF00E5FF) else Color.Gray,
+                        color = if (selectedTab == index) gold else Color.Gray,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -820,14 +799,14 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
 
-        // --- TAB CONTENT AREA ---
+        // --- TAB CONTENT ---
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .background(Color(0xFF151A24), shape = RoundedCornerShape(10.dp))
+                .background(panelBg, shape = RoundedCornerShape(10.dp))
                 .padding(8.dp)
         ) {
             when (selectedTab) {
@@ -843,7 +822,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                     onClick = { currentWave = index; engine.waveformType = index },
                                     label = { Text(name, fontSize = 10.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = Color(0xFF00E5FF),
+                                        selectedContainerColor = gold,
                                         selectedLabelColor = Color.Black
                                     )
                                 )
@@ -868,7 +847,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                 modifier = Modifier.height(28.dp)
                             ) { Text("-1 Oct", fontSize = 9.sp, color = Color.White) }
 
-                            Text(" Oct: $currentOctave ", color = Color.Yellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(" Oct: $currentOctave ", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 
                             OutlinedButton(
                                 onClick = {
@@ -890,7 +869,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                         loadPresetFromSlot(slot)
                                     },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (selectedPresetSlot == slot) Color(0xFF00E5FF) else Color(0xFF26334A)
+                                        containerColor = if (selectedPresetSlot == slot) gold else panelBg2
                                     ),
                                     contentPadding = PaddingValues(0.dp),
                                     modifier = Modifier.size(26.dp)
@@ -900,105 +879,35 @@ fun SynthAppUI(engine: SynthEngine) {
                             }
                             Button(
                                 onClick = { savePresetToSlot(selectedPresetSlot) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFAB47BC)),
+                                colors = ButtonDefaults.buttonColors(containerColor = gold),
                                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
                                 modifier = Modifier.height(26.dp)
                             ) {
-                                Text("שמור", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                Text("שמור", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
 
-                    SynthSlider(
-                        label = "ווליום נגינה",
-                        valueDisplay = "${(vol * 100).toInt()}%",
-                        value = vol,
-                        accentColor = Color.White,
-                        onValueChange = { vol = it; engine.volume = it }
-                    )
-
-                    SynthSlider(
-                        label = "Attack (התקפה)",
-                        valueDisplay = "${attackVal.toInt()}ms",
-                        value = attackVal,
-                        valueRange = 5f..500f,
-                        accentColor = Color(0xFF00E5FF),
-                        onValueChange = { attackVal = it; engine.attackMs = it }
-                    )
-
-                    SynthSlider(
-                        label = "Sustain (החזקה)",
-                        valueDisplay = "${(sustainVal * 100).toInt()}%",
-                        value = sustainVal,
-                        valueRange = 0f..1f,
-                        accentColor = Color(0xFF00FF66),
-                        onValueChange = { sustainVal = it; engine.sustainLevel = it }
-                    )
-
-                    SynthSlider(
-                        label = "Release (דעיכה)",
-                        valueDisplay = "${releaseVal.toInt()}ms",
-                        value = releaseVal,
-                        valueRange = 20f..2000f,
-                        accentColor = Color(0xFFFFD700),
-                        onValueChange = { releaseVal = it; engine.releaseMs = it }
-                    )
+                    SynthSlider("ווליום נגינה", "${(vol * 100).toInt()}%", vol, accentColor = gold) { vol = it; engine.volume = it }
+                    SynthSlider("Attack (התקפה)", "${attackVal.toInt()}ms", attackVal, 5f..500f, gold) { attackVal = it; engine.attackMs = it }
+                    SynthSlider("Sustain (החזקה)", "${(sustainVal * 100).toInt()}%", sustainVal, 0f..1f, gold) { sustainVal = it; engine.sustainLevel = it }
+                    SynthSlider("Release (דעיכה)", "${releaseVal.toInt()}ms", releaseVal, 20f..2000f, gold) { releaseVal = it; engine.releaseMs = it }
                 }
 
                 1 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
-                    SynthSlider(
-                        label = "Cutoff (חיתוך תדרים)",
-                        valueDisplay = "${cutoffVal.toInt()}Hz",
-                        value = cutoffVal,
-                        valueRange = 200f..12000f,
-                        accentColor = Color(0xFFFF7043),
-                        onValueChange = { cutoffVal = it; engine.cutoffFreq = it }
-                    )
-
-                    SynthSlider(
-                        label = "Resonance (תהודה)",
-                        valueDisplay = "${(resVal * 100).toInt()}%",
-                        value = resVal,
-                        valueRange = 0f..0.9f,
-                        accentColor = Color(0xFFFF4081),
-                        onValueChange = { resVal = it; engine.resonance = it }
-                    )
-
-                    SynthSlider(
-                        label = "Echo Mix (דיליי)",
-                        valueDisplay = "${(echoVal * 100).toInt()}%",
-                        value = echoVal,
-                        valueRange = 0f..0.6f,
-                        accentColor = Color(0xFFAB47BC),
-                        onValueChange = { echoVal = it; engine.echoMix = it }
-                    )
-
-                    SynthSlider(
-                        label = "Glide (פליסנדו בין תווים)",
-                        valueDisplay = "${glideVal.toInt()}ms",
-                        value = glideVal,
-                        valueRange = 0f..200f,
-                        accentColor = Color(0xFF26C6DA),
-                        onValueChange = { glideVal = it; engine.glideMs = it }
-                    )
+                    SynthSlider("Cutoff (חיתוך תדרים)", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
+                    SynthSlider("Resonance (תהודה)", "${(resVal * 100).toInt()}%", resVal, 0f..0.9f, gold) { resVal = it; engine.resonance = it }
+                    SynthSlider("Echo Mix (דיליי)", "${(echoVal * 100).toInt()}%", echoVal, 0f..0.6f, gold) { echoVal = it; engine.echoMix = it }
+                    SynthSlider("Glide (פליסנדו)", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
                 }
 
                 2 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
-                    SynthSlider(
-                        label = "עוצמת הלופר",
-                        valueDisplay = "${(looperVolState * 100).toInt()}%",
-                        value = looperVolState,
-                        accentColor = Color(0xFFFF2A55),
-                        onValueChange = {
-                            looperVolState = it
-                            engine.looperVolume = it
-                        }
-                    )
+                    SynthSlider("עוצמת הלופר", "${(looperVolState * 100).toInt()}%", looperVolState, accentColor = gold) {
+                        looperVolState = it
+                        engine.looperVolume = it
+                    }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = {
                                 if (isLoopRecState) {
@@ -1011,7 +920,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isLoopRecState) Color(0xFFFF5252) else Color(0xFF26334A)
+                                containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2
                             ),
                             modifier = Modifier.weight(1f).height(48.dp)
                         ) {
@@ -1030,7 +939,7 @@ fun SynthAppUI(engine: SynthEngine) {
                             },
                             enabled = engine.recordedNotes.isNotEmpty() && !isLoopRecState,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isLoopPlayState) Color(0xFF00C853) else Color(0xFF0288D1)
+                                containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2
                             ),
                             modifier = Modifier.weight(1f).height(48.dp)
                         ) {
@@ -1053,13 +962,13 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
 
-        // --- FIXED KEYBOARD AT BOTTOM ---
+        // --- KEYBOARD (גדול יותר) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(110.dp),
+                .height(155.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             frequencies.forEachIndexed { index, freq ->
@@ -1067,7 +976,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 Card(
                     shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp, topStart = 4.dp, topEnd = 4.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (isPressed) Color(0xFF00E5FF) else Color(0xFFE2E8F0)
+                        containerColor = if (isPressed) gold else Color(0xFFE8E8E8)
                     ),
                     modifier = Modifier
                         .weight(1f)
@@ -1087,19 +996,18 @@ fun SynthAppUI(engine: SynthEngine) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(bottom = 6.dp)
+                            modifier = Modifier.padding(bottom = 8.dp)
                         ) {
                             Text(
                                 text = noteNames[index],
-                                color = if (isPressed) Color.Black else Color(0xFF1E293B),
+                                color = if (isPressed) Color.Black else Color(0xFF1A1A1A),
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
+                                fontSize = 13.sp
                             )
                             Text(
                                 text = "${engine.getEffectiveFrequency(freq).toInt()}Hz",
-                                color = if (isPressed) Color.Black.copy(alpha = 0.7f) else Color(0xFF64748B),
-                                fontWeight = FontWeight.Normal,
-                                fontSize = 8.sp
+                                color = if (isPressed) Color.Black.copy(alpha = 0.7f) else Color(0xFF555555),
+                                fontSize = 9.sp
                             )
                         }
                     }
@@ -1115,10 +1023,10 @@ fun SynthSlider(
     valueDisplay: String,
     value: Float,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
-    accentColor: Color = Color(0xFF00E5FF),
+    accentColor: Color = Color(0xFFD4AF37),
     onValueChange: (Float) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 0.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
@@ -1133,7 +1041,7 @@ fun SynthSlider(
             colors = SliderDefaults.colors(
                 thumbColor = accentColor,
                 activeTrackColor = accentColor,
-                inactiveTrackColor = Color(0xFF26334A)
+                inactiveTrackColor = Color(0xFF2A2A2A)
             )
         )
     }
