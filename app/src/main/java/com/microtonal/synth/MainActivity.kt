@@ -613,7 +613,7 @@ fun SynthAppUI(engine: SynthEngine) {
 }
 
 @Composable
-fun CompactSlider(
+fun CompactSlider2(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
