@@ -236,81 +236,93 @@ class SynthEngine(private val context: Context) {
         return baseFreq * Math.pow(2.0, octaveShift.toDouble()).toFloat()
     }
 
+    
     fun noteOn(
-        baseFreq: Float,
-        isLooper: Boolean = false,
-        wave: Int? = null,
-        cutoff: Float? = null,
-        res: Float? = null,
-        attack: Float? = null,
-        sustain: Float? = null,
-        release: Float? = null
-    ) {
-        val freq = getEffectiveFrequency(baseFreq)
+    baseFreq: Float,
+    isLooper: Boolean = false,
+    wave: Int? = null,
+    cutoff: Float? = null,
+    res: Float? = null,
+    attack: Float? = null,
+    sustain: Float? = null,
+    release: Float? = null
+) {
+    val freq = getEffectiveFrequency(baseFreq)
 
-        if (isLoopRecording && !isLooper) {
-            val now = System.currentTimeMillis() - loopStartTime
-            recordedNotes.add(
-                LooperNoteEvent(
-                    timestampMs = now,
-                    isNoteOn = true,
-                    freq = baseFreq,
-                    wave = waveformType,
-                    cutoff = cutoffFreq,
-                    res = resonance,
-                    attack = attackMs,
-                    sustain = sustainLevel,
-                    release = releaseMs
-                )
+    if (isLoopRecording && !isLooper) {
+        val now = System.currentTimeMillis() - loopStartTime
+        recordedNotes.add(
+            LooperNoteEvent(
+                timestampMs = now,
+                isNoteOn = true,
+                freq = baseFreq,
+                wave = waveformType,
+                cutoff = cutoffFreq,
+                res = resonance,
+                attack = attackMs,
+                sustain = sustainLevel,
+                release = releaseMs
             )
-        }
-
-        var slot = noteSlots.find { it.active && it.baseFreq == baseFreq && it.isLooperNote == isLooper }
-        if (slot != null) {
-            slot.isReleasing = false
-            slot.targetFreq = freq
-            return
-        }
-
-        // Voice Stealing
-        slot = noteSlots.find { !it.active }
-
-        if (slot == null) {
-            slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
-        }
-
-        if (slot == null) {
-            slot = noteSlots.filter { !it.isLooperNote }.minByOrNull { it.envelopeVolume }
-        }
-
-        if (slot == null) {
-            slot = noteSlots.minByOrNull { it.envelopeVolume }
-        }
-
-        if (slot != null) {
-            slot.active = true
-            slot.baseFreq = baseFreq
-            slot.targetFreq = freq
-            slot.currentFreq = freq
-            slot.phase = 0.0
-            slot.envelopeVolume = 0.0
-            slot.isReleasing = false
-            slot.waveform = wave ?: waveformType
-            slot.isLooperNote = isLooper
-            slot.frozenCutoff = cutoff ?: cutoffFreq
-            slot.frozenRes = res ?: resonance
-            slot.frozenAttack = attack ?: attackMs
-            slot.frozenSustain = sustain ?: sustainLevel
-            slot.frozenRelease = release ?: releaseMs
-            slot.zdfState1 = 0.0
-            slot.zdfState2 = 0.0
-            
-            val actualAttack = slot.frozenAttack
-            val actualRelease = slot.frozenRelease
-            slot.attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
-            slot.releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
-        }
+        )
     }
+
+    var slot = noteSlots.find { it.active && it.baseFreq == baseFreq && it.isLooperNote == isLooper }
+    if (slot != null) {
+        slot.isReleasing = false
+        slot.targetFreq = freq
+        
+        // תיקון 1: הגנה מפני התנגשות בין תהליכונים
+        // אנו מוודאים שהתו חוזר למצב פעיל למקרה ששרשור השמע בדיוק סגר אותו, 
+        // ומעניקים לווליום דחיפה מזערית כדי להתחיל תקיפה מחדש ולא להישאר תקוע על 0
+        slot.active = true
+        if (slot.envelopeVolume < 0.001) {
+            slot.envelopeVolume = 0.001 
+        }
+        return
+    }
+
+    // Voice Stealing
+    slot = noteSlots.find { !it.active }
+
+    if (slot == null) {
+        slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
+    }
+
+    if (slot == null) {
+        slot = noteSlots.filter { !it.isLooperNote }.minByOrNull { it.envelopeVolume }
+    }
+
+    if (slot == null) {
+        slot = noteSlots.minByOrNull { it.envelopeVolume }
+    }
+
+    if (slot != null) {
+        // תיקון 2: מגדירים את כל המשתנים קודם כדי למנוע סאונד "שבור"
+        slot.baseFreq = baseFreq
+        slot.targetFreq = freq
+        slot.currentFreq = freq
+        slot.phase = 0.0
+        slot.envelopeVolume = 0.0
+        slot.isReleasing = false
+        slot.waveform = wave ?: waveformType
+        slot.isLooperNote = isLooper
+        slot.frozenCutoff = cutoff ?: cutoffFreq
+        slot.frozenRes = res ?: resonance
+        slot.frozenAttack = attack ?: attackMs
+        slot.frozenSustain = sustain ?: sustainLevel
+        slot.frozenRelease = release ?: releaseMs
+        slot.zdfState1 = 0.0
+        slot.zdfState2 = 0.0
+        
+        val actualAttack = slot.frozenAttack
+        val actualRelease = slot.frozenRelease
+        slot.attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
+        slot.releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
+
+        // רק בסוף, כשהכל מוכן, אנו נותנים אישור למנוע האודיו לגשת אל התו החדש
+        slot.active = true 
+    }
+}
 
     fun noteOff(baseFreq: Float, isLooper: Boolean = false) {
         if (isLoopRecording && !isLooper) {
