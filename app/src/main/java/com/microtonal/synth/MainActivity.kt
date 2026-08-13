@@ -38,6 +38,9 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+
 
 class MainActivity : ComponentActivity() {
     private lateinit var synthEngine: SynthEngine
