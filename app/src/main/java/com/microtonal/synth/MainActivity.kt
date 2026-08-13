@@ -85,11 +85,11 @@ class NoteSlot {
     var smoothedCutoff: Float = 5000f
     var smoothedRes: Float = 0.3f
 
-    // ׳׳§׳“׳׳™ ׳׳¢׳˜׳₪׳× ׳׳—׳•׳©׳‘׳™׳ ׳׳¨׳׳© ׳׳׳•׳₪׳˜׳™׳׳™׳–׳¦׳™׳” ׳‘-DSP
+    // מקדמי מעטפת מחושבים מראש לאופטימיזציה ב-DSP
     var attackCoeff: Double = 0.0
     var releaseCoeff: Double = 0.0
 
-    // --- ׳”׳׳©׳×׳ ׳™׳ ׳”׳—׳“׳©׳™׳ ׳©׳”׳•׳¡׳₪׳ ׳• ׳׳׳•׳₪׳˜׳™׳׳™׳–׳¦׳™׳™׳× ׳”׳₪׳™׳׳˜׳¨ ---
+    // --- המשתנים החדשים שהוספנו לאופטימיזציית הפילטר ---
     var cachedG: Double = 0.0
     var cachedH: Double = 0.0
     var lastCutoff: Float = -1f
@@ -114,15 +114,15 @@ class SynthEngine(private val context: Context) {
     private val dspEngine: DspEngine
     @Volatile private var isRunning = true
 
-    // ׳©׳™׳₪׳•׳¨ ׳‘׳™׳¦׳•׳¢׳™׳: ׳”׳•׳¨׳“׳× ׳׳¡׳₪׳¨ ׳”׳§׳•׳׳•׳× ׳”׳׳¨׳‘׳™ ׳-12 ׳-8
+    // שיפור ביצועים: הורדת מספר הקולות המרבי מ-12 ל-8
     private val maxVoices = 8
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
-    // ׳×׳•׳¨ ׳׳”׳¢׳‘׳¨׳× ׳ ׳×׳•׳ ׳™ ׳׳•׳“׳™׳• ׳׳”׳§׳׳˜׳” ׳‘׳ ׳₪׳¨׳“ ׳׳”-Audio Thread
+    // תור להעברת נתוני אודיו להקלטה בנפרד מה-Audio Thread
     private val recordingQueue = LinkedBlockingQueue<ByteArray>()
     private var recordingWriterThread: Thread? = null
 
-    // ׳©׳™׳׳•׳© ׳‘-Volatile ׳׳”׳‘׳˜׳—׳× ׳¡׳ ׳›׳¨׳•׳ ׳‘׳–׳׳ ׳׳׳× ׳׳•׳ ׳”-Audio Thread
+    // שימוש ב-Volatile להבטחת סנכרון בזמן אמת מול ה-Audio Thread
     @Volatile var waveformType = 3
     @Volatile var volume = 0.5f
     @Volatile var looperVolume = 1.0f
@@ -135,7 +135,7 @@ class SynthEngine(private val context: Context) {
     @Volatile var glideMs = 30f
     @Volatile var octaveShift = 0
 
-    // ׳׳©׳×׳ ׳” ׳¢׳–׳¨ ׳¢׳‘׳•׳¨ ׳׳ ׳’׳ ׳•׳ ׳”-Glide
+    // משתנה עזר עבור מנגנון ה-Glide
     private var lastPlayedFreq: Float = 440f
 
     val liveVisualizerBuffer = FloatArray(256)
@@ -155,7 +155,7 @@ class SynthEngine(private val context: Context) {
     private val audioTrack: AudioTrack
 
     init {
-        // ׳©׳׳™׳׳× ׳ ׳×׳•׳ ׳™ ׳”׳—׳•׳׳¨׳” ׳”׳˜׳‘׳¢׳™׳™׳ ׳©׳ ׳”׳׳›׳©׳™׳¨ ׳׳”׳₪׳—׳×׳× Latency
+        // שאילת נתוני החומרה הטבעיים של המכשיר להפחתת Latency
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val nativeSampleRateStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
         val nativeBufferSizeStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
@@ -233,7 +233,7 @@ class SynthEngine(private val context: Context) {
                     byteBuffer.putShort(shortVal)
                 }
 
-                // ׳₪׳×׳¨׳•׳ ׳”׳‘׳¢׳™׳”: ׳©׳›׳₪׳•׳ ׳׳”׳™׳¨ ׳©׳ ׳”׳ ׳×׳•׳ ׳™׳ ׳׳×׳•׳¨ ׳‘׳–׳™׳›׳¨׳•׳ ׳‘׳׳‘׳“ (׳׳׳ I/O ׳׳§׳•׳‘׳¥)
+                // פתרון הבעיה: שכפול מהיר של הנתונים לתור בזיכרון בלבד (ללא I/O לקובץ)
                 if (isRecording) {
                     recordingQueue.offer(byteBuffer.array().clone())
                 }
@@ -254,7 +254,7 @@ class SynthEngine(private val context: Context) {
         return baseFreq * Math.pow(2.0, octaveShift.toDouble()).toFloat()
     }
 
-    // ׳¢׳“׳›׳•׳ ׳¡׳•׳’ ׳”׳’׳ ׳‘׳–׳׳ ׳׳׳× ׳׳ ׳’׳™׳ ׳” ׳—׳™׳” ׳‘׳׳‘׳“
+    // עדכון סוג הגל בזמן אמת לנגינה חיה בלבד
     fun setLiveWaveform(wave: Int) {
         waveformType = wave
         noteSlots.filter { it.active && !it.isLooperNote }.forEach { it.waveform = wave }
@@ -293,7 +293,7 @@ class SynthEngine(private val context: Context) {
         if (slot != null) {
             slot.isReleasing = false
             slot.targetFreq = freq
-            // ׳¢׳“׳›׳•׳ ׳¡׳•׳’ ׳”׳’׳ ׳’׳ ׳‘׳×׳• ׳׳§׳˜׳™׳‘׳™ ׳©׳׳×׳—׳“׳©
+            // עדכון סוג הגל גם בתו אקטיבי שמתחדש
             slot.waveform = wave ?: waveformType
             slot.active = true
             if (slot.envelopeVolume < 0.001) {
@@ -318,7 +318,7 @@ class SynthEngine(private val context: Context) {
         }
 
         if (slot != null) {
-            // ׳—׳™׳©׳•׳‘ Glide: ׳’׳׳™׳©׳” ׳׳×׳“׳¨ ׳”׳×׳• ׳”׳§׳•׳“׳ ׳‘׳׳™׳“׳” ׳•׳׳“׳•׳‘׳¨ ׳‘׳ ׳’׳™׳ ׳” ׳—׳™׳” ׳•-Glide ׳₪׳•׳¢׳
+            // חישוב Glide: גלישה מתדר התו הקודם במידה ומדובר בנגינה חיה ו-Glide פועל
             val startFreq = if (!isLooper && glideMs > 0f) lastPlayedFreq else freq
             if (!isLooper) lastPlayedFreq = freq
 
@@ -444,7 +444,7 @@ class SynthEngine(private val context: Context) {
             recordingQueue.clear()
             isRecording = true
 
-            // Thread ׳™׳™׳¢׳•׳“׳™ ׳‘׳§׳™׳“׳•׳׳× ׳ ׳׳•׳›׳” ׳׳˜׳™׳₪׳•׳ ׳‘׳›׳×׳™׳‘׳” ׳׳§׳•׳‘׳¥ ׳‘׳¨׳§׳¢
+            // Thread ייעודי בקידומת נמוכה לטיפול בכתיבה לקובץ ברקע
             recordingWriterThread = Thread {
                 while (isRecording || recordingQueue.isNotEmpty()) {
                     try {
@@ -467,7 +467,7 @@ class SynthEngine(private val context: Context) {
         if (!isRecording) return wavFile
         isRecording = false
         try {
-            // ׳”׳׳×׳ ׳” ׳§׳¦׳¨׳” ׳׳¡׳™׳•׳ ׳¨׳™׳§׳•׳ ׳”׳×׳•׳¨ ׳׳“׳™׳¡׳§
+            // המתנה קצרה לסיום ריקון התור לדיסק
             recordingWriterThread?.join(1000)
             recordingWriterThread = null
             val stream = recordedAudioStream
@@ -586,7 +586,7 @@ fun SynthAppUI(engine: SynthEngine) {
     val frequencies = remember {
         mutableStateListOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 475.00f)
     }
-    val noteNames = listOf("׳“׳•", "׳¨׳”", "׳׳™", "׳₪׳”", "׳¡׳•׳", "׳׳”", "׳¡׳™", "׳׳")
+    val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
     var showTuningDialog by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -622,16 +622,16 @@ fun SynthAppUI(engine: SynthEngine) {
         uri?.let {
             val success = engine.exportRecordingToUri(context, it)
             if (success) {
-                Toast.makeText(context, "׳”׳”׳§׳׳˜׳” ׳ ׳©׳׳¨׳” ׳‘׳”׳¦׳׳—׳”!", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "ההקלטה נשמרה בהצלחה!", Toast.LENGTH_LONG).show()
             } else {
-                Toast.makeText(context, "׳©׳’׳™׳׳” ׳‘׳©׳׳™׳¨׳× ׳”׳§׳•׳‘׳¥", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "שגיאה בשמירת הקובץ", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     fun loadPresetFromSlot(slot: Int, showToast: Boolean = true) {
         if (!prefs.getBoolean("p_${slot}_exists", false)) {
-            if (showToast) Toast.makeText(context, "׳₪׳¨׳™׳¡׳˜ $slot ׳¢׳“׳™׳™׳ ׳¨׳™׳§", Toast.LENGTH_SHORT).show()
+            if (showToast) Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -663,7 +663,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 list.forEachIndexed { i, f -> frequencies[i] = f }
             }
         }
-        if (showToast) Toast.makeText(context, "׳₪׳¨׳™׳¡׳˜ $slot ׳ ׳˜׳¢׳", Toast.LENGTH_SHORT).show()
+        if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
     }
 
     LaunchedEffect(Unit) {
@@ -686,7 +686,7 @@ fun SynthAppUI(engine: SynthEngine) {
             putBoolean("p_${slot}_exists", true)
             apply()
         }
-        Toast.makeText(context, "׳₪׳¨׳™׳¡׳˜ $slot ׳ ׳©׳׳¨ ׳‘׳”׳¦׳׳—׳”!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "פריסט $slot נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
     }
 
     var renderTrigger by remember { mutableLongStateOf(0L) }
@@ -710,7 +710,7 @@ fun SynthAppUI(engine: SynthEngine) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("׳›׳™׳•׳•׳ ׳×׳“׳¨׳™׳ (Hz)", fontSize = 14.sp, color = gold, fontWeight = FontWeight.Bold)
+                    Text("כיוון תדרים (Hz)", fontSize = 14.sp, color = gold, fontWeight = FontWeight.Bold)
                     OutlinedButton(
                         onClick = {
                             defaultFrequencies.forEachIndexed { i, f ->
@@ -719,7 +719,7 @@ fun SynthAppUI(engine: SynthEngine) {
                             }
                         },
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                    ) { Text("׳׳™׳₪׳•׳¡", color = gold, fontSize = 9.sp) }
+                    ) { Text("איפוס", color = gold, fontSize = 9.sp) }
                 }
             },
             text = {
@@ -747,7 +747,7 @@ fun SynthAppUI(engine: SynthEngine) {
             },
             confirmButton = {
                 Button(onClick = { showTuningDialog = false }) {
-                    Text("׳¡׳’׳•׳¨")
+                    Text("סגור")
                 }
             },
             containerColor = panelBg2
@@ -778,7 +778,7 @@ fun SynthAppUI(engine: SynthEngine) {
                     modifier = Modifier.height(32.dp),
                     border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
                 ) {
-                    Text("ג™ן¸ ׳×׳“׳¨׳™׳", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("⚙️ תדרים", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Button(
@@ -801,7 +801,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 ) {
                     Box(modifier = Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, shape = CircleShape))
                     Spacer(Modifier.width(4.dp))
-                    Text(if (isRec) "׳©׳׳•׳¨ WAV" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(if (isRec) "שמור WAV" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -874,7 +874,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 .padding(3.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            val tabs = listOf("נ›ן¸ ׳¡׳׳•׳ ׳“", "נן¸ ׳₪׳™׳׳˜׳¨ ׳•-FX", "נ”„ ׳׳•׳₪׳¨")
+            val tabs = listOf("🎛️ סאונד", "🎚️ פילטר ו-FX", "🔄 לופר")
             tabs.forEachIndexed { index, title ->
                 Button(
                     onClick = { selectedTab = index },
@@ -908,7 +908,7 @@ fun SynthAppUI(engine: SynthEngine) {
             when (selectedTab) {
                 0 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
                     Column {
-                        Text("׳¡׳•׳’ ׳’׳ (׳ ׳’׳™׳ ׳” ׳—׳™׳”)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("סוג גל (נגינה חיה)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(2.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
@@ -982,26 +982,26 @@ fun SynthAppUI(engine: SynthEngine) {
                                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
                                 modifier = Modifier.height(26.dp)
                             ) {
-                                Text("׳©׳׳•׳¨", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                                Text("שמור", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
 
-                    SynthSlider("׳•׳•׳׳™׳•׳ ׳ ׳’׳™׳ ׳”", "${(vol * 100).toInt()}%", vol, accentColor = gold) { vol = it; engine.volume = it }
-                    SynthSlider("Attack (׳”׳×׳§׳₪׳”)", "${attackVal.toInt()}ms", attackVal, 5f..500f, gold) { attackVal = it; engine.attackMs = it }
-                    SynthSlider("Sustain (׳”׳—׳–׳§׳”)", "${(sustainVal * 100).toInt()}%", sustainVal, 0f..1f, gold) { sustainVal = it; engine.sustainLevel = it }
-                    SynthSlider("Release (׳“׳¢׳™׳›׳”)", "${releaseVal.toInt()}ms", releaseVal, 20f..2000f, gold) { releaseVal = it; engine.releaseMs = it }
+                    SynthSlider("ווליום נגינה", "${(vol * 100).toInt()}%", vol, accentColor = gold) { vol = it; engine.volume = it }
+                    SynthSlider("Attack (התקפה)", "${attackVal.toInt()}ms", attackVal, 5f..500f, gold) { attackVal = it; engine.attackMs = it }
+                    SynthSlider("Sustain (החזקה)", "${(sustainVal * 100).toInt()}%", sustainVal, 0f..1f, gold) { sustainVal = it; engine.sustainLevel = it }
+                    SynthSlider("Release (דעיכה)", "${releaseVal.toInt()}ms", releaseVal, 20f..2000f, gold) { releaseVal = it; engine.releaseMs = it }
                 }
 
                 1 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
-                    SynthSlider("Cutoff (׳—׳™׳×׳•׳ ׳×׳“׳¨׳™׳)", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
-                    SynthSlider("Resonance (׳×׳”׳•׳“׳”)", "${(resVal * 100).toInt()}%", resVal, 0f..1f, gold) { resVal = it; engine.resonance = it }
-                    SynthSlider("Echo Mix (׳“׳™׳׳™׳™)", "${(echoVal * 100).toInt()}%", echoVal, 0f..1f, gold) { echoVal = it; engine.echoMix = it }
-                    SynthSlider("Glide (׳₪׳׳™׳¡׳ ׳“׳•)", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
+                    SynthSlider("Cutoff (חיתוך תדרים)", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
+                    SynthSlider("Resonance (תהודה)", "${(resVal * 100).toInt()}%", resVal, 0f..1f, gold) { resVal = it; engine.resonance = it }
+                    SynthSlider("Echo Mix (דיליי)", "${(echoVal * 100).toInt()}%", echoVal, 0f..1f, gold) { echoVal = it; engine.echoMix = it }
+                    SynthSlider("Glide (פליסנדו)", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
                 }
 
                 2 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
-                    SynthSlider("׳¢׳•׳¦׳׳× ׳”׳׳•׳₪׳¨", "${(looperVolState * 100).toInt()}%", looperVolState, accentColor = gold) {
+                    SynthSlider("עוצמת הלופר", "${(looperVolState * 100).toInt()}%", looperVolState, accentColor = gold) {
                         looperVolState = it
                         engine.looperVolume = it
                     }
@@ -1023,7 +1023,7 @@ fun SynthAppUI(engine: SynthEngine) {
                             ),
                             modifier = Modifier.weight(1f).height(48.dp)
                         ) {
-                            Text(if (isLoopRecState) "׳¢׳¦׳•׳¨ ׳”׳§׳׳˜׳”" else "נ”´ ׳”׳§׳׳˜ ׳׳•׳₪", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(if (isLoopRecState) "עצור הקלטה" else "🔴 הקלט לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
@@ -1042,7 +1042,7 @@ fun SynthAppUI(engine: SynthEngine) {
                             ),
                             modifier = Modifier.weight(1f).height(48.dp)
                         ) {
-                            Text(if (isLoopPlayState) "׳¢׳¦׳•׳¨ ׳ ׳™׳’׳•׳" else "ג–¶ן¸ ׳ ׳’׳ ׳׳•׳₪", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(if (isLoopPlayState) "עצור ניגון" else "▶️ נגן לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -1055,7 +1055,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         modifier = Modifier.fillMaxWidth().height(42.dp),
                         border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
                     ) {
-                        Text("נ—‘ן¸ ׳ ׳§׳” ׳׳•׳₪׳¨", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("🗑️ נקה לופר", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1116,7 +1116,7 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 }
 
-// ׳¨׳›׳™׳‘ ׳¡׳׳™׳™׳“׳¨ ׳׳©׳•׳“׳¨׳’ ׳”׳׳׳₪׳©׳¨ ׳’׳ ׳”׳–׳ ׳” ׳™׳“׳ ׳™׳× ׳‘׳׳—׳™׳¦׳” ׳¢׳ ׳”׳˜׳§׳¡׳˜ ׳”׳׳¡׳₪׳¨׳™
+// רכיב סליידר משודרג המאפשר גם הזנה ידנית בלחיצה על הטקסט המספרי
 @Composable
 fun SynthSlider(
     label: String,
@@ -1133,11 +1133,11 @@ fun SynthSlider(
         AlertDialog(
             onDismissRequest = { showInputDialog = false },
             title = {
-                Text("׳”׳–׳ ׳× ׳¢׳¨׳ ׳¢׳‘׳•׳¨ $label", fontSize = 14.sp, color = accentColor, fontWeight = FontWeight.Bold)
+                Text("הזנת ערך עבור $label", fontSize = 14.sp, color = accentColor, fontWeight = FontWeight.Bold)
             },
             text = {
                 Column {
-                    Text("׳”׳›׳ ׳¡ ׳¢׳¨׳ ׳‘׳™׳ ${valueRange.start} ׳-${valueRange.endInclusive}:", color = Color.White, fontSize = 11.sp)
+                    Text("הכנס ערך בין ${valueRange.start} ל-${valueRange.endInclusive}:", color = Color.White, fontSize = 11.sp)
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = textInput,
@@ -1154,12 +1154,12 @@ fun SynthSlider(
                     }
                     showInputDialog = false
                 }) {
-                    Text("׳׳™׳©׳•׳¨")
+                    Text("אישור")
                 }
             },
             dismissButton = {
                 OutlinedButton(onClick = { showInputDialog = false }) {
-                    Text("׳‘׳™׳˜׳•׳")
+                    Text("ביטול")
                 }
             },
             containerColor = Color(0xFF1A1A1A)
@@ -1174,7 +1174,7 @@ fun SynthSlider(
         ) {
             Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 
-            // ׳׳—׳™׳¦׳” ׳¢׳ ׳”׳¢׳¨׳ ׳”׳׳¡׳₪׳¨׳™ ׳₪׳•׳×׳—׳× ׳“׳™׳׳׳•׳’ ׳׳”׳–׳ ׳” ׳™׳“׳ ׳™׳×
+            // לחיצה על הערך המספרי פותחת דיאלוג להזנה ידנית
             Text(
                 text = valueDisplay,
                 color = accentColor,
