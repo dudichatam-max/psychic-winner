@@ -39,6 +39,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     private lateinit var synthEngine: SynthEngine
@@ -106,8 +108,13 @@ class SynthEngine(private val context: Context) {
     private val dspEngine: DspEngine
     @Volatile private var isRunning = true
 
-    private val maxVoices = 12
+    // שיפור ביצועים: הורדת מספר הקולות המרבי מ-12 ל-8
+    private val maxVoices = 8
     private val noteSlots = Array(maxVoices) { NoteSlot() }
+
+    // תור להעברת נתוני אודיו להקלטה בנפרד מה-Audio Thread
+    private val recordingQueue = LinkedBlockingQueue<ByteArray>()
+    private var recordingWriterThread: Thread? = null
 
     // שימוש ב-Volatile להבטחת סנכרון בזמן אמת מול ה-Audio Thread
     @Volatile var waveformType = 3
@@ -211,7 +218,7 @@ class SynthEngine(private val context: Context) {
 
                     val rawMaster = frame.masterSample
                     val shortVal = (rawMaster * Short.MAX_VALUE * 0.85f).toInt().coerceIn(-32768, 32767).toShort()
-                    
+
                     buffer[i] = shortVal
 
                     liveVisualizerBuffer[i] = frame.liveSample
@@ -220,8 +227,9 @@ class SynthEngine(private val context: Context) {
                     byteBuffer.putShort(shortVal)
                 }
 
+                // פתרון הבעיה: שכפול מהיר של הנתונים לתור בזיכרון בלבד (ללא I/O לקובץ)
                 if (isRecording) {
-                    recordedAudioStream?.write(byteBuffer.array(), 0, byteBuffer.capacity())
+                    recordingQueue.offer(byteBuffer.array().clone())
                 }
 
                 audioTrack.write(buffer, 0, buffer.size)
@@ -283,7 +291,7 @@ class SynthEngine(private val context: Context) {
             slot.waveform = wave ?: waveformType
             slot.active = true
             if (slot.envelopeVolume < 0.001) {
-                slot.envelopeVolume = 0.001 
+                slot.envelopeVolume = 0.001
             }
             return
         }
@@ -323,13 +331,13 @@ class SynthEngine(private val context: Context) {
             slot.frozenRelease = release ?: releaseMs
             slot.zdfState1 = 0.0
             slot.zdfState2 = 0.0
-            
+
             val actualAttack = slot.frozenAttack
             val actualRelease = slot.frozenRelease
             slot.attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
             slot.releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
 
-            slot.active = true 
+            slot.active = true
         }
     }
 
@@ -427,7 +435,23 @@ class SynthEngine(private val context: Context) {
             val stream = FileOutputStream(file)
             recordedAudioStream = stream
             writeWavHeader(stream, 0L)
+            recordingQueue.clear()
             isRecording = true
+
+            // Thread ייעודי בקידומת נמוכה לטיפול בכתיבה לקובץ ברקע
+            recordingWriterThread = Thread {
+                while (isRecording || recordingQueue.isNotEmpty()) {
+                    try {
+                        val bytes = recordingQueue.poll(20, TimeUnit.MILLISECONDS)
+                        if (bytes != null) {
+                            recordedAudioStream?.write(bytes)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }.apply {
+                priority = Thread.MIN_PRIORITY
+                start()
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -437,6 +461,9 @@ class SynthEngine(private val context: Context) {
         if (!isRecording) return wavFile
         isRecording = false
         try {
+            // המתנה קצרה לסיום ריקון התור לדיסק
+            recordingWriterThread?.join(1000)
+            recordingWriterThread = null
             val stream = recordedAudioStream
             stream?.flush()
             stream?.close()
@@ -884,7 +911,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                     selected = currentWave == index,
                                     onClick = {
                                         currentWave = index
-                                        engine.setLiveWaveform(index) // עדכון מיידי של תווים פעילים בלייב בלבד
+                                        engine.setLiveWaveform(index)
                                     },
                                     label = { Text(name, fontSize = 10.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
@@ -962,9 +989,7 @@ fun SynthAppUI(engine: SynthEngine) {
 
                 1 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
                     SynthSlider("Cutoff (חיתוך תדרים)", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
-                    // תוקן לטווח מלא של 0f..1f (100%)
                     SynthSlider("Resonance (תהודה)", "${(resVal * 100).toInt()}%", resVal, 0f..1f, gold) { resVal = it; engine.resonance = it }
-                    // תוקן לטווח מלא של 0f..1f (100%)
                     SynthSlider("Echo Mix (דיליי)", "${(echoVal * 100).toInt()}%", echoVal, 0f..1f, gold) { echoVal = it; engine.echoMix = it }
                     SynthSlider("Glide (פליסנדו)", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
                 }
@@ -1142,7 +1167,7 @@ fun SynthSlider(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            
+
             // לחיצה על הערך המספרי פותחת דיאלוג להזנה ידנית
             Text(
                 text = valueDisplay,
