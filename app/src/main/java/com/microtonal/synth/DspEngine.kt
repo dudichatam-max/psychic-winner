@@ -170,7 +170,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
         dcY1 = if (dcSample.isNaN() || dcSample.isInfinite()) 0.0 else dcSample
 
         // --- OPTIMIZATION 3: FAST CUBIC SOFT CLIPPER ---
-        val masterSample = fastCubicSoftClip(dcY1 * 0.45).toFloat()
+        val masterSample = softSaturate(dcY1 * 0.52).toFloat()
 
         return DspFrame(
             liveSample = finalLiveSample,
@@ -217,9 +217,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
     }
 
     // Fast Algebraic Cubic Saturator (במקום tanh)
-    @Suppress("NOTHING_TO_INLINE")
-    private inline fun fastCubicSoftClip(x: Double): Double {
-        val clamped = x.coerceIn(-1.5, 1.5)
-        return clamped * (1.0 - (clamped * clamped) / 6.75)
-    }
+@Suppress("NOTHING_TO_INLINE")
+private inline fun softSaturate(x: Double): Double {
+    // Soft saturation יותר מוזיקלי וחם
+    val driven = x * 1.35
+    val x2 = driven * driven
+    return driven * (27.0 + x2) / (27.0 + 9.0 * x2)
+}
 }
