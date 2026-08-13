@@ -154,7 +154,7 @@ class SynthEngine(private val context: Context) {
 
     private val audioTrack: AudioTrack
 
-    init {
+        init {
         // שאילת נתוני החומרה הטבעיים של המכשיר להפחתת Latency
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val nativeSampleRateStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
@@ -171,27 +171,53 @@ class SynthEngine(private val context: Context) {
             AudioFormat.ENCODING_PCM_16BIT
         )
 
-        val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 2)
+        // וידוא שגודל ה-Buffer תקין וחיובי (מונע שגיאות קוד שגיאה שליליות)
+        val validMinBuffer = if (minBufferSize > 0) minBufferSize else 4096
+        val safeBufferSize = maxOf(validMinBuffer, bufferSizeFrames * 2)
 
-        audioTrack = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_GAME)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(safeBufferSize)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-            .build()
+        // אתחול בטוח עם מנגנון הגנה (Fallback) למניעת קריסת אפליקציה
+        audioTrack = try {
+            AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_GAME)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(safeBufferSize)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+                .build()
+        } catch (e: Exception) {
+            // גיבוי: במקרה שהמכשיר דוחה Low Latency, עוברים למצב רגיל ויציב לחלוטין
+            AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_GAME)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(maxOf(validMinBuffer, 8192))
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_NONE)
+                .build()
+        }
     }
+
 
     fun start() {
         isRunning = true
