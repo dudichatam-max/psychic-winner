@@ -107,7 +107,8 @@ data class LooperNoteEvent(
     val res: Float,
     val attack: Float,
     val sustain: Float,
-    val release: Float
+    val release: Float,
+    val octave: Int // <-- 1. הוספת שדה שמירת אוקטבה לאירוע הלופ[span_4](start_span)[span_4](end_span)
 )
 
 class SynthEngine(private val context: Context) {
@@ -241,7 +242,6 @@ class SynthEngine(private val context: Context) {
                     byteBuffer.putShort(shortVal)
                 }
 
-                // פתרון הבעיה: שכפול מהיר של הנתונים לתור בזיכרון בלבד (ללא I/O לקובץ)
                 if (isRecording) {
                     recordingQueue.offer(byteBuffer.array().clone())
                 }
@@ -258,8 +258,10 @@ class SynthEngine(private val context: Context) {
         audioTrack.release()
     }
 
-    fun getEffectiveFrequency(baseFreq: Float): Float {
-        return baseFreq * Math.pow(2.0, octaveShift.toDouble()).toFloat()
+    // --- 2. עדכון פונקציית החישוב לקבלת אוקטבה ספציפית או גלובלית ---[span_5](start_span)[span_5](end_span)
+    fun getEffectiveFrequency(baseFreq: Float, overrideOctave: Int? = null): Float {
+        val octave = overrideOctave ?: octaveShift
+        return baseFreq * Math.pow(2.0, octave.toDouble()).toFloat()
     }
 
     // עדכון סוג הגל בזמן אמת לנגינה חיה בלבד
@@ -276,9 +278,12 @@ class SynthEngine(private val context: Context) {
         res: Float? = null,
         attack: Float? = null,
         sustain: Float? = null,
-        release: Float? = null
+        release: Float? = null,
+        targetOctave: Int? = null // <-- קליטת האוקטבה השمורה בלופר[span_6](start_span)[span_6](end_span)
     ) {
-        val freq = getEffectiveFrequency(baseFreq)
+        // שימוש באוקטבה הייעודית אם מדובר בתו לופר, אחרת באוקטבה הגלובלית[span_7](start_span)[span_7](end_span)
+        val effectiveOctave = if (isLooper) targetOctave else octaveShift
+        val freq = getEffectiveFrequency(baseFreq, effectiveOctave)
 
         if (isLoopRecording && !isLooper) {
             val now = System.currentTimeMillis() - loopStartTime
@@ -292,7 +297,8 @@ class SynthEngine(private val context: Context) {
                     res = resonance,
                     attack = attackMs,
                     sustain = sustainLevel,
-                    release = releaseMs
+                    release = releaseMs,
+                    octave = octaveShift // <-- 3. שמירת האוקטבה הנוכחית בעת ההקלטה בלופר[span_8](start_span)[span_8](end_span)
                 )
             )
         }
@@ -301,7 +307,6 @@ class SynthEngine(private val context: Context) {
         if (slot != null) {
             slot.isReleasing = false
             slot.targetFreq = freq
-            // עדכון סוג הגל גם בתו אקטיבי שמתחדש
             slot.waveform = wave ?: waveformType
             slot.active = true
             if (slot.envelopeVolume < 0.001) {
@@ -326,7 +331,6 @@ class SynthEngine(private val context: Context) {
         }
 
         if (slot != null) {
-            // חישוב Glide: גלישה מתדר התו הקודם במידה ומדובר בנגינה חיה ו-Glide פועל
             val startFreq = if (!isLooper && glideMs > 0f) lastPlayedFreq else freq
             if (!isLooper) lastPlayedFreq = freq
 
@@ -368,7 +372,8 @@ class SynthEngine(private val context: Context) {
                     res = resonance,
                     attack = attackMs,
                     sustain = sustainLevel,
-                    release = releaseMs
+                    release = releaseMs,
+                    octave = octaveShift // שומר את האוקטבה גם ב-noteOff למען עקביות במבנה הנתונים
                 )
             )
         }
@@ -414,7 +419,8 @@ class SynthEngine(private val context: Context) {
                                 res = ev.res,
                                 attack = ev.attack,
                                 sustain = ev.sustain,
-                                release = ev.release
+                                release = ev.release,
+                                targetOctave = ev.octave // <-- 4. העברת האוקטבה המקורית שנשמרה בעת ניגון חוזר בלופר[span_9](start_span)[span_9](end_span)
                             )
                         } else {
                             noteOff(ev.freq, isLooper = true)
@@ -452,7 +458,6 @@ class SynthEngine(private val context: Context) {
             recordingQueue.clear()
             isRecording = true
 
-            // Thread ייעודי בקידומת נמוכה לטיפול בכתיבה לקובץ ברקע
             recordingWriterThread = Thread {
                 while (isRecording || recordingQueue.isNotEmpty()) {
                     try {
@@ -475,7 +480,6 @@ class SynthEngine(private val context: Context) {
         if (!isRecording) return wavFile
         isRecording = false
         try {
-            // המתנה קצרה לסיום ריקון התור לדיסק
             recordingWriterThread?.join(1000)
             recordingWriterThread = null
             val stream = recordedAudioStream
@@ -562,28 +566,25 @@ class SynthEngine(private val context: Context) {
     }
 
     private fun updateWavHeader(file: File) {
-    val totalAudioLen = file.length() - 44
-    val totalDataLen = totalAudioLen + 36
+        val totalAudioLen = file.length() - 44
+        val totalDataLen = totalAudioLen + 36
 
-    val randomAccessFile = java.io.RandomAccessFile(file, "rw")
-    
-    // 1. עדכון גודל ה-RIFF / קובץ כולל בכתובת 4
-    randomAccessFile.seek(4)
-    randomAccessFile.write((totalDataLen and 0xff).toInt())
-    randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
-    randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
-    randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
+        val randomAccessFile = java.io.RandomAccessFile(file, "rw")
+        
+        randomAccessFile.seek(4)
+        randomAccessFile.write((totalDataLen and 0xff).toInt())
+        randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
+        randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
+        randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
 
-    // 2. עדכון גודל נתוני האודיו (Data Chunk Length) בכתובת 40 - תיקון הבאג!
-    randomAccessFile.seek(40)
-    randomAccessFile.write((totalAudioLen and 0xff).toInt())
-    randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
-    randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
-    randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
+        randomAccessFile.seek(40)
+        randomAccessFile.write((totalAudioLen and 0xff).toInt())
+        randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
+        randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
+        randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
 
-    randomAccessFile.close()
-}
-
+        randomAccessFile.close()
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1073,7 +1074,6 @@ fun SynthAppUI(engine: SynthEngine) {
                     }
                 }
                 
-                // --- קטגוריית ה- PERFORMANCE החדשה ---
                 3 -> Column(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -1096,7 +1096,6 @@ fun SynthAppUI(engine: SynthEngine) {
                                         engine.performanceY = 1f - (offset.y / size.height.toFloat()).coerceIn(0f, 1f)
                                     },
                                     onDragEnd = {
-                                        // Spring-back למרכז כשעוזבים
                                         engine.performanceX = 0f
                                         engine.performanceY = 0f
                                     },
@@ -1112,24 +1111,19 @@ fun SynthAppUI(engine: SynthEngine) {
                             }
                     ) {
                         Canvas(modifier = Modifier.fillMaxSize()) {
-                            // שימוש בטריגר של האוסילוסקופ כדי להפעיל רינדור זורם ב-30FPS למשטח
                             val dummy = renderTrigger
-                            
                             val w = size.width
                             val h = size.height
 
-                            // ציור רשת (Grid) למראה טכני
                             val gridColor = Color(0xFF1F1F1F)
                             for (i in 1..4) {
                                 drawLine(gridColor, start = Offset(w * (i / 5f), 0f), end = Offset(w * (i / 5f), h))
                                 drawLine(gridColor, start = Offset(0f, h * (i / 5f)), end = Offset(w, h * (i / 5f)))
                             }
                             
-                            // קו אמצע דק
                             drawLine(Color(0xFF2A2A2A), start = Offset(0f, h), end = Offset(w, h), strokeWidth = 2f)
                             drawLine(Color(0xFF2A2A2A), start = Offset(0f, 0f), end = Offset(0f, h), strokeWidth = 2f)
 
-                            // ציור מיקום האצבע הנוכחי על בסיס נתוני המנוע
                             val cursorX = engine.performanceX * w
                             val cursorY = (1f - engine.performanceY) * h
 
@@ -1151,7 +1145,6 @@ fun SynthAppUI(engine: SynthEngine) {
                             )
                         }
 
-                        // תוויות צירים
                         Text("LFO RATE (קצב)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp))
                         Text("DRIVE (עיוות)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart).padding(start = 6.dp).rotate(-90f))
                     }
@@ -1214,7 +1207,6 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 }
 
-// רכיב סליידר משודרג המאפשר גם הזנה ידנית בלחיצה על הטקסט המספרי
 @Composable
 fun SynthSlider(
     label: String,
@@ -1272,7 +1264,6 @@ fun SynthSlider(
         ) {
             Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 
-            // לחיצה על הערך המספרי פותחת דיאלוג להזנה ידנית
             Text(
                 text = valueDisplay,
                 color = accentColor,
