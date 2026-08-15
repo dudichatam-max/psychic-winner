@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -25,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -134,6 +136,10 @@ class SynthEngine(private val context: Context) {
     @Volatile var echoMix = 0.25f
     @Volatile var glideMs = 30f
     @Volatile var octaveShift = 0
+    
+    // --- משתני PERFORMANCE PAD (X/Y) ---
+    @Volatile var performanceX: Float = 0f
+    @Volatile var performanceY: Float = 0f
 
     // משתנה עזר עבור מנגנון ה-Glide
     private var lastPlayedFreq: Float = 440f
@@ -219,7 +225,9 @@ class SynthEngine(private val context: Context) {
                         attackMs = attackMs,
                         sustainLevel = sustainLevel,
                         releaseMs = releaseMs,
-                        echoMix = echoMix
+                        echoMix = echoMix,
+                        performanceX = performanceX,
+                        performanceY = performanceY
                     )
 
                     val rawMaster = frame.masterSample
@@ -564,12 +572,6 @@ class SynthEngine(private val context: Context) {
         randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
         randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
 
-        randomAccessFile.seek(40)
-        randomAccessFile.write((totalAudioLen and 0xff).toInt())
-        randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
-        randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
-        randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
-
         randomAccessFile.close()
     }
 }
@@ -874,7 +876,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 .padding(3.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            val tabs = listOf("🎛️ סאונד", "🎚️ פילטר ו-FX", "🔄 לופר")
+            val tabs = listOf("🎛️ סאונד", "🎚️ פילטר", "🔄 לופר", "🚀 PERFORMANCE")
             tabs.forEachIndexed { index, title ->
                 Button(
                     onClick = { selectedTab = index },
@@ -888,8 +890,10 @@ fun SynthAppUI(engine: SynthEngine) {
                     Text(
                         title,
                         color = if (selectedTab == index) gold else Color.Gray,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
@@ -1056,6 +1060,90 @@ fun SynthAppUI(engine: SynthEngine) {
                         border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
                     ) {
                         Text("🗑️ נקה לופר", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                
+                // --- קטגוריית ה- PERFORMANCE החדשה ---
+                3 -> Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("LIVE PERFORMANCE PAD", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("משפיע על נגינה חיה בלבד. שחרר לחזרה אוטומטית למרכז.", color = Color.Gray, fontSize = 9.sp)
+                    Spacer(Modifier.height(8.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .background(Color(0xFF0D0D0D), RoundedCornerShape(8.dp))
+                            .border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) {
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        engine.performanceX = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                        engine.performanceY = 1f - (offset.y / size.height.toFloat()).coerceIn(0f, 1f)
+                                    },
+                                    onDragEnd = {
+                                        // Spring-back למרכז כשעוזבים
+                                        engine.performanceX = 0f
+                                        engine.performanceY = 0f
+                                    },
+                                    onDragCancel = {
+                                        engine.performanceX = 0f
+                                        engine.performanceY = 0f
+                                    },
+                                    onDrag = { change, _ ->
+                                        engine.performanceX = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                        engine.performanceY = 1f - (change.position.y / size.height.toFloat()).coerceIn(0f, 1f)
+                                    }
+                                )
+                            }
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            // שימוש בטריגר של האוסילוסקופ כדי להפעיל רינדור זורם ב-30FPS למשטח
+                            val dummy = renderTrigger
+                            
+                            val w = size.width
+                            val h = size.height
+
+                            // ציור רשת (Grid) למראה טכני
+                            val gridColor = Color(0xFF1F1F1F)
+                            for (i in 1..4) {
+                                drawLine(gridColor, start = Offset(w * (i / 5f), 0f), end = Offset(w * (i / 5f), h))
+                                drawLine(gridColor, start = Offset(0f, h * (i / 5f)), end = Offset(w, h * (i / 5f)))
+                            }
+                            
+                            // קו אמצע דק
+                            drawLine(Color(0xFF2A2A2A), start = Offset(0f, h), end = Offset(w, h), strokeWidth = 2f)
+                            drawLine(Color(0xFF2A2A2A), start = Offset(0f, 0f), end = Offset(0f, h), strokeWidth = 2f)
+
+                            // ציור מיקום האצבע הנוכחי על בסיס נתוני המנוע
+                            val cursorX = engine.performanceX * w
+                            val cursorY = (1f - engine.performanceY) * h
+
+                            drawCircle(
+                                color = gold.copy(alpha = 0.2f),
+                                radius = 50f,
+                                center = Offset(cursorX, cursorY)
+                            )
+                            drawCircle(
+                                color = gold,
+                                radius = 20f,
+                                center = Offset(cursorX, cursorY),
+                                style = Stroke(width = 4f)
+                            )
+                            drawCircle(
+                                color = Color.White,
+                                radius = 4f,
+                                center = Offset(cursorX, cursorY)
+                            )
+                        }
+
+                        // תוויות צירים
+                        Text("LFO RATE (קצב)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp))
+                        Text("DRIVE (עיוות)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart).padding(start = 6.dp).rotate(-90f))
                     }
                 }
             }
