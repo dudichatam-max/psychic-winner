@@ -562,18 +562,28 @@ class SynthEngine(private val context: Context) {
     }
 
     private fun updateWavHeader(file: File) {
-        val totalAudioLen = file.length() - 44
-        val totalDataLen = totalAudioLen + 36
+    val totalAudioLen = file.length() - 44
+    val totalDataLen = totalAudioLen + 36
 
-        val randomAccessFile = java.io.RandomAccessFile(file, "rw")
-        randomAccessFile.seek(4)
-        randomAccessFile.write((totalDataLen and 0xff).toInt())
-        randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
-        randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
-        randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
+    val randomAccessFile = java.io.RandomAccessFile(file, "rw")
+    
+    // 1. עדכון גודל ה-RIFF / קובץ כולל בכתובת 4
+    randomAccessFile.seek(4)
+    randomAccessFile.write((totalDataLen and 0xff).toInt())
+    randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
+    randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
+    randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
 
-        randomAccessFile.close()
-    }
+    // 2. עדכון גודל נתוני האודיו (Data Chunk Length) בכתובת 40 - תיקון הבאג!
+    randomAccessFile.seek(40)
+    randomAccessFile.write((totalAudioLen and 0xff).toInt())
+    randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
+    randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
+    randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
+
+    randomAccessFile.close()
+}
+
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
