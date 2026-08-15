@@ -149,7 +149,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
             // --- X/Y PAD: החלת LFO ל-Cutoff רק על תווים חיים ---
             if (!slot.isLooperNote && performanceX > 0.01f) {
                 val modDepth = performanceX * 5000f // ככל שמושכים ימינה ה-Rate וה-Depth גדלים
-                targetCutoff = (targetCutoff + (lfoMod * modDepth)).coerceIn(20f, 16000f)
+                targetCutoff = (targetCutoff + (lfoMod * modDepth)).coerceIn(20f, 16000f).toFloat()
             }
             
             val targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance).coerceIn(0.0f, 0.95f)
@@ -161,7 +161,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 slot.lastCutoff = slot.smoothedCutoff
                 slot.lastRes = slot.smoothedRes
                 
-                val gTemp = tan(PI * slot.smoothedCutoff / sampleRate)
+                val gTemp = tan(PI * slot.smoothedCutoff.toDouble() / sampleRate)
                 val kTemp = 2.0 * (1.0 - slot.smoothedRes.toDouble())
                 
                 slot.cachedG = gTemp
