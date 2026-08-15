@@ -199,7 +199,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
             finalLiveSample = (softSaturate(driven.toDouble()) * (1.0 / (1.0 + driveAmount * 0.18))).toFloat()
         }
 
-        var totalSample = finalLiveSample + finalLooperSample
+        // מוגדר כ-Double כדי להתאים בדיוק לחישובי הדיליי ומניעת שגיאות קומפילציה
+        var totalSample = (finalLiveSample + finalLooperSample).toDouble()
 
         // אפקט דיליי מוזיקלי עם Feedback + סינון
         val delaySamples = (sampleRate * 0.28).toInt()
