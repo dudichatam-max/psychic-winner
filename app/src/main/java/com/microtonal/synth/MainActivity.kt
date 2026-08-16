@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
@@ -108,7 +109,7 @@ data class LooperNoteEvent(
     val attack: Float,
     val sustain: Float,
     val release: Float,
-    val octave: Int // <-- 1. הוספת שדה שמירת אוקטבה לאירוע הלופ[span_4](start_span)[span_4](end_span)
+    val octave: Int // <-- 1. הוספת שדה שמירת אוקטבה לאירוע הלופ
 )
 
 class SynthEngine(private val context: Context) {
@@ -254,11 +255,12 @@ class SynthEngine(private val context: Context) {
     fun stop() {
         isRunning = false
         stopLoopPlayback()
+        stopBackgroundAudio() // <--- עצירת שמע רקע ביציאה
         audioTrack.stop()
         audioTrack.release()
     }
 
-    // --- 2. עדכון פונקציית החישוב לקבלת אוקטבה ספציפית או גלובלית ---[span_5](start_span)[span_5](end_span)
+    // --- 2. עדכון פונקציית החישוב לקבלת אוקטבה ספציפית או גלובלית ---
     fun getEffectiveFrequency(baseFreq: Float, overrideOctave: Int? = null): Float {
         val octave = overrideOctave ?: octaveShift
         return baseFreq * Math.pow(2.0, octave.toDouble()).toFloat()
@@ -279,9 +281,9 @@ class SynthEngine(private val context: Context) {
         attack: Float? = null,
         sustain: Float? = null,
         release: Float? = null,
-        targetOctave: Int? = null // <-- קליטת האוקטבה השمורה בלופר[span_6](start_span)[span_6](end_span)
+        targetOctave: Int? = null // <-- קליטת האוקטבה השמורה בלופר
     ) {
-        // שימוש באוקטבה הייעודית אם מדובר בתו לופר, אחרת באוקטבה הגלובלית[span_7](start_span)[span_7](end_span)
+        // שימוש באוקטבה הייעודית אם מדובר בתו לופר, אחרת באוקטבה הגלובלית
         val effectiveOctave = if (isLooper) targetOctave else octaveShift
         val freq = getEffectiveFrequency(baseFreq, effectiveOctave)
 
@@ -298,7 +300,7 @@ class SynthEngine(private val context: Context) {
                     attack = attackMs,
                     sustain = sustainLevel,
                     release = releaseMs,
-                    octave = octaveShift // <-- 3. שמירת האוקטבה הנוכחית בעת ההקלטה בלופר[span_8](start_span)[span_8](end_span)
+                    octave = octaveShift // <-- 3. שמירת האוקטבה הנוכחית בעת ההקלטה בלופר
                 )
             )
         }
@@ -420,7 +422,7 @@ class SynthEngine(private val context: Context) {
                                 attack = ev.attack,
                                 sustain = ev.sustain,
                                 release = ev.release,
-                                targetOctave = ev.octave // <-- 4. העברת האוקטבה המקורית שנשמרה בעת ניגון חוזר בלופר[span_9](start_span)[span_9](end_span)
+                                targetOctave = ev.octave // <-- 4. העברת האוקטבה המקורית שנשמרה בעת ניגון חוזר בלופר
                             )
                         } else {
                             noteOff(ev.freq, isLooper = true)
@@ -577,13 +579,47 @@ class SynthEngine(private val context: Context) {
         randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
         randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
 
-        randomAccessFile.seek(40)
-        randomAccessFile.write((totalAudioLen and 0xff).toInt())
-        randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
-        randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
-        randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
-
         randomAccessFile.close()
+    }
+
+    // --- משתני נגן רקע (WAV/MP3) ---
+    private var backgroundPlayer: MediaPlayer? = null
+
+    fun setLooperVol(vol: Float) {
+        looperVolume = vol
+        backgroundPlayer?.setVolume(vol, vol)
+    }
+
+    fun loadAndPlayBackgroundAudio(context: Context, uri: Uri) {
+        try {
+            backgroundPlayer?.stop()
+            backgroundPlayer?.release()
+            backgroundPlayer = MediaPlayer.create(context, uri).apply {
+                isLooping = true
+                setVolume(looperVolume, looperVolume)
+                start()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun pauseBackgroundAudio() {
+        backgroundPlayer?.takeIf { it.isPlaying }?.pause()
+    }
+
+    fun resumeBackgroundAudio() {
+        backgroundPlayer?.start()
+    }
+
+    fun stopBackgroundAudio() {
+        try {
+            backgroundPlayer?.stop()
+            backgroundPlayer?.release()
+            backgroundPlayer = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }
 
@@ -639,6 +675,16 @@ fun SynthAppUI(engine: SynthEngine) {
             } else {
                 Toast.makeText(context, "שגיאה בשמירת הקובץ", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    // --- הוספת הלאונצ'ר החדש לבחירת קובץ אודיו ---
+    val loadAudioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            engine.loadAndPlayBackgroundAudio(context, it)
+            isLoopPlayState = true
         }
     }
 
@@ -1018,7 +1064,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 2 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
                     SynthSlider("עוצמת הלופר", "${(looperVolState * 100).toInt()}%", looperVolState, accentColor = gold) {
                         looperVolState = it
-                        engine.looperVolume = it
+                        engine.setLooperVol(it) // קורא לפונקציה המעודכנת לעדכון גם של מנוע ה-DSP וגם של ה-MediaPlayer
                     }
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1045,13 +1091,15 @@ fun SynthAppUI(engine: SynthEngine) {
                             onClick = {
                                 if (isLoopPlayState) {
                                     engine.stopLoopPlayback()
+                                    engine.pauseBackgroundAudio() // השהיית קובץ הרקע
                                     isLoopPlayState = false
                                 } else {
                                     engine.startLoopPlayback()
+                                    engine.resumeBackgroundAudio() // המשך ניגון קובץ הרקע
                                     isLoopPlayState = true
                                 }
                             },
-                            enabled = engine.recordedNotes.isNotEmpty() && !isLoopRecState,
+                            // הסרנו את המגבלה "enabled =" כדי שתוכל לנגן ולעצור את קובץ ה-WAV גם אם לא הוקלטו תווי סינתיסייזר
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2
                             ),
@@ -1061,16 +1109,26 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
+                    // --- הכפתור החדש לטעינת קובץ ---
+                    OutlinedButton(
+                        onClick = { loadAudioLauncher.launch("audio/*") },
+                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
+                    ) {
+                        Text("📂 טען קובץ שמע (WAV/MP3)", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
                     OutlinedButton(
                         onClick = {
                             engine.clearLoop()
+                            engine.stopBackgroundAudio() // איפוס ועצירת קובץ הרקע
                             isLoopRecState = false
                             isLoopPlayState = false
                         },
                         modifier = Modifier.fillMaxWidth().height(42.dp),
                         border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
                     ) {
-                        Text("🗑️ נקה לופר", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("🗑️ נקה לופר ורקע", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 
