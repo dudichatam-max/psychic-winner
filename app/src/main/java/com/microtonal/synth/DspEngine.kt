@@ -239,6 +239,9 @@ class DspEngine(private val sampleRate: Int = 44100) {
         }
 
         val finalLiveSample = (liveChannelMix * smoothedLiveVol).toFloat()
+        
+        // כאן הקובץ החיצוני משולב יחד עם הלופר (מוכפל בווליום הלופר), 
+        // וכיוון שהם חלק מ-finalLooperSample והלאה ב-totalSample, הם ייכללו בהקלטת ה-WAV!
         val finalLooperSample = ((looperChannelMix + externalAudioSample) * smoothedLooperVol).toFloat()
 
         var totalSample = (finalLiveSample + finalLooperSample).toDouble()
@@ -262,7 +265,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
         dcX1 = totalSample
         dcY1 = if (dcSample.isNaN() || dcSample.isInfinite()) 0.0 else dcSample
 
-        // Soft Clipper
+        // Soft Clipper (הסאונד המלא שעובר לרמקולים וגם מוקלט לקובץ ה-WAV)
         val masterSample = softSaturate(dcY1 * 0.52).toFloat()
 
         reusableFrame.liveSample = finalLiveSample
