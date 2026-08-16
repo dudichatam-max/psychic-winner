@@ -157,7 +157,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
             slot.smoothedCutoff += (targetCutoff - slot.smoothedCutoff) * 0.005f
             slot.smoothedRes += (targetRes - slot.smoothedRes) * 0.005f
 
-            if (Math.abs(slot.smoothedCutoff - slot.lastCutoff) > 1.0f || Math.abs(slot.smoothedRes - slot.lastRes) > 0.01f) {
+            if (abs(slot.smoothedCutoff - slot.lastCutoff) > 0.5f || abs(slot.smoothedRes - slot.lastRes) > 0.005f) {
                 slot.lastCutoff = slot.smoothedCutoff
                 slot.lastRes = slot.smoothedRes
                 
