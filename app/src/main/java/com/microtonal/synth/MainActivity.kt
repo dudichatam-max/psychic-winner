@@ -577,19 +577,28 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
     }
 
     private fun updateWavHeader(file: File) {
-        val totalAudioLen = file.length() - 44
-        val totalDataLen = totalAudioLen + 36
+    val totalAudioLen = file.length() - 44
+    val totalDataLen = totalAudioLen + 36
 
-        val randomAccessFile = java.io.RandomAccessFile(file, "rw")
-        
-        randomAccessFile.seek(4)
-        randomAccessFile.write((totalDataLen and 0xff).toInt())
-        randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
-        randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
-        randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
+    val randomAccessFile = java.io.RandomAccessFile(file, "rw")
+    
+    // עדכון גודל ה-RIFF (בייטים 4-7)
+    randomAccessFile.seek(4)
+    randomAccessFile.write((totalDataLen and 0xff).toInt())
+    randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
+    randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
+    randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
 
-        randomAccessFile.close()
-    }
+    // עדכון גודל נתוני האודיו הכלליים בתוך ה-Data Chunk (בייטים 40-43)
+    randomAccessFile.seek(40)
+    randomAccessFile.write((totalAudioLen and 0xff).toInt())
+    randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
+    randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
+    randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
+
+    randomAccessFile.close()
+}
+
 
     // --- משתני נגן רקע (WAV/MP3) ---
     private var backgroundPlayer: MediaPlayer? = null
