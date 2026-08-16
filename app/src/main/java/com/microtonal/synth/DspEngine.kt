@@ -34,10 +34,37 @@ class DspEngine(private val sampleRate: Int = 44100) {
     
     private var liveLfoPhase = 0.0
 
+    // --- נתונים עבור נגינת קובץ אודיו חיצוני בלופר ---
+    @Volatile
+    private var externalAudioBuffer: FloatArray? = null
+    private var externalAudioPos = 0
+    @Volatile
+    var isExternalAudioPlaying = false
+    @Volatile
+    var isExternalAudioLooping = true
+
     private val lutSize = 4096
     private val lutMask = lutSize - 1
     private val sineLUT = FloatArray(lutSize) { i ->
         sin(2.0 * PI * i / lutSize).toFloat()
+    }
+
+    /**
+     * טעינת מערך PCM מפוילח מראש של הקובץ החיצוני לתוך ה-DSP
+     */
+    fun setExternalAudioBuffer(buffer: FloatArray?) {
+        externalAudioBuffer = buffer
+        externalAudioPos = 0
+    }
+
+    fun startExternalPlayback() {
+        externalAudioPos = 0
+        isExternalAudioPlaying = true
+    }
+
+    fun stopExternalPlayback() {
+        isExternalAudioPlaying = false
+        externalAudioPos = 0
     }
 
     @Suppress("NOTHING_TO_INLINE")
@@ -194,8 +221,25 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
         }
 
+        // --- קריאת סאמפל מתוך הקובץ החיצוני שנטען לזיכרון ---
+        var externalAudioSample = 0.0
+        val extBuf = externalAudioBuffer
+        if (isExternalAudioPlaying && extBuf != null && extBuf.isNotEmpty()) {
+            if (externalAudioPos < extBuf.size) {
+                externalAudioSample = extBuf[externalAudioPos].toDouble()
+                externalAudioPos++
+                if (externalAudioPos >= extBuf.size) {
+                    if (isExternalAudioLooping) {
+                        externalAudioPos = 0
+                    } else {
+                        isExternalAudioPlaying = false
+                    }
+                }
+            }
+        }
+
         val finalLiveSample = (liveChannelMix * smoothedLiveVol).toFloat()
-        val finalLooperSample = (looperChannelMix * smoothedLooperVol).toFloat()
+        val finalLooperSample = ((looperChannelMix + externalAudioSample) * smoothedLooperVol).toFloat()
 
         var totalSample = (finalLiveSample + finalLooperSample).toDouble()
 
