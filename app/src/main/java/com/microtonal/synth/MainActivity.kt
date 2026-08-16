@@ -91,12 +91,6 @@ class NoteSlot {
     // מקדמי מעטפת מחושבים מראש לאופטימיזציה ב-DSP
     var attackCoeff: Double = 0.0
     var releaseCoeff: Double = 0.0
-
-    // --- המשתנים החדשים שהוספנו לאופטימיזציית הפילטר ---
-    var cachedG: Double = 0.0
-    var cachedH: Double = 0.0
-    var lastCutoff: Float = -1f
-    var lastRes: Float = -1f
 }
 
 data class LooperNoteEvent(
@@ -174,13 +168,13 @@ class SynthEngine(private val context: Context) {
         dspEngine = DspEngine(sampleRate)
 
         val minBufferSize = AudioTrack.getMinBufferSize(
-    sampleRate,
-    AudioFormat.CHANNEL_OUT_MONO,
-    AudioFormat.ENCODING_PCM_16BIT
-)
+            sampleRate,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
 
-// הכפלה פי 2 או 3 ליתר ביטחון נגד קטיעות בזמן שימוש ב-Performance Pad
-val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
+        // הכפלה פי 2 או 3 ליתר ביטחון נגד קטיעות בזמן שימוש ב-Performance Pad
+        val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
 
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
@@ -245,7 +239,10 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
                 }
 
                 if (isRecording) {
-                    recordingQueue.offer(byteBuffer.array().clone())
+                    // אופטימיזציה: העתקת מערך מהירה ללא clone() כדי למנוע הטרדות של ה-GC ב-Audio Thread
+                    val recBytes = ByteArray(bufferSize * 2)
+                    System.arraycopy(byteBuffer.array(), 0, recBytes, 0, recBytes.size)
+                    recordingQueue.offer(recBytes)
                 }
 
                 audioTrack.write(buffer, 0, buffer.size)
@@ -267,10 +264,15 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
         return baseFreq * Math.pow(2.0, octave.toDouble()).toFloat()
     }
 
-    // עדכון סוג הגל בזמן אמת לנגינה חיה בלבד
+    // עדכון סוג הגל בזמן אמת לנגינה חיה בלבד - ללא הקצאות זיכרון
     fun setLiveWaveform(wave: Int) {
         waveformType = wave
-        noteSlots.filter { it.active && !it.isLooperNote }.forEach { it.waveform = wave }
+        for (i in 0 until maxVoices) {
+            val slot = noteSlots[i]
+            if (slot.active && !slot.isLooperNote) {
+                slot.waveform = wave
+            }
+        }
     }
 
     fun noteOn(
@@ -306,7 +308,17 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
             )
         }
 
-        var slot = noteSlots.find { it.active && it.baseFreq == baseFreq && it.isLooperNote == isLooper }
+        var slot: NoteSlot? = null
+
+        // 1. חיפוש קול קיים בעל אותו תדר ומצב לופר
+        for (i in 0 until maxVoices) {
+            val s = noteSlots[i]
+            if (s.active && s.baseFreq == baseFreq && s.isLooperNote == isLooper) {
+                slot = s
+                break
+            }
+        }
+
         if (slot != null) {
             slot.isReleasing = false
             slot.targetFreq = freq
@@ -318,19 +330,50 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
             return
         }
 
-        // Voice Stealing
-        slot = noteSlots.find { !it.active }
-
-        if (slot == null) {
-            slot = noteSlots.filter { it.isReleasing }.minByOrNull { it.envelopeVolume }
+        // Voice Stealing באופטימיזציה מלאה ללא הקצאות זיכרון (הסרת filter / minByOrNull)
+        // 2. מציאת Slot פנוי
+        for (i in 0 until maxVoices) {
+            val s = noteSlots[i]
+            if (!s.active) {
+                slot = s
+                break
+            }
         }
 
+        // 3. מציאת הקול הנמוך ביותר מבין האותות בשחרור (Releasing)
         if (slot == null) {
-            slot = noteSlots.filter { !it.isLooperNote }.minByOrNull { it.envelopeVolume }
+            var minVol = Double.MAX_VALUE
+            for (i in 0 until maxVoices) {
+                val s = noteSlots[i]
+                if (s.isReleasing && s.envelopeVolume < minVol) {
+                    minVol = s.envelopeVolume
+                    slot = s
+                }
+            }
         }
 
+        // 4. מציאת הקול הנמוך ביותר מבין הקולות החיים (שאינם לופר)
         if (slot == null) {
-            slot = noteSlots.minByOrNull { it.envelopeVolume }
+            var minVol = Double.MAX_VALUE
+            for (i in 0 until maxVoices) {
+                val s = noteSlots[i]
+                if (!s.isLooperNote && s.envelopeVolume < minVol) {
+                    minVol = s.envelopeVolume
+                    slot = s
+                }
+            }
+        }
+
+        // 5. מציאת הקול בעל העוצמה הנמוכה ביותר באופן מוחלט
+        if (slot == null) {
+            var minVol = Double.MAX_VALUE
+            for (i in 0 until maxVoices) {
+                val s = noteSlots[i]
+                if (s.envelopeVolume < minVol) {
+                    minVol = s.envelopeVolume
+                    slot = s
+                }
+            }
         }
 
         if (slot != null) {
@@ -381,8 +424,13 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
             )
         }
 
-        val slot = noteSlots.find { it.active && it.baseFreq == baseFreq && it.isLooperNote == isLooper && !it.isReleasing }
-        slot?.isReleasing = true
+        for (i in 0 until maxVoices) {
+            val slot = noteSlots[i]
+            if (slot.active && slot.baseFreq == baseFreq && slot.isLooperNote == isLooper && !slot.isReleasing) {
+                slot.isReleasing = true
+                break
+            }
+        }
     }
 
     fun startLoopRecording() {
@@ -433,7 +481,11 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
                     try { Thread.sleep(1) } catch (_: Exception) {}
                 }
 
-                noteSlots.filter { it.isLooperNote }.forEach { it.active = false }
+                for (i in 0 until maxVoices) {
+                    if (noteSlots[i].isLooperNote) {
+                        noteSlots[i].active = false
+                    }
+                }
             }
         }.also { it.start() }
     }
@@ -442,7 +494,11 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
         isLoopPlaying = false
         loopThread?.interrupt()
         loopThread = null
-        noteSlots.filter { it.isLooperNote }.forEach { it.active = false }
+        for (i in 0 until maxVoices) {
+            if (noteSlots[i].isLooperNote) {
+                noteSlots[i].active = false
+            }
+        }
     }
 
     fun clearLoop() {
@@ -479,7 +535,7 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
         }
     }
 
-        fun stopAndSaveRecording(): File? {
+    fun stopAndSaveRecording(): File? {
         if (!isRecording) return wavFile
         isRecording = false
         try {
@@ -502,7 +558,6 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
         }
         return wavFile
     }
-
 
     fun exportRecordingToUri(context: Context, destinationUri: Uri): Boolean {
         val sourceFile = wavFile ?: File(context.cacheDir, "temp_synth_recording.wav")
@@ -577,28 +632,27 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
     }
 
     private fun updateWavHeader(file: File) {
-    val totalAudioLen = file.length() - 44
-    val totalDataLen = totalAudioLen + 36
+        val totalAudioLen = file.length() - 44
+        val totalDataLen = totalAudioLen + 36
 
-    val randomAccessFile = java.io.RandomAccessFile(file, "rw")
-    
-    // עדכון גודל ה-RIFF (בייטים 4-7)
-    randomAccessFile.seek(4)
-    randomAccessFile.write((totalDataLen and 0xff).toInt())
-    randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
-    randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
-    randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
+        val randomAccessFile = java.io.RandomAccessFile(file, "rw")
+        
+        // עדכון גודל ה-RIFF (בייטים 4-7)
+        randomAccessFile.seek(4)
+        randomAccessFile.write((totalDataLen and 0xff).toInt())
+        randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
+        randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
+        randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
 
-    // עדכון גודל נתוני האודיו הכלליים בתוך ה-Data Chunk (בייטים 40-43)
-    randomAccessFile.seek(40)
-    randomAccessFile.write((totalAudioLen and 0xff).toInt())
-    randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
-    randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
-    randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
+        // עדכון גודל נתוני האודיו הכלליים בתוך ה-Data Chunk (בייטים 40-43)
+        randomAccessFile.seek(40)
+        randomAccessFile.write((totalAudioLen and 0xff).toInt())
+        randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
+        randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
+        randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
 
-    randomAccessFile.close()
-}
-
+        randomAccessFile.close()
+    }
 
     // --- משתני נגן רקע (WAV/MP3) ---
     private var backgroundPlayer: MediaPlayer? = null
@@ -647,7 +701,7 @@ fun SynthAppUI(engine: SynthEngine) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE) }
 
-        val defaultFrequencies = remember {
+    val defaultFrequencies = remember {
         listOf(222.00f, 299.00f, 333.00f, 355.00f, 396.00f, 444.00f, 463.00f, 477.00f)
     }
     val frequencies = remember {
@@ -1117,7 +1171,6 @@ fun SynthAppUI(engine: SynthEngine) {
                                     isLoopPlayState = true
                                 }
                             },
-                            // הסרנו את המגבלה "enabled =" כדי שתוכל לנגן ולעצור את קובץ ה-WAV גם אם לא הוקלטו תווי סינתיסייזר
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2
                             ),
