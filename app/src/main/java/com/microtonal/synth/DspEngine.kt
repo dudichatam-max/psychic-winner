@@ -137,27 +137,30 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
 
             val raw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt)
-            var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.5
 
             // --- פילטר ZDF: ציר X = Cutoff LFO, ציר Y = Resonance ---
             var targetCutoff = (if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq).coerceIn(20f, 16000f)
             
             if (!slot.isLooperNote && smoothedPerfX > 0.001f) {
-                val modDepth = smoothedPerfX * 5000f
+                val modDepth = smoothedPerfX * 4000f
                 targetCutoff = (targetCutoff + (lfoMod * modDepth)).coerceIn(20f, 16000f).toFloat()
             }
             
             var targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance)
             
-            // ציר Y מעלה את הרזוננס בהדרגה עד לשיא של 0.95
+            // ציר Y מעלה את הרזוננס בהדרגה עד לשיא בטוח של 0.82 למניעת עיוות
             if (!slot.isLooperNote && smoothedPerfY > 0.001f) {
-                targetRes = (targetRes + smoothedPerfY * (0.95f - targetRes)).coerceIn(0.0f, 0.95f)
+                targetRes = (targetRes + smoothedPerfY * (0.82f - targetRes)).coerceIn(0.0f, 0.82f)
             } else {
-                targetRes = targetRes.coerceIn(0.0f, 0.95f)
+                targetRes = targetRes.coerceIn(0.0f, 0.82f)
             }
 
             slot.smoothedCutoff += (targetCutoff - slot.smoothedCutoff) * 0.01f
             slot.smoothedRes += (targetRes - slot.smoothedRes) * 0.01f
+
+            // פיצוי עוצמה אוטומטי המונע עיוות דיגיטלי כשהרזוננס עולה
+            val resGainComp = 1.0 - (slot.smoothedRes * 0.45)
+            var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.5 * resGainComp
 
             val g = tan(PI * slot.smoothedCutoff.toDouble() / sampleRate)
             val k = 2.0 * (1.0 - slot.smoothedRes.toDouble())
