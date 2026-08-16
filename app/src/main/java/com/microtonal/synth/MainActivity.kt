@@ -5,6 +5,9 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
@@ -37,7 +40,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -446,6 +453,7 @@ class SynthEngine(private val context: Context) {
     }
 
     fun startLoopPlayback() {
+        dspEngine.startExternalPlayback()
         if (recordedNotes.isEmpty() || loopDurationMs <= 0) return
         stopLoopPlayback()
         isLoopPlaying = true
@@ -492,6 +500,7 @@ class SynthEngine(private val context: Context) {
 
     fun stopLoopPlayback() {
         isLoopPlaying = false
+        dspEngine.stopExternalPlayback()
         loopThread?.interrupt()
         loopThread = null
         for (i in 0 until maxVoices) {
@@ -674,14 +683,25 @@ class SynthEngine(private val context: Context) {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+
+        // טעינה ופענוח אסינכרוני של הסאמפלים ישירות לתוך מנוע ה-DSP ב-RAM
+        CoroutineScope(Dispatchers.IO).launch {
+            val pcmData = decodeAudioToPCM(context, uri)
+            if (pcmData != null) {
+                dspEngine.setExternalAudioBuffer(pcmData)
+                dspEngine.startExternalPlayback()
+            }
+        }
     }
 
     fun pauseBackgroundAudio() {
         backgroundPlayer?.takeIf { it.isPlaying }?.pause()
+        dspEngine.isExternalAudioPlaying = false
     }
 
     fun resumeBackgroundAudio() {
         backgroundPlayer?.start()
+        dspEngine.isExternalAudioPlaying = true
     }
 
     fun stopBackgroundAudio() {
@@ -691,6 +711,88 @@ class SynthEngine(private val context: Context) {
             backgroundPlayer = null
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+        dspEngine.stopExternalPlayback()
+        dspEngine.setExternalAudioBuffer(null)
+    }
+
+    /**
+     * פונקציית פענוח אסינכרונית הממירה קובצי אודיו מכל פורמט ל-FloatArray PCM מיושר
+     */
+    private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, uri, null)
+            var trackIndex = -1
+            var format: MediaFormat? = null
+
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("audio/")) {
+                    trackIndex = i
+                    format = f
+                    break
+                }
+            }
+
+            if (trackIndex < 0 || format == null) return null
+
+            extractor.selectTrack(trackIndex)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+            val codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val pcmList = ArrayList<Float>(262144)
+            val info = MediaCodec.BufferInfo()
+            var isEOS = false
+
+            while (!isEOS) {
+                val inIndex = codec.dequeueInputBuffer(10000)
+                if (inIndex >= 0) {
+                    val inputBuffer = codec.getInputBuffer(inIndex)
+                    if (inputBuffer != null) {
+                        val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                        if (sampleSize < 0) {
+                            codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            isEOS = true
+                        } else {
+                            val sampleTime = extractor.sampleTime
+                            codec.queueInputBuffer(inIndex, 0, sampleSize, sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+
+                var outIndex = codec.dequeueOutputBuffer(info, 10000)
+                while (outIndex >= 0) {
+                    val outputBuffer = codec.getOutputBuffer(outIndex)
+                    if (outputBuffer != null && info.size > 0) {
+                        outputBuffer.position(info.offset)
+                        outputBuffer.limit(info.offset + info.size)
+                        val shortBuffer = outputBuffer.asShortBuffer()
+                        while (shortBuffer.hasRemaining()) {
+                            pcmList.add(shortBuffer.get() / 32768.0f)
+                        }
+                    }
+                    codec.releaseOutputBuffer(outIndex, false)
+                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        break
+                    }
+                    outIndex = codec.dequeueOutputBuffer(info, 0)
+                }
+            }
+
+            codec.stop()
+            codec.release()
+            extractor.release()
+
+            return pcmList.toFloatArray()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            try { extractor.release() } catch (_: Exception) {}
+            return null
         }
     }
 }
@@ -1180,7 +1282,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-                    // --- הכפתור החדש לטעינת קובץ ---
+                    // --- הכפתור לטעינת קובץ שמע חיצוני ---
                     OutlinedButton(
                         onClick = { loadAudioLauncher.launch("audio/*") },
                         modifier = Modifier.fillMaxWidth().height(42.dp),
