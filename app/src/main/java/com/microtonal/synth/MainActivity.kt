@@ -703,7 +703,7 @@ fun stopBackgroundAudio() {
  * פונקציית פענוח אסינכרונית הממירה קובצי אודיו ל-FloatArray
  * תוקן: שימוש במערך פרימיטיבי רציף (למניעת קריסת זיכרון OOM) והמרת Stereo ל-Mono.
  */
-private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {
+private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {    
     val extractor = MediaExtractor()
     try {
         extractor.setDataSource(context, uri, null)
@@ -724,17 +724,18 @@ private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {
         extractor.selectTrack(trackIndex)
         
         val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
-        
-        // בדיקה האם הקובץ הוא סטריאו או מונו
         val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (e: Exception) { 1 }
+        
+        // קצב הדגימה המקורי של קובץ השמע החיצוני
+        val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (e: Exception) { 44100 }
         
         val codec = MediaCodec.createDecoderByType(mime)
         codec.configure(format, null, null, 0)
         codec.start()
         
-        // שימוש במערך פרימיטיבי שגדל דינמית חוסך מאות מגה-בייטים של RAM ומונע קראשים
-        var pcmData = FloatArray(1024 * 1024) 
-        var size = 0
+        // שלב א': איסוף כל סאמפל ה-PCM לזכרון במונו
+        var rawPcmData = FloatArray(1024 * 1024)
+        var rawSize = 0
         
         val info = MediaCodec.BufferInfo()
         var isEOS = false
@@ -749,8 +750,7 @@ private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {
                         codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                         isEOS = true
                     } else {
-                        val sampleTime = extractor.sampleTime
-                        codec.queueInputBuffer(inIndex, 0, sampleSize, sampleTime, 0)
+                        codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
                         extractor.advance()
                     }
                 }
@@ -765,22 +765,20 @@ private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {
                     val shortBuffer = outputBuffer.asShortBuffer()
                     
                     if (channels == 2) {
-                        // המרת סטריאו למונו (מיזוג L + R)
                         while (shortBuffer.remaining() >= 2) {
-                            if (size >= pcmData.size) {
-                                pcmData = pcmData.copyOf(pcmData.size * 2)
+                            if (rawSize >= rawPcmData.size) {
+                                rawPcmData = rawPcmData.copyOf(rawPcmData.size * 2)
                             }
                             val left = shortBuffer.get() / 32768.0f
                             val right = shortBuffer.get() / 32768.0f
-                            pcmData[size++] = (left + right) / 2.0f
+                            rawPcmData[rawSize++] = (left + right) / 2.0f
                         }
                     } else {
-                        // מונו רגיל
                         while (shortBuffer.hasRemaining()) {
-                            if (size >= pcmData.size) {
-                                pcmData = pcmData.copyOf(pcmData.size * 2)
+                            if (rawSize >= rawPcmData.size) {
+                                rawPcmData = rawPcmData.copyOf(rawPcmData.size * 2)
                             }
-                            pcmData[size++] = shortBuffer.get() / 32768.0f
+                            rawPcmData[rawSize++] = shortBuffer.get() / 32768.0f
                         }
                     }
                 }
@@ -795,17 +793,39 @@ private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {
         codec.release()
         extractor.release()
         
-        // החזרת המערך בגודלו המדויק
-        return pcmData.copyOf(size)
+        val decodedSamplesCount = rawSize
+        if (decodedSamplesCount <= 0) return null
+
+        // שלב ב': ביצוע Resampling מקצב הקובץ (fileSampleRate) לקצב המנוע (sampleRate)
+        val ratio = fileSampleRate.toDouble() / sampleRate.toDouble()
+        val targetSize = (decodedSamplesCount / ratio).toInt()
+        val resampledData = FloatArray(targetSize)
+        
+        for (i in 0 until targetSize) {
+            val srcIdx = i * ratio
+            val idxInt = srcIdx.toInt()
+            val frac = (srcIdx - idxInt).toFloat()
+            
+            if (idxInt + 1 < decodedSamplesCount) {
+                // אינטרפולציה ליניארית לקבלת סאונד חלק וללא עיוותים
+                val s0 = rawPcmData[idxInt]
+                val s1 = rawPcmData[idxInt + 1]
+                resampledData[i] = s0 + (s1 - s0) * frac
+            } else if (idxInt < decodedSamplesCount) {
+                resampledData[i] = rawPcmData[idxInt]
+            }
+        }
+        
+        return resampledData
         
     } catch (e: Exception) {
         e.printStackTrace()
         try { extractor.release() } catch (_: Exception) {}
         return null
-     }
-  }
+    }
 }
-            
+}
+   
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
