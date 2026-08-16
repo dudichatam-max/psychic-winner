@@ -13,7 +13,6 @@ class DspFrame(
 
 class DspEngine(private val sampleRate: Int = 44100) {
 
-    // שימוש מחדש באובייקט פלט יחיד למניעת עומס על ה-Garbage Collector
     private val reusableFrame = DspFrame()
 
     private val delayBuffer = FloatArray(sampleRate)
@@ -23,15 +22,16 @@ class DspEngine(private val sampleRate: Int = 44100) {
     private var delayFilterState = 0.0
     private var currentHeadroom = 1.0
 
-    // החלקת פרמטרים גלובלית למניעת Zipper Noise
     private var smoothedLiveVol = 0.5
     private var smoothedLooperVol = 1.0
     private var smoothedEchoMix = 0.25
     
-    // --- מתנד LFO חופשי לשימוש ב- PERFORMANCE PAD ---
+    // החלקת נתוני ה-Pad למניעת קליקים וקפיצות ב-UI
+    private var smoothedPerfX = 0.0f
+    private var smoothedPerfY = 0.0f
+    
     private var liveLfoPhase = 0.0
 
-    // --- OPTIMIZATION 1: SINE LOOKUP TABLE (LUT) ---
     private val lutSize = 4096
     private val lutMask = lutSize - 1
     private val sineLUT = FloatArray(lutSize) { i ->
@@ -44,7 +44,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
         return sineLUT[index].toDouble()
     }
 
-    // --- OPTIMIZATION 2: FAST XORSHIFT PRNG FOR NOISE ---
     private var noiseSeed = 123456789
     @Suppress("NOTHING_TO_INLINE")
     private inline fun fastNoise(): Double {
@@ -66,17 +65,18 @@ class DspEngine(private val sampleRate: Int = 44100) {
         sustainLevel: Float,
         releaseMs: Float,
         echoMix: Float,
-        performanceX: Float, // ערך 0.0 עד 1.0 המגיע מה-PAD
-        performanceY: Float  // ערך 0.0 עד 1.0 המגיע מה-PAD
+        performanceX: Float,
+        performanceY: Float
     ): DspFrame {
-        // החלקת עוצמות (Parameter Smoothing)
         smoothedLiveVol += (liveVolume - smoothedLiveVol) * 0.005
         smoothedLooperVol += (looperVolume - smoothedLooperVol) * 0.005
         smoothedEchoMix += (echoMix - smoothedEchoMix) * 0.005
         
-        // --- חישוב מודולציית LFO בזמן אמת עבור הנגינה החיה (ציר X) ---
-        // המהירות נעה בין 0.1Hz ועד 25Hz בהתאם למיקום האצבע בציר ה-X
-        val lfoFreq = 0.1 + performanceX * 24.9 
+        smoothedPerfX += (performanceX - smoothedPerfX) * 0.005f
+        smoothedPerfY += (performanceY - smoothedPerfY) * 0.005f
+        
+        // --- ציר X: LFO מקורי על תדר החיתוך (Cutoff) ---
+        val lfoFreq = 0.1 + smoothedPerfX * 24.9 
         liveLfoPhase += lfoFreq / sampleRate
         if (liveLfoPhase >= 1.0) liveLfoPhase -= 1.0
         val lfoMod = fastSine(liveLfoPhase).toFloat()
@@ -98,7 +98,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
             val slot = noteSlots[v]
             if (!slot.active) continue
 
-            // Glissando / Glide
             if (glideMs > 0 && abs(slot.currentFreq - slot.targetFreq) > 0.05f) {
                 slot.currentFreq += ((slot.targetFreq - slot.currentFreq) * glideFactor).toFloat()
             } else {
@@ -112,7 +111,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
             val phaseNorm = slot.phase / (2.0 * PI)
 
-            // מעטפת ADSR (שימוש במקדמים מחושבים מראש למניעת חישובי Math.exp יקרים בלולאה)
             val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
 
             val attackCoeff = if (slot.attackCoeff > 0.0) slot.attackCoeff else {
@@ -138,39 +136,32 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 }
             }
 
-            // --- מחולל גלים אופטימלי (PolyBLEP + LUT) ---
             val raw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt)
-
             var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.5
 
-            // --- פילטר ZDF / TPT SVF (אופטימיזציה) ---
+            // --- פילטר ZDF: ציר X = Cutoff LFO, ציר Y = Resonance ---
             var targetCutoff = (if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq).coerceIn(20f, 16000f)
             
-            // --- X/Y PAD: החלת LFO ל-Cutoff רק על תווים חיים ---
-            if (!slot.isLooperNote && performanceX > 0.01f) {
-                val modDepth = performanceX * 5000f // ככל שמושכים ימינה ה-Rate וה-Depth גדלים
+            if (!slot.isLooperNote && smoothedPerfX > 0.001f) {
+                val modDepth = smoothedPerfX * 5000f
                 targetCutoff = (targetCutoff + (lfoMod * modDepth)).coerceIn(20f, 16000f).toFloat()
             }
             
-            val targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance).coerceIn(0.0f, 0.95f)
-
-            slot.smoothedCutoff += (targetCutoff - slot.smoothedCutoff) * 0.005f
-            slot.smoothedRes += (targetRes - slot.smoothedRes) * 0.005f
-
-            if (abs(slot.smoothedCutoff - slot.lastCutoff) > 0.5f || abs(slot.smoothedRes - slot.lastRes) > 0.005f) {
-                slot.lastCutoff = slot.smoothedCutoff
-                slot.lastRes = slot.smoothedRes
-                
-                val gTemp = tan(PI * slot.smoothedCutoff.toDouble() / sampleRate)
-                val kTemp = 2.0 * (1.0 - slot.smoothedRes.toDouble())
-                
-                slot.cachedG = gTemp
-                slot.cachedH = 1.0 / (1.0 + gTemp * (gTemp + kTemp))
+            var targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance)
+            
+            // ציר Y מעלה את הרזוננס בהדרגה עד לשיא של 0.95
+            if (!slot.isLooperNote && smoothedPerfY > 0.001f) {
+                targetRes = (targetRes + smoothedPerfY * (0.95f - targetRes)).coerceIn(0.0f, 0.95f)
+            } else {
+                targetRes = targetRes.coerceIn(0.0f, 0.95f)
             }
 
-            val g = slot.cachedG
+            slot.smoothedCutoff += (targetCutoff - slot.smoothedCutoff) * 0.01f
+            slot.smoothedRes += (targetRes - slot.smoothedRes) * 0.01f
+
+            val g = tan(PI * slot.smoothedCutoff.toDouble() / sampleRate)
             val k = 2.0 * (1.0 - slot.smoothedRes.toDouble())
-            val h = slot.cachedH
+            val h = 1.0 / (1.0 + g * (g + k))
 
             val hp = h * (voiceSample - (g + k) * slot.zdfState1 - slot.zdfState2)
             val bp = g * hp + slot.zdfState1
@@ -188,30 +179,19 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
         }
 
-        var finalLiveSample = (liveChannelMix * smoothedLiveVol).toFloat()
+        val finalLiveSample = (liveChannelMix * smoothedLiveVol).toFloat()
         val finalLooperSample = (looperChannelMix * smoothedLooperVol).toFloat()
-        
-        // --- X/Y PAD: החלת Drive / Distortion (ציר ה-Y) רק על הנגינה החיה ---
-        if (performanceY > 0.01f) {
-            val driveAmount = performanceY * 15.0 // עד פי 15 גיין לעיוות מודולטורי אגרסיבי
-            val driven = finalLiveSample * (1.0 + driveAmount)
-            // שימוש ב-Soft Clipper כדי ליצור דיסטורשן שמן מבלי לקרוע את הרמקול, ופיצוי ווליום חלקי
-            finalLiveSample = (softSaturate(driven.toDouble()) * (1.0 / (1.0 + driveAmount * 0.18))).toFloat()
-        }
 
-        // מוגדר כ-Double כדי להתאים בדיוק לחישובי הדיליי ומניעת שגיאות קומפילציה
         var totalSample = (finalLiveSample + finalLooperSample).toDouble()
 
-        // אפקט דיליי מוזיקלי עם Feedback + סינון
+        // Delay
         val delaySamples = (sampleRate * 0.28).toInt()
         val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
         var echoSample = delayBuffer[delayReadPos].toDouble()
 
-        // סינון עדין על ההד (Low-pass)
         echoSample = echoSample * 0.82 + delayFilterState * 0.18
         delayFilterState = echoSample
 
-        // Feedback
         val feedback = 0.42
         delayBuffer[delayWritePos] = (totalSample + echoSample * feedback).toFloat()
         delayWritePos = (delayWritePos + 1) % delayBuffer.size
@@ -223,10 +203,9 @@ class DspEngine(private val sampleRate: Int = 44100) {
         dcX1 = totalSample
         dcY1 = if (dcSample.isNaN() || dcSample.isInfinite()) 0.0 else dcSample
 
-        // Fast Cubic Soft Clipper
+        // Soft Clipper
         val masterSample = softSaturate(dcY1 * 0.52).toFloat()
 
-        // עדכון האובייקט הקיים והחזרתו ללא יצירת אובייקט חדש בזיכרון
         reusableFrame.liveSample = finalLiveSample
         reusableFrame.looperSample = finalLooperSample
         reusableFrame.masterSample = masterSample
@@ -234,7 +213,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
         return reusableFrame
     }
 
-    // --- PolyBLEP Anti-Aliasing Logic ---
     @Suppress("NOTHING_TO_INLINE")
     private inline fun polyBlep(t: Double, dt: Double): Double {
         return when {
@@ -252,26 +230,25 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
     private fun generateOptimizedWaveform(waveType: Int, phase: Double, dt: Double): Double {
         return when (waveType) {
-            0 -> fastSine(phase) // Sine מהיר מטבלת LUT
-            1 -> { // Square Wave
+            0 -> fastSine(phase)
+            1 -> { 
                 var naive = if (phase < 0.5) 0.3 else -0.3
                 naive += polyBlep(phase, dt) * 0.3
                 naive -= polyBlep((phase + 0.5) % 1.0, dt) * 0.3
                 naive
             }
-            2 -> { // Triangle Wave
+            2 -> { 
                 (2.0 * abs(2.0 * phase - 1.0) - 1.0) * 0.35
             }
-            3 -> { // Sawtooth Wave
+            3 -> { 
                 var naive = (2.0 * phase - 1.0) * 0.35
                 naive -= polyBlep(phase, dt) * 0.35
                 naive
             }
-            else -> fastNoise() // PRNG מהיר בסיביות
+            else -> fastNoise() 
         }
     }
 
-    // Fast Algebraic Cubic Saturator (במקום tanh)
     @Suppress("NOTHING_TO_INLINE")
     private inline fun softSaturate(x: Double): Double {
         val driven = x * 1.35
