@@ -8,7 +8,6 @@ import android.media.AudioTrack
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
@@ -663,139 +662,150 @@ class SynthEngine(private val context: Context) {
         randomAccessFile.close()
     }
 
-    // --- משתני נגן רקע (WAV/MP3) ---
-    private var backgroundPlayer: MediaPlayer? = null
+    
+// --- משתני נגן רקע (WAV/MP3) ---
 
-    fun setLooperVol(vol: Float) {
-        looperVolume = vol
-        backgroundPlayer?.setVolume(vol, vol)
-    }
 
-    fun loadAndPlayBackgroundAudio(context: Context, uri: Uri) {
-        try {
-            backgroundPlayer?.stop()
-            backgroundPlayer?.release()
-            backgroundPlayer = MediaPlayer.create(context, uri).apply {
-                isLooping = true
-                setVolume(looperVolume, looperVolume)
-                start()
+fun setLooperVol(vol: Float) {
+    looperVolume = vol
+    // אין יותר צורך לעדכן את backgroundPlayer
+}
+
+fun loadAndPlayBackgroundAudio(context: Context, uri: Uri) {
+    // טעינה ופענוח אסינכרוני של הסאמפלים ישירות לתוך מנוע ה-DSP ב-RAM
+    CoroutineScope(Dispatchers.IO).launch {
+        val pcmData = decodeAudioToPCM(context, uri)
+        if (pcmData != null) {
+            dspEngine.setExternalAudioBuffer(pcmData)
+            dspEngine.startExternalPlayback()
+        } else {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "שגיאה בפענוח קובץ השמע, ייתכן שהפורמט אינו נתמך", Toast.LENGTH_SHORT).show()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        // טעינה ופענוח אסינכרוני של הסאמפלים ישירות לתוך מנוע ה-DSP ב-RAM
-        CoroutineScope(Dispatchers.IO).launch {
-            val pcmData = decodeAudioToPCM(context, uri)
-            if (pcmData != null) {
-                dspEngine.setExternalAudioBuffer(pcmData)
-                dspEngine.startExternalPlayback()
-            }
-        }
-    }
-
-    fun pauseBackgroundAudio() {
-        backgroundPlayer?.takeIf { it.isPlaying }?.pause()
-        dspEngine.isExternalAudioPlaying = false
-    }
-
-    fun resumeBackgroundAudio() {
-        backgroundPlayer?.start()
-        dspEngine.isExternalAudioPlaying = true
-    }
-
-    fun stopBackgroundAudio() {
-        try {
-            backgroundPlayer?.stop()
-            backgroundPlayer?.release()
-            backgroundPlayer = null
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        dspEngine.stopExternalPlayback()
-        dspEngine.setExternalAudioBuffer(null)
-    }
-
-    /**
-     * פונקציית פענוח אסינכרונית הממירה קובצי אודיו מכל פורמט ל-FloatArray PCM מיושר
-     */
-    private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(context, uri, null)
-            var trackIndex = -1
-            var format: MediaFormat? = null
-
-            for (i in 0 until extractor.trackCount) {
-                val f = extractor.getTrackFormat(i)
-                val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("audio/")) {
-                    trackIndex = i
-                    format = f
-                    break
-                }
-            }
-
-            if (trackIndex < 0 || format == null) return null
-
-            extractor.selectTrack(trackIndex)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
-            val codec = MediaCodec.createDecoderByType(mime)
-            codec.configure(format, null, null, 0)
-            codec.start()
-
-            val pcmList = ArrayList<Float>(262144)
-            val info = MediaCodec.BufferInfo()
-            var isEOS = false
-
-            while (!isEOS) {
-                val inIndex = codec.dequeueInputBuffer(10000)
-                if (inIndex >= 0) {
-                    val inputBuffer = codec.getInputBuffer(inIndex)
-                    if (inputBuffer != null) {
-                        val sampleSize = extractor.readSampleData(inputBuffer, 0)
-                        if (sampleSize < 0) {
-                            codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            isEOS = true
-                        } else {
-                            val sampleTime = extractor.sampleTime
-                            codec.queueInputBuffer(inIndex, 0, sampleSize, sampleTime, 0)
-                            extractor.advance()
-                        }
-                    }
-                }
-
-                var outIndex = codec.dequeueOutputBuffer(info, 10000)
-                while (outIndex >= 0) {
-                    val outputBuffer = codec.getOutputBuffer(outIndex)
-                    if (outputBuffer != null && info.size > 0) {
-                        outputBuffer.position(info.offset)
-                        outputBuffer.limit(info.offset + info.size)
-                        val shortBuffer = outputBuffer.asShortBuffer()
-                        while (shortBuffer.hasRemaining()) {
-                            pcmList.add(shortBuffer.get() / 32768.0f)
-                        }
-                    }
-                    codec.releaseOutputBuffer(outIndex, false)
-                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        break
-                    }
-                    outIndex = codec.dequeueOutputBuffer(info, 0)
-                }
-            }
-
-            codec.stop()
-            codec.release()
-            extractor.release()
-
-            return pcmList.toFloatArray()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            try { extractor.release() } catch (_: Exception) {}
-            return null
         }
     }
 }
+
+fun pauseBackgroundAudio() {
+    dspEngine.isExternalAudioPlaying = false
+}
+
+fun resumeBackgroundAudio() {
+    dspEngine.isExternalAudioPlaying = true
+}
+
+fun stopBackgroundAudio() {
+    dspEngine.stopExternalPlayback()
+    dspEngine.setExternalAudioBuffer(null)
+}
+
+/**
+ * פונקציית פענוח אסינכרונית הממירה קובצי אודיו ל-FloatArray
+ * תוקן: שימוש במערך פרימיטיבי רציף (למניעת קריסת זיכרון OOM) והמרת Stereo ל-Mono.
+ */
+private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {
+    val extractor = MediaExtractor()
+    try {
+        extractor.setDataSource(context, uri, null)
+        var trackIndex = -1
+        var format: MediaFormat? = null
+        
+        for (i in 0 until extractor.trackCount) {
+            val f = extractor.getTrackFormat(i)
+            val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
+            if (mime.startsWith("audio/")) {
+                trackIndex = i
+                format = f
+                break
+            }
+        }
+        
+        if (trackIndex < 0 || format == null) return null
+        extractor.selectTrack(trackIndex)
+        
+        val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+        
+        // בדיקה האם הקובץ הוא סטריאו או מונו
+        val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (e: Exception) { 1 }
+        
+        val codec = MediaCodec.createDecoderByType(mime)
+        codec.configure(format, null, null, 0)
+        codec.start()
+        
+        // שימוש במערך פרימיטיבי שגדל דינמית חוסך מאות מגה-בייטים של RAM ומונע קראשים
+        var pcmData = FloatArray(1024 * 1024) 
+        var size = 0
+        
+        val info = MediaCodec.BufferInfo()
+        var isEOS = false
+        
+        while (!isEOS) {
+            val inIndex = codec.dequeueInputBuffer(10000)
+            if (inIndex >= 0) {
+                val inputBuffer = codec.getInputBuffer(inIndex)
+                if (inputBuffer != null) {
+                    val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                    if (sampleSize < 0) {
+                        codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        isEOS = true
+                    } else {
+                        val sampleTime = extractor.sampleTime
+                        codec.queueInputBuffer(inIndex, 0, sampleSize, sampleTime, 0)
+                        extractor.advance()
+                    }
+                }
+            }
+            
+            var outIndex = codec.dequeueOutputBuffer(info, 10000)
+            while (outIndex >= 0) {
+                val outputBuffer = codec.getOutputBuffer(outIndex)
+                if (outputBuffer != null && info.size > 0) {
+                    outputBuffer.position(info.offset)
+                    outputBuffer.limit(info.offset + info.size)
+                    val shortBuffer = outputBuffer.asShortBuffer()
+                    
+                    if (channels == 2) {
+                        // המרת סטריאו למונו (מיזוג L + R)
+                        while (shortBuffer.remaining() >= 2) {
+                            if (size >= pcmData.size) {
+                                pcmData = pcmData.copyOf(pcmData.size * 2)
+                            }
+                            val left = shortBuffer.get() / 32768.0f
+                            val right = shortBuffer.get() / 32768.0f
+                            pcmData[size++] = (left + right) / 2.0f
+                        }
+                    } else {
+                        // מונו רגיל
+                        while (shortBuffer.hasRemaining()) {
+                            if (size >= pcmData.size) {
+                                pcmData = pcmData.copyOf(pcmData.size * 2)
+                            }
+                            pcmData[size++] = shortBuffer.get() / 32768.0f
+                        }
+                    }
+                }
+                codec.releaseOutputBuffer(outIndex, false)
+                if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                    break
+                }
+                outIndex = codec.dequeueOutputBuffer(info, 0)
+            }
+        }
+        codec.stop()
+        codec.release()
+        extractor.release()
+        
+        // החזרת המערך בגודלו המדויק
+        return pcmData.copyOf(size)
+        
+    } catch (e: Exception) {
+        e.printStackTrace()
+        try { extractor.release() } catch (_: Exception) {}
+        return null
+    }
+}
+
+            
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
