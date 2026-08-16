@@ -479,11 +479,18 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
         }
     }
 
-    fun stopAndSaveRecording(): File? {
+        fun stopAndSaveRecording(): File? {
         if (!isRecording) return wavFile
         isRecording = false
         try {
-            recordingWriterThread?.join(1000)
+            // הוספת המתנה לריקוד התור המלא לפני סגירת הזרם
+            var waitTries = 0
+            while (recordingQueue.isNotEmpty() && waitTries < 50) {
+                Thread.sleep(10)
+                waitTries++
+            }
+
+            recordingWriterThread?.join(1500)
             recordingWriterThread = null
             val stream = recordedAudioStream
             stream?.flush()
@@ -495,6 +502,7 @@ val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
         }
         return wavFile
     }
+
 
     fun exportRecordingToUri(context: Context, destinationUri: Uri): Boolean {
         val sourceFile = wavFile ?: File(context.cacheDir, "temp_synth_recording.wav")
