@@ -174,12 +174,13 @@ class SynthEngine(private val context: Context) {
         dspEngine = DspEngine(sampleRate)
 
         val minBufferSize = AudioTrack.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
+    sampleRate,
+    AudioFormat.CHANNEL_OUT_MONO,
+    AudioFormat.ENCODING_PCM_16BIT
+)
 
-        val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 2)
+// הכפלה פי 2 או 3 ליתר ביטחון נגד קטיעות בזמן שימוש ב-Performance Pad
+val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
 
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
