@@ -629,11 +629,11 @@ fun SynthAppUI(engine: SynthEngine) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE) }
 
-    val defaultFrequencies = remember {
-        listOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 475.00f)
+        val defaultFrequencies = remember {
+        listOf(222.00f, 299.00f, 333.00f, 355.00f, 396.00f, 444.00f, 463.00f, 477.00f)
     }
     val frequencies = remember {
-        mutableStateListOf(264.00f, 297.00f, 330.00f, 352.00f, 396.00f, 440.00f, 462.00f, 475.00f)
+        mutableStateListOf(222.00f, 299.00f, 333.00f, 355.00f, 396.00f, 444.00f, 463.00f, 477.00f)
     }
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
