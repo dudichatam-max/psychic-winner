@@ -3,7 +3,6 @@ package com.microtonal.synth
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
-import kotlin.math.tan
 
 class DspFrame(
     var liveSample: Float = 0f,
@@ -14,6 +13,10 @@ class DspFrame(
 class DspEngine(private val sampleRate: Int = 44100) {
 
     private val reusableFrame = DspFrame()
+
+    // קבועים מחושבים מראש למניעת פעולות חילוק יקרות בלולאה הפנימית
+    private val invSampleRate = 1.0 / sampleRate
+    private val piOverSampleRate = PI * invSampleRate
 
     private val delayBuffer = FloatArray(sampleRate)
     private var delayWritePos = 0
@@ -26,7 +29,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
     private var smoothedLooperVol = 1.0
     private var smoothedEchoMix = 0.25
     
-    // החלקת נתוני ה-Pad למניעת קליקים וקפיצות ב-UI
     private var smoothedPerfX = 0.0f
     private var smoothedPerfY = 0.0f
     
@@ -42,6 +44,16 @@ class DspEngine(private val sampleRate: Int = 44100) {
     private inline fun fastSine(phaseNorm: Double): Double {
         val index = (phaseNorm * lutSize).toInt() and lutMask
         return sineLUT[index].toDouble()
+    }
+
+    /**
+     * קירוב Padé מהיר ומדויק ל-tan(x) המבטל קריאות יקרות ל-Math.tan() בלולאת הסאמפלים.
+     * שומר על יציבות דיוק תדרי מלאה עד 16kHz ב-44.1kHz/48kHz.
+     */
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun fastTan(x: Double): Double {
+        val x2 = x * x
+        return x * (15.0 - x2) / (15.0 - 6.0 * x2)
     }
 
     private var noiseSeed = 123456789
@@ -77,11 +89,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
         
         // --- ציר X: LFO מקורי על תדר החיתוך (Cutoff) ---
         val lfoFreq = 0.1 + smoothedPerfX * 24.9 
-        liveLfoPhase += lfoFreq / sampleRate
+        liveLfoPhase += lfoFreq * invSampleRate
         if (liveLfoPhase >= 1.0) liveLfoPhase -= 1.0
         val lfoMod = fastSine(liveLfoPhase).toFloat()
 
-        val glideFactor = if (glideMs > 0) (1.0 / (sampleRate * (glideMs / 1000.0))).coerceIn(0.001, 1.0) else 1.0
+        val glideFactor = if (glideMs > 0) (invSampleRate / (glideMs / 1000.0)).coerceIn(0.001, 1.0) else 1.0
 
         var activeCount = 0
         for (v in 0 until maxVoices) {
@@ -104,7 +116,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 slot.currentFreq = slot.targetFreq
             }
 
-            val dt = (slot.currentFreq / sampleRate.toDouble()).coerceIn(0.0001, 0.45)
+            val dt = (slot.currentFreq * invSampleRate).coerceIn(0.0001, 0.45)
+            val invDt = 1.0 / dt
             slot.phase += 2.0 * PI * dt
             if (slot.phase >= 2.0 * PI) {
                 slot.phase %= (2.0 * PI)
@@ -115,12 +128,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             val attackCoeff = if (slot.attackCoeff > 0.0) slot.attackCoeff else {
                 val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
-                1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
+                1.0 - Math.exp(-invSampleRate / (actualAttack / 1000.0).coerceAtLeast(0.001))
             }
 
             val releaseCoeff = if (slot.releaseCoeff > 0.0) slot.releaseCoeff else {
                 val actualRelease = if (slot.isLooperNote) slot.frozenRelease else releaseMs
-                Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
+                Math.exp(-invSampleRate / (actualRelease / 1000.0).coerceAtLeast(0.001))
             }
 
             if (!slot.isReleasing) {
@@ -136,7 +149,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 }
             }
 
-            val raw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt)
+            val raw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt, invDt)
 
             // --- פילטר ZDF: ציר X = Cutoff LFO, ציר Y = Resonance ---
             var targetCutoff = (if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq).coerceIn(20f, 16000f)
@@ -148,7 +161,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
             
             var targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance)
             
-            // ציר Y מעלה את הרזוננס בהדרגה עד לשיא בטוח של 0.82 למניעת עיוות
             if (!slot.isLooperNote && smoothedPerfY > 0.001f) {
                 targetRes = (targetRes + smoothedPerfY * (0.82f - targetRes)).coerceIn(0.0f, 0.82f)
             } else {
@@ -158,11 +170,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
             slot.smoothedCutoff += (targetCutoff - slot.smoothedCutoff) * 0.01f
             slot.smoothedRes += (targetRes - slot.smoothedRes) * 0.01f
 
-            // פיצוי עוצמה אוטומטי המונע עיוות דיגיטלי כשהרזוננס עולה
             val resGainComp = 1.0 - (slot.smoothedRes * 0.45)
             var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.5 * resGainComp
 
-            val g = tan(PI * slot.smoothedCutoff.toDouble() / sampleRate)
+            // חישוב פילטר מהיר בעזרת fastTan ובלי Math.tan יקר
+            val g = fastTan(piOverSampleRate * slot.smoothedCutoff.toDouble())
             val k = 2.0 * (1.0 - slot.smoothedRes.toDouble())
             val h = 1.0 / (1.0 + g * (g + k))
 
@@ -217,27 +229,27 @@ class DspEngine(private val sampleRate: Int = 44100) {
     }
 
     @Suppress("NOTHING_TO_INLINE")
-    private inline fun polyBlep(t: Double, dt: Double): Double {
+    private inline fun polyBlep(t: Double, dt: Double, invDt: Double): Double {
         return when {
             t < dt -> {
-                val p = t / dt
+                val p = t * invDt
                 p + p - p * p - 1.0
             }
             t > 1.0 - dt -> {
-                val p = (t - 1.0) / dt
+                val p = (t - 1.0) * invDt
                 p * p + p + p + 1.0
             }
             else -> 0.0
         }
     }
 
-    private fun generateOptimizedWaveform(waveType: Int, phase: Double, dt: Double): Double {
+    private fun generateOptimizedWaveform(waveType: Int, phase: Double, dt: Double, invDt: Double): Double {
         return when (waveType) {
             0 -> fastSine(phase)
             1 -> { 
                 var naive = if (phase < 0.5) 0.3 else -0.3
-                naive += polyBlep(phase, dt) * 0.3
-                naive -= polyBlep((phase + 0.5) % 1.0, dt) * 0.3
+                naive += polyBlep(phase, dt, invDt) * 0.3
+                naive -= polyBlep((phase + 0.5) % 1.0, dt, invDt) * 0.3
                 naive
             }
             2 -> { 
@@ -245,7 +257,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
             3 -> { 
                 var naive = (2.0 * phase - 1.0) * 0.35
-                naive -= polyBlep(phase, dt) * 0.35
+                naive -= polyBlep(phase, dt, invDt) * 0.35
                 naive
             }
             else -> fastNoise() 
