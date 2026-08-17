@@ -225,6 +225,9 @@ class DspEngine(private val sampleRate: Int = 44100) {
         var externalAudioSample = 0.0
         val extBuf = externalAudioBuffer
         if (isExternalAudioPlaying && extBuf != null && extBuf.isNotEmpty()) {
+            if (externalAudioPos >= extBuf.size) {
+                externalAudioPos = if (isExternalAudioLooping) 0 else extBuf.size
+            }
             if (externalAudioPos < extBuf.size) {
                 externalAudioSample = extBuf[externalAudioPos].toDouble()
                 externalAudioPos++
@@ -239,14 +242,16 @@ class DspEngine(private val sampleRate: Int = 44100) {
         }
 
         val finalLiveSample = (liveChannelMix * smoothedLiveVol).toFloat()
-        
-        // כאן הקובץ החיצוני משולב יחד עם הלופר (מוכפל בווליום הלופר), 
-        // וכיוון שהם חלק מ-finalLooperSample והלאה ב-totalSample, הם ייכללו בהקלטת ה-WAV!
-        val finalLooperSample = ((looperChannelMix + externalAudioSample) * smoothedLooperVol).toFloat()
+        val synthLooperSample = (looperChannelMix * smoothedLooperVol).toFloat()
+        val extAudioSampleScaled = (externalAudioSample * smoothedLooperVol).toFloat()
 
-        var totalSample = (finalLiveSample + finalLooperSample).toDouble()
+        // finalLooperSample מכיל את השילוב לצורך הוויזואל וההקלטה
+        val finalLooperSample = synthLooperSample + extAudioSampleScaled
 
-        // Delay
+        // רק סינתיסייזר (נגינה חיה + לופר תווים) נכנסים לאפקט ה-Delay!
+        val synthTotal = (finalLiveSample + synthLooperSample).toDouble()
+
+        // Delay Effect
         val delaySamples = (sampleRate * 0.28).toInt()
         val delayReadPos = (delayWritePos - delaySamples + delayBuffer.size) % delayBuffer.size
         var echoSample = delayBuffer[delayReadPos].toDouble()
@@ -255,17 +260,22 @@ class DspEngine(private val sampleRate: Int = 44100) {
         delayFilterState = echoSample
 
         val feedback = 0.42
-        delayBuffer[delayWritePos] = (totalSample + echoSample * feedback).toFloat()
+        // מזינים רק את צלילי הסינתיסייזר ל-delayBuffer
+        delayBuffer[delayWritePos] = (synthTotal + echoSample * feedback).toFloat()
         delayWritePos = (delayWritePos + 1) % delayBuffer.size
 
-        totalSample += echoSample * smoothedEchoMix
+        // הסינתיסייזר מעובד עם הדיליי
+        val processedSynth = synthTotal + (echoSample * smoothedEchoMix)
+
+        // חיבור הקובץ החיצוני הנקי (Dry) יחד עם הסינתיסייזר המעובד
+        var totalSample = processedSynth + extAudioSampleScaled.toDouble()
 
         // DC Blocker
         val dcSample = totalSample - dcX1 + 0.995 * dcY1
         dcX1 = totalSample
         dcY1 = if (dcSample.isNaN() || dcSample.isInfinite()) 0.0 else dcSample
 
-        // Soft Clipper (הסאונד המלא שעובר לרמקולים וגם מוקלט לקובץ ה-WAV)
+        // Soft Clipper (הסאונד המלא שיוצא ל-AudioTrack ומוקלט ל-WAV)
         val masterSample = softSaturate(dcY1 * 0.52).toFloat()
 
         reusableFrame.liveSample = finalLiveSample
