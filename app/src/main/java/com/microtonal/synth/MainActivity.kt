@@ -46,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.LinkedBlockingQueue
@@ -94,9 +95,45 @@ class NoteSlot {
     var smoothedCutoff: Float = 5000f
     var smoothedRes: Float = 0.3f
 
-    // מקדמי מעטפת מחושבים מראש לאופטימיזציה ב-DSP
     var attackCoeff: Double = 0.0
     var releaseCoeff: Double = 0.0
+
+    // נעילה מקומית למניעת Race Condition בעת הפעלה מחדש של קול תפוס
+    private val lock = Any()
+
+    fun updateAndActivate(
+        newBaseFreq: Float,
+        newTargetFreq: Float,
+        newStartFreq: Float,
+        newWaveform: Int,
+        isLooper: Boolean,
+        cutoff: Float,
+        res: Float,
+        attack: Float,
+        sustain: Float,
+        release: Float,
+        sampleRate: Int
+    ) = synchronized(lock) {
+        baseFreq = newBaseFreq
+        targetFreq = newTargetFreq
+        currentFreq = newStartFreq
+        phase = 0.0
+        envelopeVolume = if (envelopeVolume < 0.001) 0.001 else envelopeVolume
+        isReleasing = false
+        waveform = newWaveform
+        isLooperNote = isLooper
+        frozenCutoff = cutoff
+        frozenRes = res
+        frozenAttack = attack
+        frozenSustain = sustain
+        frozenRelease = release
+        zdfState1 = 0.0
+        zdfState2 = 0.0
+
+        attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (attack / 1000.0).coerceAtLeast(0.001)))
+        releaseCoeff = Math.exp(-1.0 / (sampleRate * (release / 1000.0).coerceAtLeast(0.001)))
+        active = true
+    }
 }
 
 data class LooperNoteEvent(
@@ -109,7 +146,7 @@ data class LooperNoteEvent(
     val attack: Float,
     val sustain: Float,
     val release: Float,
-    val octave: Int // <-- 1. הוספת שדה שמירת אוקטבה לאירוע הלופ
+    val octave: Int
 )
 
 class SynthEngine(private val context: Context) {
@@ -118,15 +155,12 @@ class SynthEngine(private val context: Context) {
     private val dspEngine: DspEngine
     @Volatile private var isRunning = true
 
-    // שיפור ביצועים: הורדת מספר הקולות המרבי מ-12 ל-8
     private val maxVoices = 8
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
-    // תור להעברת נתוני אודיו להקלטה בנפרד מה-Audio Thread
     private val recordingQueue = LinkedBlockingQueue<ByteArray>()
     private var recordingWriterThread: Thread? = null
 
-    // שימוש ב-Volatile להבטחת סנכרון בזמן אמת מול ה-Audio Thread
     @Volatile var waveformType = 3
     @Volatile var volume = 0.5f
     @Volatile var looperVolume = 1.0f
@@ -139,11 +173,9 @@ class SynthEngine(private val context: Context) {
     @Volatile var glideMs = 30f
     @Volatile var octaveShift = 0
     
-    // --- משתני PERFORMANCE PAD (X/Y) ---
     @Volatile var performanceX: Float = 0f
     @Volatile var performanceY: Float = 0f
 
-    // משתנה עזר עבור מנגנון ה-Glide
     private var lastPlayedFreq: Float = 440f
 
     val liveVisualizerBuffer = FloatArray(512)
@@ -156,14 +188,13 @@ class SynthEngine(private val context: Context) {
     private var loopDurationMs = 0L
     private var loopThread: Thread? = null
 
-    private var isRecording = false
+    @Volatile private var isRecording = false
     private var recordedAudioStream: FileOutputStream? = null
     private var wavFile: File? = null
 
     private val audioTrack: AudioTrack
 
     init {
-        // שאילת נתוני החומרה הטבעיים של המכשיר להפחתת Latency
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val nativeSampleRateStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
         val nativeBufferSizeStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
@@ -179,7 +210,6 @@ class SynthEngine(private val context: Context) {
             AudioFormat.ENCODING_PCM_16BIT
         )
 
-        // הכפלה פי 2 או 3 ליתר ביטחון נגד קטיעות בזמן שימוש ב-Performance Pad
         val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
 
         audioTrack = AudioTrack.Builder()
@@ -237,7 +267,6 @@ class SynthEngine(private val context: Context) {
                     val shortVal = (rawMaster * Short.MAX_VALUE * 0.85f).toInt().coerceIn(-32768, 32767).toShort()
 
                     buffer[i] = shortVal
-
                     liveVisualizerBuffer[i] = frame.liveSample
                     looperVisualizerBuffer[i] = frame.looperSample
 
@@ -245,7 +274,6 @@ class SynthEngine(private val context: Context) {
                 }
 
                 if (isRecording) {
-                    // אופטימיזציה: העתקת מערך מהירה ללא clone() כדי למנוע הטרדות של ה-GC ב-Audio Thread
                     val recBytes = ByteArray(bufferSize * 2)
                     System.arraycopy(byteBuffer.array(), 0, recBytes, 0, recBytes.size)
                     recordingQueue.offer(recBytes)
@@ -259,18 +287,16 @@ class SynthEngine(private val context: Context) {
     fun stop() {
         isRunning = false
         stopLoopPlayback()
-        stopBackgroundAudio() // <--- עצירת שמע רקע ביציאה
+        stopBackgroundAudio()
         audioTrack.stop()
         audioTrack.release()
     }
 
-    // --- 2. עדכון פונקציית החישוב לקבלת אוקטבה ספציפית או גלובלית ---
     fun getEffectiveFrequency(baseFreq: Float, overrideOctave: Int? = null): Float {
         val octave = overrideOctave ?: octaveShift
         return baseFreq * Math.pow(2.0, octave.toDouble()).toFloat()
     }
 
-    // עדכון סוג הגל בזמן אמת לנגינה חיה בלבד - ללא הקצאות זיכרון
     fun setLiveWaveform(wave: Int) {
         waveformType = wave
         for (i in 0 until maxVoices) {
@@ -290,9 +316,8 @@ class SynthEngine(private val context: Context) {
         attack: Float? = null,
         sustain: Float? = null,
         release: Float? = null,
-        targetOctave: Int? = null // <-- קליטת האוקטבה השמורה בלופר
+        targetOctave: Int? = null
     ) {
-        // שימוש באוקטבה הייעודית אם מדובר בתו לופר, אחרת באוקטבה הגלובלית
         val effectiveOctave = if (isLooper) targetOctave else octaveShift
         val freq = getEffectiveFrequency(baseFreq, effectiveOctave)
 
@@ -309,14 +334,13 @@ class SynthEngine(private val context: Context) {
                     attack = attackMs,
                     sustain = sustainLevel,
                     release = releaseMs,
-                    octave = octaveShift // <-- 3. שמירת האוקטבה הנוכחית בעת ההקלטה בלופר
+                    octave = octaveShift
                 )
             )
         }
 
         var slot: NoteSlot? = null
 
-        // 1. חיפוש קול קיים בעל אותו תדר ומצב לופר
         for (i in 0 until maxVoices) {
             val s = noteSlots[i]
             if (s.active && s.baseFreq == baseFreq && s.isLooperNote == isLooper) {
@@ -330,14 +354,10 @@ class SynthEngine(private val context: Context) {
             slot.targetFreq = freq
             slot.waveform = wave ?: waveformType
             slot.active = true
-            if (slot.envelopeVolume < 0.001) {
-                slot.envelopeVolume = 0.001
-            }
+            if (slot.envelopeVolume < 0.001) slot.envelopeVolume = 0.001
             return
         }
 
-        // Voice Stealing באופטימיזציה מלאה ללא הקצאות זיכרון (הסרת filter / minByOrNull)
-        // 2. מציאת Slot פנוי
         for (i in 0 until maxVoices) {
             val s = noteSlots[i]
             if (!s.active) {
@@ -346,7 +366,6 @@ class SynthEngine(private val context: Context) {
             }
         }
 
-        // 3. מציאת הקול הנמוך ביותר מבין האותות בשחרור (Releasing)
         if (slot == null) {
             var minVol = Double.MAX_VALUE
             for (i in 0 until maxVoices) {
@@ -358,7 +377,6 @@ class SynthEngine(private val context: Context) {
             }
         }
 
-        // 4. מציאת הקול הנמוך ביותר מבין הקולות החיים (שאינם לופר)
         if (slot == null) {
             var minVol = Double.MAX_VALUE
             for (i in 0 until maxVoices) {
@@ -370,7 +388,6 @@ class SynthEngine(private val context: Context) {
             }
         }
 
-        // 5. מציאת הקול בעל העוצמה הנמוכה ביותר באופן מוחלט
         if (slot == null) {
             var minVol = Double.MAX_VALUE
             for (i in 0 until maxVoices) {
@@ -386,28 +403,19 @@ class SynthEngine(private val context: Context) {
             val startFreq = if (!isLooper && glideMs > 0f) lastPlayedFreq else freq
             if (!isLooper) lastPlayedFreq = freq
 
-            slot.baseFreq = baseFreq
-            slot.targetFreq = freq
-            slot.currentFreq = startFreq
-            slot.phase = 0.0
-            slot.envelopeVolume = 0.0
-            slot.isReleasing = false
-            slot.waveform = wave ?: waveformType
-            slot.isLooperNote = isLooper
-            slot.frozenCutoff = cutoff ?: cutoffFreq
-            slot.frozenRes = res ?: resonance
-            slot.frozenAttack = attack ?: attackMs
-            slot.frozenSustain = sustain ?: sustainLevel
-            slot.frozenRelease = release ?: releaseMs
-            slot.zdfState1 = 0.0
-            slot.zdfState2 = 0.0
-
-            val actualAttack = slot.frozenAttack
-            val actualRelease = slot.frozenRelease
-            slot.attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (actualAttack / 1000.0).coerceAtLeast(0.001)))
-            slot.releaseCoeff = Math.exp(-1.0 / (sampleRate * (actualRelease / 1000.0).coerceAtLeast(0.001)))
-
-            slot.active = true
+            slot.updateAndActivate(
+                newBaseFreq = baseFreq,
+                newTargetFreq = freq,
+                newStartFreq = startFreq,
+                newWaveform = wave ?: waveformType,
+                isLooper = isLooper,
+                cutoff = cutoff ?: cutoffFreq,
+                res = res ?: resonance,
+                attack = attack ?: attackMs,
+                sustain = sustain ?: sustainLevel,
+                release = release ?: releaseMs,
+                sampleRate = sampleRate
+            )
         }
     }
 
@@ -425,7 +433,7 @@ class SynthEngine(private val context: Context) {
                     attack = attackMs,
                     sustain = sustainLevel,
                     release = releaseMs,
-                    octave = octaveShift // שומר את האוקטבה גם ב-noteOff למען עקביות במבנה הנתונים
+                    octave = octaveShift
                 )
             )
         }
@@ -478,7 +486,7 @@ class SynthEngine(private val context: Context) {
                                 attack = ev.attack,
                                 sustain = ev.sustain,
                                 release = ev.release,
-                                targetOctave = ev.octave // <-- 4. העברת האוקטבה המקורית שנשמרה בעת ניגון חוזר בלופר
+                                targetOctave = ev.octave
                             )
                         } else {
                             noteOff(ev.freq, isLooper = true)
@@ -543,28 +551,37 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-    fun stopAndSaveRecording(): File? {
-        if (!isRecording) return wavFile
-        isRecording = false
-        try {
-            // הוספת המתנה לריקוד התור המלא לפני סגירת הזרם
-            var waitTries = 0
-            while (recordingQueue.isNotEmpty() && waitTries < 50) {
-                Thread.sleep(10)
-                waitTries++
-            }
-
-            recordingWriterThread?.join(1500)
-            recordingWriterThread = null
-            val stream = recordedAudioStream
-            stream?.flush()
-            stream?.close()
-            recordedAudioStream = null
-            wavFile?.let { updateWavHeader(it) }
-        } catch (e: Exception) {
-            e.printStackTrace()
+    // תיקון: העברת עצירת ההקלטה וסגירת הקובץ אל מחוץ ל-Main Thread כדי למנוע UI Jank
+    fun stopAndSaveRecordingAsync(onSaved: (File?) -> Unit) {
+        if (!isRecording) {
+            onSaved(wavFile)
+            return
         }
-        return wavFile
+        isRecording = false
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                var waitTries = 0
+                while (recordingQueue.isNotEmpty() && waitTries < 50) {
+                    Thread.sleep(10)
+                    waitTries++
+                }
+
+                recordingWriterThread?.join(1500)
+                recordingWriterThread = null
+                
+                recordedAudioStream?.flush()
+                recordedAudioStream?.close()
+                recordedAudioStream = null
+                
+                wavFile?.let { updateWavHeader(it) }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            withContext(Dispatchers.Main) {
+                onSaved(wavFile)
+            }
+        }
     }
 
     fun exportRecordingToUri(context: Context, destinationUri: Uri): Boolean {
@@ -639,192 +656,181 @@ class SynthEngine(private val context: Context) {
         out.write(header, 0, 44)
     }
 
+    // תיקון: שימוש ב-ByteBuffer לעדכון כותרת WAV בצורה בטוחה ותקינה
     private fun updateWavHeader(file: File) {
         val totalAudioLen = file.length() - 44
         val totalDataLen = totalAudioLen + 36
 
-        val randomAccessFile = java.io.RandomAccessFile(file, "rw")
-        
-        // עדכון גודל ה-RIFF (בייטים 4-7)
-        randomAccessFile.seek(4)
-        randomAccessFile.write((totalDataLen and 0xff).toInt())
-        randomAccessFile.write((totalDataLen shr 8 and 0xff).toInt())
-        randomAccessFile.write((totalDataLen shr 16 and 0xff).toInt())
-        randomAccessFile.write((totalDataLen shr 24 and 0xff).toInt())
+        RandomAccessFile(file, "rw").use { raf ->
+            val buffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
 
-        // עדכון גודל נתוני האודיו הכלליים בתוך ה-Data Chunk (בייטים 40-43)
-        randomAccessFile.seek(40)
-        randomAccessFile.write((totalAudioLen and 0xff).toInt())
-        randomAccessFile.write((totalAudioLen shr 8 and 0xff).toInt())
-        randomAccessFile.write((totalAudioLen shr 16 and 0xff).toInt())
-        randomAccessFile.write((totalAudioLen shr 24 and 0xff).toInt())
+            // עדכון גודל ה-RIFF (בייטים 4-7)
+            raf.seek(4)
+            buffer.clear()
+            buffer.putInt(totalDataLen.toInt())
+            raf.write(buffer.array())
 
-        randomAccessFile.close()
-    }
-
-    
-// --- משתני נגן רקע (WAV/MP3) ---
-
-
-fun setLooperVol(vol: Float) {
-    looperVolume = vol
-    // אין יותר צורך לעדכן את backgroundPlayer
-}
-
-fun loadAndPlayBackgroundAudio(context: Context, uri: Uri) {
-    // טעינה ופענוח אסינכרוני של הסאמפלים ישירות לתוך מנוע ה-DSP ב-RAM
-    CoroutineScope(Dispatchers.IO).launch {
-        val pcmData = decodeAudioToPCM(context, uri)
-        if (pcmData != null) {
-            dspEngine.setExternalAudioBuffer(pcmData)
-            dspEngine.startExternalPlayback()
-        } else {
-            withContext(Dispatchers.Main) {
-                Toast.makeText(context, "שגיאה בפענוח קובץ השמע, ייתכן שהפורמט אינו נתמך", Toast.LENGTH_SHORT).show()
-            }
+            // עדכון גודל נתוני האודיו הכלליים בתוך ה-Data Chunk (בייטים 40-43)
+            raf.seek(40)
+            buffer.clear()
+            buffer.putInt(totalAudioLen.toInt())
+            raf.write(buffer.array())
         }
     }
-}
 
-fun pauseBackgroundAudio() {
-    dspEngine.isExternalAudioPlaying = false
-}
+    fun setLooperVol(vol: Float) {
+        looperVolume = vol
+    }
 
-fun resumeBackgroundAudio() {
-    dspEngine.isExternalAudioPlaying = true
-}
-
-fun stopBackgroundAudio() {
-    dspEngine.stopExternalPlayback()
-    dspEngine.setExternalAudioBuffer(null)
-}
-
-/**
- * פונקציית פענוח אסינכרונית הממירה קובצי אודיו ל-FloatArray
- * תוקן: שימוש במערך פרימיטיבי רציף (למניעת קריסת זיכרון OOM) והמרת Stereo ל-Mono.
- */
-private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {    
-    val extractor = MediaExtractor()
-    try {
-        extractor.setDataSource(context, uri, null)
-        var trackIndex = -1
-        var format: MediaFormat? = null
-        
-        for (i in 0 until extractor.trackCount) {
-            val f = extractor.getTrackFormat(i)
-            val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
-            if (mime.startsWith("audio/")) {
-                trackIndex = i
-                format = f
-                break
-            }
-        }
-        
-        if (trackIndex < 0 || format == null) return null
-        extractor.selectTrack(trackIndex)
-        
-        val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
-        val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (e: Exception) { 1 }
-        
-        // קצב הדגימה המקורי של קובץ השמע החיצוני
-        val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (e: Exception) { 44100 }
-        
-        val codec = MediaCodec.createDecoderByType(mime)
-        codec.configure(format, null, null, 0)
-        codec.start()
-        
-        // שלב א': איסוף כל סאמפל ה-PCM לזכרון במונו
-        var rawPcmData = FloatArray(1024 * 1024)
-        var rawSize = 0
-        
-        val info = MediaCodec.BufferInfo()
-        var isEOS = false
-        
-        while (!isEOS) {
-            val inIndex = codec.dequeueInputBuffer(10000)
-            if (inIndex >= 0) {
-                val inputBuffer = codec.getInputBuffer(inIndex)
-                if (inputBuffer != null) {
-                    val sampleSize = extractor.readSampleData(inputBuffer, 0)
-                    if (sampleSize < 0) {
-                        codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                        isEOS = true
-                    } else {
-                        codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
-                        extractor.advance()
-                    }
+    fun loadAndPlayBackgroundAudio(context: Context, uri: Uri) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val pcmData = decodeAudioToPCM(context, uri)
+            if (pcmData != null) {
+                dspEngine.setExternalAudioBuffer(pcmData)
+                dspEngine.startExternalPlayback()
+            } else {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "שגיאה בפענוח קובץ השמע, ייתכן שהפורמט אינו נתמך", Toast.LENGTH_SHORT).show()
                 }
             }
+        }
+    }
+
+    fun pauseBackgroundAudio() {
+        dspEngine.isExternalAudioPlaying = false
+    }
+
+    fun resumeBackgroundAudio() {
+        dspEngine.isExternalAudioPlaying = true
+    }
+
+    fun stopBackgroundAudio() {
+        dspEngine.stopExternalPlayback()
+        dspEngine.setExternalAudioBuffer(null)
+    }
+
+    /**
+     * תיקון דליפת זיכרון: שימוש בבלוק try-finally לשחרור בטוח של ה-MediaCodec וה-MediaExtractor גם בזמן שגיאה.
+     */
+    private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {    
+        val extractor = MediaExtractor()
+        var codec: MediaCodec? = null
+        try {
+            extractor.setDataSource(context, uri, null)
+            var trackIndex = -1
+            var format: MediaFormat? = null
             
-            var outIndex = codec.dequeueOutputBuffer(info, 10000)
-            while (outIndex >= 0) {
-                val outputBuffer = codec.getOutputBuffer(outIndex)
-                if (outputBuffer != null && info.size > 0) {
-                    outputBuffer.position(info.offset)
-                    outputBuffer.limit(info.offset + info.size)
-                    val shortBuffer = outputBuffer.asShortBuffer()
-                    
-                    if (channels == 2) {
-                        while (shortBuffer.remaining() >= 2) {
-                            if (rawSize >= rawPcmData.size) {
-                                rawPcmData = rawPcmData.copyOf(rawPcmData.size * 2)
-                            }
-                            val left = shortBuffer.get() / 32768.0f
-                            val right = shortBuffer.get() / 32768.0f
-                            rawPcmData[rawSize++] = (left + right) / 2.0f
-                        }
-                    } else {
-                        while (shortBuffer.hasRemaining()) {
-                            if (rawSize >= rawPcmData.size) {
-                                rawPcmData = rawPcmData.copyOf(rawPcmData.size * 2)
-                            }
-                            rawPcmData[rawSize++] = shortBuffer.get() / 32768.0f
-                        }
-                    }
-                }
-                codec.releaseOutputBuffer(outIndex, false)
-                if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("audio/")) {
+                    trackIndex = i
+                    format = f
                     break
                 }
-                outIndex = codec.dequeueOutputBuffer(info, 0)
             }
-        }
-        codec.stop()
-        codec.release()
-        extractor.release()
-        
-        val decodedSamplesCount = rawSize
-        if (decodedSamplesCount <= 0) return null
-
-        // שלב ב': ביצוע Resampling מקצב הקובץ (fileSampleRate) לקצב המנוע (sampleRate)
-        val ratio = fileSampleRate.toDouble() / sampleRate.toDouble()
-        val targetSize = (decodedSamplesCount / ratio).toInt()
-        val resampledData = FloatArray(targetSize)
-        
-        for (i in 0 until targetSize) {
-            val srcIdx = i * ratio
-            val idxInt = srcIdx.toInt()
-            val frac = (srcIdx - idxInt).toFloat()
             
-            if (idxInt + 1 < decodedSamplesCount) {
-                // אינטרפולציה ליניארית לקבלת סאונד חלק וללא עיוותים
-                val s0 = rawPcmData[idxInt]
-                val s1 = rawPcmData[idxInt + 1]
-                resampledData[i] = s0 + (s1 - s0) * frac
-            } else if (idxInt < decodedSamplesCount) {
-                resampledData[i] = rawPcmData[idxInt]
+            if (trackIndex < 0 || format == null) return null
+            extractor.selectTrack(trackIndex)
+            
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+            val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (e: Exception) { 1 }
+            val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (e: Exception) { 44100 }
+            
+            codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(format, null, null, 0)
+            codec.start()
+            
+            var rawPcmData = FloatArray(1024 * 1024)
+            var rawSize = 0
+            
+            val info = MediaCodec.BufferInfo()
+            var isEOS = false
+            
+            while (!isEOS) {
+                val inIndex = codec.dequeueInputBuffer(10000)
+                if (inIndex >= 0) {
+                    val inputBuffer = codec.getInputBuffer(inIndex)
+                    if (inputBuffer != null) {
+                        val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                        if (sampleSize < 0) {
+                            codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            isEOS = true
+                        } else {
+                            codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                
+                var outIndex = codec.dequeueOutputBuffer(info, 10000)
+                while (outIndex >= 0) {
+                    val outputBuffer = codec.getOutputBuffer(outIndex)
+                    if (outputBuffer != null && info.size > 0) {
+                        outputBuffer.position(info.offset)
+                        outputBuffer.limit(info.offset + info.size)
+                        val shortBuffer = outputBuffer.asShortBuffer()
+                        
+                        if (channels == 2) {
+                            while (shortBuffer.remaining() >= 2) {
+                                if (rawSize >= rawPcmData.size) {
+                                    rawPcmData = rawPcmData.copyOf(rawPcmData.size * 2)
+                                }
+                                val left = shortBuffer.get() / 32768.0f
+                                val right = shortBuffer.get() / 32768.0f
+                                rawPcmData[rawSize++] = (left + right) / 2.0f
+                            }
+                        } else {
+                            while (shortBuffer.hasRemaining()) {
+                                if (rawSize >= rawPcmData.size) {
+                                    rawPcmData = rawPcmData.copyOf(rawPcmData.size * 2)
+                                }
+                                rawPcmData[rawSize++] = shortBuffer.get() / 32768.0f
+                            }
+                        }
+                    }
+                    codec.releaseOutputBuffer(outIndex, false)
+                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        break
+                    }
+                    outIndex = codec.dequeueOutputBuffer(info, 0)
+                }
             }
+            
+            val decodedSamplesCount = rawSize
+            if (decodedSamplesCount <= 0) return null
+
+            val ratio = fileSampleRate.toDouble() / sampleRate.toDouble()
+            val targetSize = (decodedSamplesCount / ratio).toInt()
+            val resampledData = FloatArray(targetSize)
+            
+            for (i in 0 until targetSize) {
+                val srcIdx = i * ratio
+                val idxInt = srcIdx.toInt()
+                val frac = (srcIdx - idxInt).toFloat()
+                
+                if (idxInt + 1 < decodedSamplesCount) {
+                    val s0 = rawPcmData[idxInt]
+                    val s1 = rawPcmData[idxInt + 1]
+                    resampledData[i] = s0 + (s1 - s0) * frac
+                } else if (idxInt < decodedSamplesCount) {
+                    resampledData[i] = rawPcmData[idxInt]
+                }
+            }
+            
+            return resampledData
+            
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        } finally {
+            try { codec?.stop() } catch (_: Exception) {}
+            try { codec?.release() } catch (_: Exception) {}
+            try { extractor.release() } catch (_: Exception) {}
         }
-        
-        return resampledData
-        
-    } catch (e: Exception) {
-        e.printStackTrace()
-        try { extractor.release() } catch (_: Exception) {}
-        return null
     }
 }
-}
+
    
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1045,27 +1051,31 @@ fun SynthAppUI(engine: SynthEngine) {
                 }
 
                 Button(
-                    onClick = {
-                        if (isRec) {
-                            engine.stopAndSaveRecording()
-                            isRec = false
-                            val defaultFileName = "Siren_Recording_${System.currentTimeMillis()}.wav"
-                            createWavLauncher.launch(defaultFileName)
-                        } else {
-                            engine.startRecording()
-                            isRec = true
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isRec) Color(0xFFFF1744) else panelBg2
-                    ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Box(modifier = Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, shape = CircleShape))
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (isRec) "שמור WAV" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    onClick = {
+        if (isRec) {
+            engine.stopAndSaveRecordingAsync { file ->
+                isRec = false
+                file?.let {
+                    val defaultFileName = "Siren_Recording_${System.currentTimeMillis()}.wav"
+                    createWavLauncher.launch(defaultFileName)
                 }
+            }
+        } else {
+            engine.startRecording()
+            isRec = true
+        }
+    },
+    colors = ButtonDefaults.buttonColors(
+        containerColor = if (isRec) Color(0xFFFF1744) else panelBg2
+    ),
+    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+    modifier = Modifier.height(32.dp)
+) {
+    Box(modifier = Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, shape = CircleShape))
+    Spacer(Modifier.width(4.dp))
+    Text(if (isRec) "שמור WAV" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+}
+
             }
         }
 
