@@ -14,7 +14,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -939,7 +938,7 @@ fun SynthAppUI(engine: SynthEngine) {
         contract = ActivityResultContracts.CreateDocument("audio/midi")
     ) { uri ->
         uri?.let {
-            val success = MidiExporter.exportMidiToUri(context, it, engine.recordedMidiNotes.toList())
+            val success = MidiExporter.exportMidiToUri(context, engine.recordedMidiNotes.toList(), it)
             if (success) {
                 Toast.makeText(context, "קובץ ה-MIDI נשמר בהצלחה!", Toast.LENGTH_LONG).show()
             } else {
