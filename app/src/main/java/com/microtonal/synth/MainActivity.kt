@@ -1010,6 +1010,44 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 
 
+    fun loadPresetFromSlot(slot: Int, showToast: Boolean = true) {
+        if (!prefs.getBoolean("p_${slot}_exists", false)) {
+            if (showToast) Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        vol = prefs.getFloat("p_${slot}_vol", 0.5f)
+        engine.volume = vol
+        attackVal = prefs.getFloat("p_${slot}_attack", 15f)
+        engine.attackMs = attackVal
+        decayVal = prefs.getFloat("p_${slot}_decay", 50f)
+        engine.decayMs = decayVal
+        sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f)
+        engine.sustainLevel = sustainVal
+        releaseVal = prefs.getFloat("p_${slot}_release", 200f)
+        engine.releaseMs = releaseVal
+        cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f)
+        engine.cutoffFreq = cutoffVal
+        resVal = prefs.getFloat("p_${slot}_res", 0.3f)
+        engine.resonance = resVal
+        echoVal = prefs.getFloat("p_${slot}_echo", 0.25f)
+        engine.echoMix = echoVal
+        glideVal = prefs.getFloat("p_${slot}_glide", 30f)
+        engine.glideMs = glideVal
+        currentWave = prefs.getInt("p_${slot}_wave", 3)
+        engine.setLiveWaveform(currentWave)
+        currentOctave = prefs.getInt("p_${slot}_octave", 0)
+        engine.octaveShift = currentOctave
+
+        val freqsStr = prefs.getString("p_${slot}_freqs", null)
+        if (freqsStr != null) {
+            val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
+            if (list.size == frequencies.size) {
+                list.forEachIndexed { i, f -> frequencies[i] = f }
+            }
+        }
+        if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
+    }
     val importPresetLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.GetContent()
 ) { uri ->
@@ -1061,47 +1099,6 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 }
-
-
-    fun loadPresetFromSlot(slot: Int, showToast: Boolean = true) {
-        if (!prefs.getBoolean("p_${slot}_exists", false)) {
-            if (showToast) Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        vol = prefs.getFloat("p_${slot}_vol", 0.5f)
-        engine.volume = vol
-        attackVal = prefs.getFloat("p_${slot}_attack", 15f)
-        engine.attackMs = attackVal
-        decayVal = prefs.getFloat("p_${slot}_decay", 50f)
-        engine.decayMs = decayVal
-        sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f)
-        engine.sustainLevel = sustainVal
-        releaseVal = prefs.getFloat("p_${slot}_release", 200f)
-        engine.releaseMs = releaseVal
-        cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f)
-        engine.cutoffFreq = cutoffVal
-        resVal = prefs.getFloat("p_${slot}_res", 0.3f)
-        engine.resonance = resVal
-        echoVal = prefs.getFloat("p_${slot}_echo", 0.25f)
-        engine.echoMix = echoVal
-        glideVal = prefs.getFloat("p_${slot}_glide", 30f)
-        engine.glideMs = glideVal
-        currentWave = prefs.getInt("p_${slot}_wave", 3)
-        engine.setLiveWaveform(currentWave)
-        currentOctave = prefs.getInt("p_${slot}_octave", 0)
-        engine.octaveShift = currentOctave
-
-        val freqsStr = prefs.getString("p_${slot}_freqs", null)
-        if (freqsStr != null) {
-            val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
-            if (list.size == frequencies.size) {
-                list.forEachIndexed { i, f -> frequencies[i] = f }
-            }
-        }
-        if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
-    }
-
     LaunchedEffect(Unit) {
         loadPresetFromSlot(1, showToast = false)
     }
