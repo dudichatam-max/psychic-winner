@@ -13,7 +13,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
+import androidx.activity.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -149,6 +149,14 @@ data class LooperNoteEvent(
     val octave: Int
 )
 
+data class MidiNoteEvent(
+    val timestampMs: Long,
+    val isNoteOn: Boolean,
+    val freq: Float,
+    val wave: Int,
+    val octave: Int
+)
+
 class SynthEngine(private val context: Context) {
     var sampleRate: Int = 44100
     private var bufferSizeFrames: Int = 512
@@ -191,6 +199,11 @@ class SynthEngine(private val context: Context) {
     @Volatile private var isRecording = false
     private var recordedAudioStream: FileOutputStream? = null
     private var wavFile: File? = null
+    
+    // MIDI Recording Variables
+    val recordedMidiNotes = java.util.concurrent.CopyOnWriteArrayList<MidiNoteEvent>()
+    @Volatile var isMidiRecording = false
+    private var midiStartTime = 0L
 
     private val audioTrack: AudioTrack
 
@@ -307,6 +320,16 @@ class SynthEngine(private val context: Context) {
         }
     }
 
+    fun startMidiRecording() {
+        recordedMidiNotes.clear()
+        isMidiRecording = true
+        midiStartTime = System.currentTimeMillis()
+    }
+
+    fun stopMidiRecording() {
+        isMidiRecording = false
+    }
+
     fun noteOn(
         baseFreq: Float,
         isLooper: Boolean = false,
@@ -334,6 +357,18 @@ class SynthEngine(private val context: Context) {
                     attack = attackMs,
                     sustain = sustainLevel,
                     release = releaseMs,
+                    octave = octaveShift
+                )
+            )
+        }
+        
+        if (isMidiRecording && !isLooper) {
+            recordedMidiNotes.add(
+                MidiNoteEvent(
+                    timestampMs = System.currentTimeMillis() - midiStartTime,
+                    isNoteOn = true,
+                    freq = baseFreq,
+                    wave = waveformType,
                     octave = octaveShift
                 )
             )
@@ -433,6 +468,18 @@ class SynthEngine(private val context: Context) {
                     attack = attackMs,
                     sustain = sustainLevel,
                     release = releaseMs,
+                    octave = octaveShift
+                )
+            )
+        }
+        
+        if (isMidiRecording && !isLooper) {
+            recordedMidiNotes.add(
+                MidiNoteEvent(
+                    timestampMs = System.currentTimeMillis() - midiStartTime,
+                    isNoteOn = false,
+                    freq = baseFreq,
+                    wave = waveformType,
                     octave = octaveShift
                 )
             )
@@ -831,8 +878,6 @@ class SynthEngine(private val context: Context) {
     }
 }
 
-   
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynthAppUI(engine: SynthEngine) {
@@ -863,6 +908,7 @@ fun SynthAppUI(engine: SynthEngine) {
 
     var currentOctave by remember { mutableIntStateOf(0) }
     var isRec by remember { mutableStateOf(false) }
+    var isMidiRec by remember { mutableStateOf(false) }
 
     var isLoopRecState by remember { mutableStateOf(false) }
     var isLoopPlayState by remember { mutableStateOf(false) }
@@ -884,6 +930,19 @@ fun SynthAppUI(engine: SynthEngine) {
                 Toast.makeText(context, "ההקלטה נשמרה בהצלחה!", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(context, "שגיאה בשמירת הקובץ", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val createMidiLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("audio/midi")
+    ) { uri ->
+        uri?.let {
+            val success = MidiExporter.exportToUri(context, it, engine.recordedMidiNotes.toList())
+            if (success) {
+                Toast.makeText(context, "קובץ ה-MIDI נשמר בהצלחה!", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "שגיאה בשמירת קובץ ה-MIDI", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1051,31 +1110,52 @@ fun SynthAppUI(engine: SynthEngine) {
                 }
 
                 Button(
-    onClick = {
-        if (isRec) {
-            engine.stopAndSaveRecordingAsync { file ->
-                isRec = false
-                file?.let {
-                    val defaultFileName = "Siren_Recording_${System.currentTimeMillis()}.wav"
-                    createWavLauncher.launch(defaultFileName)
+                    onClick = {
+                        if (isMidiRec) {
+                            isMidiRec = false
+                            engine.stopMidiRecording()
+                            createMidiLauncher.launch("Siren_MIDI_${System.currentTimeMillis()}.mid")
+                        } else {
+                            engine.startMidiRecording()
+                            isMidiRec = true
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isMidiRec) Color(0xFF2979FF) else panelBg2
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Box(modifier = Modifier.size(6.dp).background(if (isMidiRec) Color.White else Color(0xFF2979FF), shape = CircleShape))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (isMidiRec) "שמור MIDI" else "MIDI", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
-            }
-        } else {
-            engine.startRecording()
-            isRec = true
-        }
-    },
-    colors = ButtonDefaults.buttonColors(
-        containerColor = if (isRec) Color(0xFFFF1744) else panelBg2
-    ),
-    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-    modifier = Modifier.height(32.dp)
-) {
-    Box(modifier = Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, shape = CircleShape))
-    Spacer(Modifier.width(4.dp))
-    Text(if (isRec) "שמור WAV" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-}
 
+                Button(
+                    onClick = {
+                        if (isRec) {
+                            engine.stopAndSaveRecordingAsync { file ->
+                                isRec = false
+                                file?.let {
+                                    val defaultFileName = "Siren_Recording_${System.currentTimeMillis()}.wav"
+                                    createWavLauncher.launch(defaultFileName)
+                                }
+                            }
+                        } else {
+                            engine.startRecording()
+                            isRec = true
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isRec) Color(0xFFFF1744) else panelBg2
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Box(modifier = Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, shape = CircleShape))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (isRec) "שמור WAV" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
@@ -1558,5 +1638,14 @@ fun SynthSlider(
                 inactiveTrackColor = Color(0xFF2A2A2A)
             )
         )
+    }
+}
+
+// --- מחלקה זמנית (Stub) שהמשתמש יממש בעצמו ליצירת ה-MIDI ---
+object MidiExporter {
+    fun exportToUri(context: Context, uri: Uri, notes: List<MidiNoteEvent>): Boolean {
+        // הוסף כאן את הלוגיקה שלך ליצירת קובץ MIDI כפי שציינת.
+        // תוכל לגשת לכל הנתונים במשתנה notes שמועבר לכאן.
+        return true
     }
 }
