@@ -939,7 +939,7 @@ fun SynthAppUI(engine: SynthEngine) {
         contract = ActivityResultContracts.CreateDocument("audio/midi")
     ) { uri ->
         uri?.let {
-            val success = MidiExporter.exportToUri(context, it, engine.recordedMidiNotes.toList())
+            val success = MidiExporter.exportMidiToUri(context, it, engine.recordedMidiNotes.toList())
             if (success) {
                 Toast.makeText(context, "קובץ ה-MIDI נשמר בהצלחה!", Toast.LENGTH_LONG).show()
             } else {
