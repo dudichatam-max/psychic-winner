@@ -18,10 +18,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -30,6 +30,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -902,7 +903,7 @@ fun SynthAppUI(engine: SynthEngine) {
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
     var showTuningDialog by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by remember { mutableStateOf("SOUND") } // SOUND | PRESET | LOOP | PAD
 
     var currentWave by remember { mutableIntStateOf(3) }
     var vol by remember { mutableFloatStateOf(0.5f) }
@@ -924,11 +925,17 @@ fun SynthAppUI(engine: SynthEngine) {
     var isLoopPlayState by remember { mutableStateOf(false) }
     var looperVolState by remember { mutableFloatStateOf(1.0f) }
 
-    // Preset editing & management state
-    var editingPresetSlot by remember { mutableIntStateOf(-1) }
-    var presetNameInput by remember { mutableStateOf("") }
-    var exportTargetSlot by remember { mutableIntStateOf(1) }
-    var importTargetSlot by remember { mutableIntStateOf(1) }
+    // Preset Names State for 8 presets
+    val presetNames = remember {
+        mutableStateMapOf<Int, String>().apply {
+            for (i in 1..8) {
+                put(i, prefs.getString("p_${i}_name", "Preset $i") ?: "Preset $i")
+            }
+        }
+    }
+
+    var editingPresetId by remember { mutableStateOf<Int?>(null) }
+    var tempPresetNameInput by remember { mutableStateOf("") }
 
     val gold = Color(0xFFD4AF37)
     val darkBg = Color(0xFF0A0A0A)
@@ -970,76 +977,63 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-    // Export preset to file launcher
+    // Preset File Import / Export launchers
     val exportPresetLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         uri?.let {
-            val slot = exportTargetSlot
-            val presetName = prefs.getString("p_${slot}_name", "Preset $slot") ?: "Preset $slot"
-            val data = buildString {
-                append("name=$presetName\n")
-                append("vol=${prefs.getFloat("p_${slot}_vol", 0.5f)}\n")
-                append("attack=${prefs.getFloat("p_${slot}_attack", 15f)}\n")
-                append("decay=${prefs.getFloat("p_${slot}_decay", 50f)}\n")
-                append("sustain=${prefs.getFloat("p_${slot}_sustain", 0.8f)}\n")
-                append("release=${prefs.getFloat("p_${slot}_release", 200f)}\n")
-                append("cutoff=${prefs.getFloat("p_${slot}_cutoff", 5000f)}\n")
-                append("res=${prefs.getFloat("p_${slot}_res", 0.3f)}\n")
-                append("echo=${prefs.getFloat("p_${slot}_echo", 0.25f)}\n")
-                append("glide=${prefs.getFloat("p_${slot}_glide", 30f)}\n")
-                append("wave=${prefs.getInt("p_${slot}_wave", 3)}\n")
-                append("octave=${prefs.getInt("p_${slot}_octave", 0)}\n")
-                append("freqs=${prefs.getString("p_${slot}_freqs", frequencies.joinToString(","))}\n")
-            }
             try {
-                context.contentResolver.openOutputStream(uri)?.use { os ->
-                    os.write(data.toByteArray())
+                val sb = StringBuilder()
+                for (i in 1..8) {
+                    sb.append("preset:$i|${presetNames[i]}|")
+                    sb.append("${prefs.getFloat("p_${i}_vol", 0.5f)},")
+                    sb.append("${prefs.getFloat("p_${i}_attack", 15f)},")
+                    sb.append("${prefs.getFloat("p_${i}_decay", 50f)},")
+                    sb.append("${prefs.getFloat("p_${i}_sustain", 0.8f)},")
+                    sb.append("${prefs.getFloat("p_${i}_release", 200f)},")
+                    sb.append("${prefs.getFloat("p_${i}_cutoff", 5000f)},")
+                    sb.append("${prefs.getFloat("p_${i}_res", 0.3f)},")
+                    sb.append("${prefs.getFloat("p_${i}_echo", 0.25f)},")
+                    sb.append("${prefs.getFloat("p_${i}_glide", 30f)},")
+                    sb.append("${prefs.getInt("p_${i}_wave", 3)},")
+                    sb.append("${prefs.getInt("p_${i}_octave", 0)}|")
+                    sb.append("${prefs.getString("p_${i}_freqs", "")}\n")
                 }
-                Toast.makeText(context, "פריסט $slot יוצא בהצלחה!", Toast.LENGTH_SHORT).show()
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(sb.toString().toByteArray())
+                }
+                Toast.makeText(context, "כל הפריסטים יוצאו בהצלחה!", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                Toast.makeText(context, "שגיאה בייצוא הפריסט", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "שגיאה בייצוא פריסטים", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    // Import preset from file launcher
     val importPresetLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let {
-            val slot = importTargetSlot
             try {
                 context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val text = stream.bufferedReader().readText()
-                    val map = mutableMapOf<String, String>()
-                    for (line in text.lines()) {
-                        val parts = line.split("=", limit = 2)
-                        if (parts.size == 2) {
-                            map[parts[0].trim()] = parts[1].trim()
+                    val lines = stream.bufferedReader().readLines()
+                    val editor = prefs.edit()
+                    for (line in lines) {
+                        if (line.startsWith("preset:")) {
+                            val parts = line.split("|")
+                            if (parts.size >= 4) {
+                                val slot = parts[0].removePrefix("preset:").toIntOrNull() ?: continue
+                                val name = parts[1]
+                                presetNames[slot] = name
+                                editor.putString("p_${slot}_name", name)
+                                editor.putBoolean("p_${slot}_exists", true)
+                                editor.apply()
+                            }
                         }
                     }
-                    prefs.edit().apply {
-                        putBoolean("p_${slot}_exists", true)
-                        map["name"]?.let { putString("p_${slot}_name", it) }
-                        map["vol"]?.toFloatOrNull()?.let { putFloat("p_${slot}_vol", it) }
-                        map["attack"]?.toFloatOrNull()?.let { putFloat("p_${slot}_attack", it) }
-                        map["decay"]?.toFloatOrNull()?.let { putFloat("p_${slot}_decay", it) }
-                        map["sustain"]?.toFloatOrNull()?.let { putFloat("p_${slot}_sustain", it) }
-                        map["release"]?.toFloatOrNull()?.let { putFloat("p_${slot}_release", it) }
-                        map["cutoff"]?.toFloatOrNull()?.let { putFloat("p_${slot}_cutoff", it) }
-                        map["res"]?.toFloatOrNull()?.let { putFloat("p_${slot}_res", it) }
-                        map["echo"]?.toFloatOrNull()?.let { putFloat("p_${slot}_echo", it) }
-                        map["glide"]?.toFloatOrNull()?.let { putFloat("p_${slot}_glide", it) }
-                        map["wave"]?.toIntOrNull()?.let { putInt("p_${slot}_wave", it) }
-                        map["octave"]?.toIntOrNull()?.let { putInt("p_${slot}_octave", it) }
-                        map["freqs"]?.let { putString("p_${slot}_freqs", it) }
-                        apply()
-                    }
-                    Toast.makeText(context, "פריסט $slot יובא בהצלחה!", Toast.LENGTH_SHORT).show()
                 }
+                Toast.makeText(context, "הפריסטים יובאו בהצלחה!", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                Toast.makeText(context, "שגיאה בייבוא הפריסט", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "שגיאה בייבוא פריסטים", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1080,8 +1074,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 list.forEachIndexed { i, f -> frequencies[i] = f }
             }
         }
-        val name = prefs.getString("p_${slot}_name", "Preset $slot")
-        if (showToast) Toast.makeText(context, "פריסט $name נטען", Toast.LENGTH_SHORT).show()
+        if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
     }
 
     LaunchedEffect(Unit) {
@@ -1089,7 +1082,7 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 
     fun savePresetToSlot(slot: Int) {
-        val currentName = prefs.getString("p_${slot}_name", "Preset $slot") ?: "Preset $slot"
+        val currentName = presetNames[slot] ?: "Preset $slot"
         prefs.edit().apply {
             putString("p_${slot}_name", currentName)
             putFloat("p_${slot}_vol", vol)
@@ -1107,7 +1100,7 @@ fun SynthAppUI(engine: SynthEngine) {
             putBoolean("p_${slot}_exists", true)
             apply()
         }
-        Toast.makeText(context, "פריסט $currentName נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "פריסט $slot נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
     }
 
     var renderTrigger by remember { mutableLongStateOf(0L) }
@@ -1116,6 +1109,35 @@ fun SynthAppUI(engine: SynthEngine) {
             delay(33)
             renderTrigger = System.currentTimeMillis()
         }
+    }
+
+    // Dialog for renaming preset
+    if (editingPresetId != null) {
+        AlertDialog(
+            onDismissRequest = { editingPresetId = null },
+            title = { Text("ערוך שם פריסט $editingPresetId", color = gold, fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = tempPresetNameInput,
+                    onValueChange = { tempPresetNameInput = it },
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 12.sp)
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    editingPresetId?.let { id ->
+                        presetNames[id] = tempPresetNameInput
+                        prefs.edit().putString("p_${id}_name", tempPresetNameInput).apply()
+                    }
+                    editingPresetId = null
+                }) { Text("שמור") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { editingPresetId = null }) { Text("ביטול") }
+            },
+            containerColor = panelBg2
+        )
     }
 
     if (showTuningDialog) {
@@ -1175,59 +1197,31 @@ fun SynthAppUI(engine: SynthEngine) {
         )
     }
 
-    // Dialog for editing preset name
-    if (editingPresetSlot != -1) {
-        AlertDialog(
-            onDismissRequest = { editingPresetSlot = -1 },
-            title = { Text("ערוך שם פריסט $editingPresetSlot", fontSize = 14.sp, color = gold, fontWeight = FontWeight.Bold) },
-            text = {
-                OutlinedTextField(
-                    value = presetNameInput,
-                    onValueChange = { presetNameInput = it },
-                    singleLine = true,
-                    textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 12.sp)
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    if (presetNameInput.isNotBlank()) {
-                        prefs.edit().putString("p_${editingPresetSlot}_name", presetNameInput).apply()
-                    }
-                    editingPresetSlot = -1
-                }) { Text("שמור") }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { editingPresetSlot = -1 }) { Text("ביטול") }
-            },
-            containerColor = panelBg2
-        )
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(darkBg)
-            .padding(10.dp),
+            .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // --- HEADER ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 6.dp),
+                .padding(bottom = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("SIREN", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text("SIREN", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(
                     onClick = { showTuningDialog = true },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp),
                     border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
                 ) {
-                    Text("תדרים", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("⚙️ תדרים", color = gold, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Button(
@@ -1244,12 +1238,12 @@ fun SynthAppUI(engine: SynthEngine) {
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isMidiRec) Color(0xFF2979FF) else panelBg2
                     ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                    modifier = Modifier.height(32.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
                 ) {
-                    Box(modifier = Modifier.size(6.dp).background(if (isMidiRec) Color.White else Color(0xFF2979FF), shape = CircleShape))
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (isMidiRec) "שמור MIDI" else "MIDI", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Box(modifier = Modifier.size(5.dp).background(if (isMidiRec) Color.White else Color(0xFF2979FF), shape = CircleShape))
+                    Spacer(Modifier.width(3.dp))
+                    Text(if (isMidiRec) "שמור MIDI" else "MIDI", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Button(
@@ -1270,12 +1264,12 @@ fun SynthAppUI(engine: SynthEngine) {
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isRec) Color(0xFFFF1744) else panelBg2
                     ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                    modifier = Modifier.height(32.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
                 ) {
-                    Box(modifier = Modifier.size(6.dp).background(if (isRec) Color.White else Color.Red, shape = CircleShape))
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (isRec) "שמור WAV" else "WAV", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Box(modifier = Modifier.size(5.dp).background(if (isRec) Color.White else Color.Red, shape = CircleShape))
+                    Spacer(Modifier.width(3.dp))
+                    Text(if (isRec) "שמור WAV" else "WAV", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -1284,9 +1278,9 @@ fun SynthAppUI(engine: SynthEngine) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(120.dp)
-                .background(panelBg, shape = RoundedCornerShape(10.dp))
-                .border(1.dp, Color(0xFF2A2A2A), shape = RoundedCornerShape(10.dp))
+                .height(100.dp)
+                .background(panelBg, shape = RoundedCornerShape(8.dp))
+                .border(1.dp, Color(0xFF2A2A2A), shape = RoundedCornerShape(8.dp))
                 .padding(4.dp)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1314,7 +1308,7 @@ fun SynthAppUI(engine: SynthEngine) {
                     val y = liveCenterY + (sample * (halfH / 2f) * 0.85f)
                     if (i == 0) livePath.moveTo(x, y) else livePath.lineTo(x, y)
                 }
-                drawPath(livePath, gold, style = Stroke(width = 2.5f))
+                drawPath(livePath, gold, style = Stroke(width = 2f))
 
                 val looperPath = Path()
                 val looperCenterY = halfH + (halfH / 2f)
@@ -1324,7 +1318,7 @@ fun SynthAppUI(engine: SynthEngine) {
                     val y = looperCenterY + (sample * (halfH / 2f) * 0.85f)
                     if (i == 0) looperPath.moveTo(x, y) else looperPath.lineTo(x, y)
                 }
-                drawPath(looperPath, Color.White.copy(alpha = 0.7f), style = Stroke(width = 2.5f))
+                drawPath(looperPath, Color.White.copy(alpha = 0.7f), style = Stroke(width = 2f))
             }
 
             Column(
@@ -1338,9 +1332,9 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
-        // --- TABS (SOUND | PRESET | LOOP | PAD) ---
+        // --- TABS (SOUND | PRESET | LOOP | PAD) - No Emojis ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1349,11 +1343,12 @@ fun SynthAppUI(engine: SynthEngine) {
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             val tabs = listOf("SOUND", "PRESET", "LOOP", "PAD")
-            tabs.forEachIndexed { index, title ->
+            tabs.forEach { title ->
+                val isSelected = selectedTab == title
                 Button(
-                    onClick = { selectedTab = index },
+                    onClick = { selectedTab = title },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (selectedTab == index) panelBg2 else Color.Transparent
+                        containerColor = if (isSelected) panelBg2 else Color.Transparent
                     ),
                     shape = RoundedCornerShape(6.dp),
                     contentPadding = PaddingValues(vertical = 4.dp),
@@ -1361,7 +1356,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 ) {
                     Text(
                         title,
-                        color = if (selectedTab == index) gold else Color.Gray,
+                        color = if (isSelected) gold else Color.Gray,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -1371,7 +1366,7 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
         // --- TAB CONTENT ---
         Box(
@@ -1379,38 +1374,20 @@ fun SynthAppUI(engine: SynthEngine) {
                 .fillMaxWidth()
                 .weight(1f)
                 .background(panelBg, shape = RoundedCornerShape(10.dp))
-                .padding(8.dp)
+                .padding(6.dp)
         ) {
             when (selectedTab) {
-                // TAB 0: SOUND (Unified Sound & Filter with Waveform, Octaves, and 9 Knobs symmetrically)
-                0 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+                // --- SOUND TAB (Merged Sound + Filter, 9 knobs symmetrical in 3x3) ---
+                "SOUND" -> Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Top Bar inside Sound: Octave + Wave selector
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text("סוג גל (נגינה חיה)", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(2.dp))
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
-                                itemsIndexed(waves) { index, name ->
-                                    FilterChip(
-                                        selected = currentWave == index,
-                                        onClick = {
-                                            currentWave = index
-                                            engine.setLiveWaveform(index)
-                                        },
-                                        label = { Text(name, fontSize = 9.sp) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = gold,
-                                            selectedLabelColor = Color.Black
-                                        )
-                                    )
-                                }
-                            }
-                        }
-
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedButton(
                                 onClick = {
@@ -1419,11 +1396,11 @@ fun SynthAppUI(engine: SynthEngine) {
                                         engine.octaveShift = currentOctave
                                     }
                                 },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                                modifier = Modifier.height(26.dp)
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                modifier = Modifier.height(24.dp)
                             ) { Text("-1", fontSize = 9.sp, color = Color.White) }
 
-                            Text(" Oct:$currentOctave ", color = gold, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text(" Oct: $currentOctave ", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 
                             OutlinedButton(
                                 onClick = {
@@ -1432,21 +1409,38 @@ fun SynthAppUI(engine: SynthEngine) {
                                         engine.octaveShift = currentOctave
                                     }
                                 },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                                modifier = Modifier.height(26.dp)
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                modifier = Modifier.height(24.dp)
                             ) { Text("+1", fontSize = 9.sp, color = Color.White) }
+                        }
+
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
+                            itemsIndexed(waves) { index, name ->
+                                FilterChip(
+                                    selected = currentWave == index,
+                                    onClick = {
+                                        currentWave = index
+                                        engine.setLiveWaveform(index)
+                                    },
+                                    label = { Text(name, fontSize = 9.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = gold,
+                                        selectedLabelColor = Color.Black
+                                    )
+                                )
+                            }
                         }
                     }
 
-                    Spacer(Modifier.height(2.dp))
-
-                    // 9 Knobs arranged symmetrically in rows of 3
+                    // 9 Knobs Symmetrical Grid (3 rows of 3)
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                            SynthKnob("Volume", "${(vol * 100).toInt()}%", vol, accentColor = gold) { vol = it; engine.volume = it }
+                            SynthKnob("Volume", "${(vol * 100).toInt()}%", vol, 0f..1f, gold) { vol = it; engine.volume = it }
                             SynthKnob("Attack", "${attackVal.toInt()}ms", attackVal, 5f..500f, gold) { attackVal = it; engine.attackMs = it }
                             SynthKnob("Decay", "${decayVal.toInt()}ms", decayVal, 5f..1000f, gold) { decayVal = it; engine.decayMs = it }
                         }
@@ -1463,100 +1457,101 @@ fun SynthAppUI(engine: SynthEngine) {
                     }
                 }
 
-                // TAB 1: PRESET (8 different presets with name editing, saving, loading, and import/export)
-                1 -> Column(
-                    modifier = Modifier.fillMaxSize()
+                // --- PRESET TAB (8 Presets visible in one single window without scrolling, edit name + import/save device) ---
+                "PRESET" -> Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("פריסטים (8 חריצים)", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(8) { index ->
-                            val slot = index + 1
-                            val presetName = prefs.getString("p_${slot}_name", "Preset $slot") ?: "Preset $slot"
-                            val isExists = prefs.getBoolean("p_${slot}_exists", false)
 
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = panelBg2),
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
+                    // 8 Presets in 2 columns of 4 rows, perfectly fitting without scrolling
+                    val rows = (1..8).chunked(2)
+                    rows.forEach { rowSlots ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            rowSlots.forEach { slot ->
+                                val pName = presetNames[slot] ?: "Preset $slot"
+                                Box(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(6.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .weight(1f)
+                                        .background(panelBg2, RoundedCornerShape(6.dp))
+                                        .border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(6.dp))
+                                        .padding(4.dp)
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
-                                            text = "$slot. $presetName",
-                                            color = if (isExists) Color.White else Color.Gray,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
+                                            text = "$slot. $pName",
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            maxLines = 1,
+                                            modifier = Modifier.weight(1f)
                                         )
-                                        Text(
-                                            text = if (isExists) "שמור במערכת" else "ריק",
-                                            color = if (isExists) gold else Color.DarkGray,
-                                            fontSize = 8.sp
-                                        )
-                                    }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Button(
+                                                onClick = { loadPresetFromSlot(slot) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = gold),
+                                                contentPadding = PaddingValues(2.dp),
+                                                modifier = Modifier.height(22.dp).width(28.dp)
+                                            ) { Text("טען", fontSize = 8.sp, color = Color.Black) }
 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                        Button(
-                                            onClick = { loadPresetFromSlot(slot) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = gold),
-                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(26.dp)
-                                        ) { Text("טען", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold) }
+                                            Button(
+                                                onClick = { savePresetToSlot(slot) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
+                                                contentPadding = PaddingValues(2.dp),
+                                                modifier = Modifier.height(22.dp).width(30.dp)
+                                            ) { Text("שמור", fontSize = 8.sp, color = Color.White) }
 
-                                        Button(
-                                            onClick = { savePresetToSlot(slot) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
-                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(26.dp)
-                                        ) { Text("שמור", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold) }
-
-                                        Button(
-                                            onClick = {
-                                                editingPresetSlot = slot
-                                                presetNameInput = presetName
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(26.dp)
-                                        ) { Text("ערוך", fontSize = 9.sp, color = Color.White) }
-
-                                        Button(
-                                            onClick = {
-                                                exportTargetSlot = slot
-                                                exportPresetLauncher.launch("Siren_Preset_$slot.json")
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Gray),
-                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(26.dp)
-                                        ) { Text("ייצא", fontSize = 9.sp, color = Color.Black) }
-
-                                        Button(
-                                            onClick = {
-                                                importTargetSlot = slot
-                                                importPresetLauncher.launch("application/json")
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray),
-                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(26.dp)
-                                        ) { Text("ייבא", fontSize = 9.sp, color = Color.Black) }
+                                            Button(
+                                                onClick = {
+                                                    editingPresetId = slot
+                                                    tempPresetNameInput = pName
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF555555)),
+                                                contentPadding = PaddingValues(2.dp),
+                                                modifier = Modifier.height(22.dp).width(28.dp)
+                                            ) { Text("ערוך", fontSize = 8.sp, color = Color.White) }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+
+                    // Import / Save device presets buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { importPresetLauncher.launch("application/json") },
+                            modifier = Modifier.weight(1f).height(28.dp),
+                            contentPadding = PaddingValues(2.dp),
+                            border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
+                        ) {
+                            Text("ייבוא פריסט מהמכשיר", color = gold, fontSize = 9.sp)
+                        }
+                        Button(
+                            onClick = { exportPresetLauncher.launch("Siren_Presets_${System.currentTimeMillis()}.json") },
+                            colors = ButtonDefaults.buttonColors(containerColor = gold),
+                            modifier = Modifier.weight(1f).height(28.dp),
+                            contentPadding = PaddingValues(2.dp)
+                        ) {
+                            Text("שמירה למכשיר", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
 
-                // TAB 2: LOOP
-                2 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
+                // --- LOOP TAB ---
+                "LOOP" -> Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceAround
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center
@@ -1582,9 +1577,9 @@ fun SynthAppUI(engine: SynthEngine) {
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2
                             ),
-                            modifier = Modifier.weight(1f).height(48.dp)
+                            modifier = Modifier.weight(1f).height(42.dp)
                         ) {
-                            Text(if (isLoopRecState) "עצור הקלטה" else "הקלט לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(if (isLoopRecState) "עצור הקלטה" else "הקלט לופ", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
@@ -1602,18 +1597,18 @@ fun SynthAppUI(engine: SynthEngine) {
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2
                             ),
-                            modifier = Modifier.weight(1f).height(48.dp)
+                            modifier = Modifier.weight(1f).height(42.dp)
                         ) {
-                            Text(if (isLoopPlayState) "עצור ניגון" else "נגן לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(if (isLoopPlayState) "עצור ניגון" else "נגן לופ", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
                     OutlinedButton(
                         onClick = { loadAudioLauncher.launch("audio/*") },
-                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        modifier = Modifier.fillMaxWidth().height(36.dp),
                         border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
                     ) {
-                        Text("טען קובץ שמע (WAV/MP3)", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("טען קובץ שמע (WAV/MP3)", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
@@ -1623,22 +1618,22 @@ fun SynthAppUI(engine: SynthEngine) {
                             isLoopRecState = false
                             isLoopPlayState = false
                         },
-                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        modifier = Modifier.fillMaxWidth().height(36.dp),
                         border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
                     ) {
-                        Text("נקה לופר ורקע", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("נקה לופר ורקע", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 
-                // TAB 3: PAD
-                3 -> Column(
+                // --- PAD TAB ---
+                "PAD" -> Column(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("LIVE PERFORMANCE PAD", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("LIVE PERFORMANCE PAD", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(2.dp))
+                    Text("משפיע על נגינה חיה בלבד. שחרר לחזרה אוטומטית למרכז.", color = Color.Gray, fontSize = 8.sp)
                     Spacer(Modifier.height(4.dp))
-                    Text("משפיע על נגינה חיה בלבד. שחרר לחזרה אוטומטית למרכז.", color = Color.Gray, fontSize = 9.sp)
-                    Spacer(Modifier.height(8.dp))
 
                     Box(
                         modifier = Modifier
@@ -1686,37 +1681,37 @@ fun SynthAppUI(engine: SynthEngine) {
 
                             drawCircle(
                                 color = gold.copy(alpha = 0.2f),
-                                radius = 50f,
+                                radius = 40f,
                                 center = Offset(cursorX, cursorY)
                             )
                             drawCircle(
                                 color = gold,
-                                radius = 20f,
+                                radius = 16f,
                                 center = Offset(cursorX, cursorY),
-                                style = Stroke(width = 4f)
+                                style = Stroke(width = 3f)
                             )
                             drawCircle(
                                 color = Color.White,
-                                radius = 4f,
+                                radius = 3f,
                                 center = Offset(cursorX, cursorY)
                             )
                         }
 
-                        Text("LFO RATE (קצב)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp))
-                        Text("Resonance (תהודה)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart).padding(start = 6.dp).rotate(-90f))
+                        Text("LFO RATE", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
+                        Text("Resonance", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp).rotate(-90f))
                     }
                 }
             }
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
-        // --- KEYBOARD ---
+        // --- MICROTONAL KEYBOARD (8 Keys: 222Hz to 477Hz) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(155.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                .height(130.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             frequencies.forEachIndexed { index, freq ->
                 var isPressed by remember { mutableStateOf(false) }
@@ -1743,18 +1738,18 @@ fun SynthAppUI(engine: SynthEngine) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(bottom = 8.dp)
+                            modifier = Modifier.padding(bottom = 6.dp)
                         ) {
                             Text(
                                 text = noteNames[index],
                                 color = if (isPressed) Color.Black else Color(0xFF1A1A1A),
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
+                                fontSize = 12.sp
                             )
                             Text(
                                 text = "${engine.getEffectiveFrequency(freq).toInt()}Hz",
                                 color = if (isPressed) Color.Black.copy(alpha = 0.7f) else Color(0xFF555555),
-                                fontSize = 9.sp
+                                fontSize = 8.sp
                             )
                         }
                     }
@@ -1782,17 +1777,17 @@ fun SynthKnob(
         AlertDialog(
             onDismissRequest = { showInputDialog = false },
             title = {
-                Text("הזנת ערך עבור $label", fontSize = 14.sp, color = accentColor, fontWeight = FontWeight.Bold)
+                Text("הזנת ערך עבור $label", fontSize = 13.sp, color = accentColor, fontWeight = FontWeight.Bold)
             },
             text = {
                 Column {
-                    Text("הכנס ערך בין ${valueRange.start} ל-${valueRange.endInclusive}:", color = Color.White, fontSize = 11.sp)
-                    Spacer(Modifier.height(8.dp))
+                    Text("הכנס ערך בין ${valueRange.start} ל-${valueRange.endInclusive}:", color = Color.White, fontSize = 10.sp)
+                    Spacer(Modifier.height(6.dp))
                     OutlinedTextField(
                         value = textInput,
                         onValueChange = { textInput = it },
                         singleLine = true,
-                        textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 12.sp)
+                        textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 11.sp)
                     )
                 }
             },
@@ -1802,14 +1797,10 @@ fun SynthKnob(
                         onValueChange(inputVal.coerceIn(valueRange))
                     }
                     showInputDialog = false
-                }) {
-                    Text("אישור")
-                }
+                }) { Text("אישור") }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showInputDialog = false }) {
-                    Text("ביטול")
-                }
+                OutlinedButton(onClick = { showInputDialog = false }) { Text("ביטול") }
             },
             containerColor = Color(0xFF1A1A1A)
         )
@@ -1830,7 +1821,7 @@ fun SynthKnob(
 
         Box(
             modifier = Modifier
-                .size(54.dp)
+                .size(52.dp)
                 .pointerInput(valueRange) {
                     detectDragGestures(
                         onDragStart = { 
@@ -1854,7 +1845,7 @@ fun SynthKnob(
                 val center = center
 
                 drawCircle(color = Color(0xFF1F1F1F), radius = radius, center = center)
-                drawCircle(color = Color(0xFF2A2A2A), radius = radius, center = center, style = Stroke(width = 2f))
+                drawCircle(color = Color(0xFF2A2A2A), radius = radius, center = center, style = Stroke(width = 1.5f))
 
                 val fraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
                 val angleDegrees = 135f + fraction * 270f
@@ -1868,7 +1859,7 @@ fun SynthKnob(
                     color = accentColor,
                     start = center,
                     end = Offset(endX, endY),
-                    strokeWidth = 3f
+                    strokeWidth = 2.5f
                 )
             }
         }
