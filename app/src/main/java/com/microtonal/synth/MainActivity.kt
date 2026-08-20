@@ -1601,6 +1601,8 @@ fun SynthKnob(
 ) {
     var showInputDialog by remember { mutableStateOf(false) }
     var textInput by remember { mutableStateOf(value.toString()) }
+    var initialValue by remember { mutableFloatStateOf(value) }
+    var totalDragY by remember { mutableFloatStateOf(0f) }
 
     if (showInputDialog) {
         AlertDialog(
@@ -1654,15 +1656,23 @@ fun SynthKnob(
 
         Box(
             modifier = Modifier
-                .size(48.dp)
-                .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val span = valueRange.endInclusive - valueRange.start
-                        val sensitivity = 0.005f * span
-                        val newValue = (value - dragAmount.y * sensitivity).coerceIn(valueRange)
-                        onValueChange(newValue)
-                    }
+                .size(64.dp) // שטח מגע מוגדל לנוחות בזמן נגינה
+                .pointerInput(valueRange) {
+                    detectDragGestures(
+                        onDragStart = { 
+                            initialValue = value
+                            totalDragY = 0f
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            totalDragY += dragAmount.y
+                            val span = valueRange.endInclusive - valueRange.start
+                            // רגישות חלקה המבוססת על גרירה של כ-200 פיקסלים לכל הטווח
+                            val sensitivity = span / 200f 
+                            val newValue = (initialValue - totalDragY * sensitivity).coerceIn(valueRange)
+                            onValueChange(newValue)
+                        }
+                    )
                 },
             contentAlignment = Alignment.Center
         ) {
