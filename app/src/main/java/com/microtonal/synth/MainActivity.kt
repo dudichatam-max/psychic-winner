@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -1641,11 +1642,4 @@ fun SynthSlider(
     }
 }
 
-// --- מחלקה זמנית (Stub) שהמשתמש יממש בעצמו ליצירת ה-MIDI ---
-object MidiExporter {
-    fun exportToUri(context: Context, uri: Uri, notes: List<MidiNoteEvent>): Boolean {
-        // הוסף כאן את הלוגיקה שלך ליצירת קובץ MIDI כפי שציינת.
-        // תוכל לגשת לכל הנתונים במשתנה notes שמועבר לכאן.
-        return true
-    }
-}
+
