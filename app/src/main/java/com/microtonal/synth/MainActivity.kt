@@ -51,6 +51,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
     private lateinit var synthEngine: SynthEngine
@@ -87,8 +88,11 @@ class NoteSlot {
     var frozenCutoff: Float = 5000f
     var frozenRes: Float = 0.3f
     var frozenAttack: Float = 15f
+    var frozenDecay: Float = 50f
     var frozenSustain: Float = 0.8f
     var frozenRelease: Float = 200f
+
+    var envState: Int = 0 // 0: Attack, 1: Decay, 2: Sustain
 
     var zdfState1: Double = 0.0
     var zdfState2: Double = 0.0
@@ -96,9 +100,9 @@ class NoteSlot {
     var smoothedRes: Float = 0.3f
 
     var attackCoeff: Double = 0.0
+    var decayCoeff: Double = 0.0
     var releaseCoeff: Double = 0.0
 
-    // נעילה מקומית למניעת Race Condition בעת הפעלה מחדש של קול תפוס
     private val lock = Any()
 
     fun updateAndActivate(
@@ -110,6 +114,7 @@ class NoteSlot {
         cutoff: Float,
         res: Float,
         attack: Float,
+        decay: Float,
         sustain: Float,
         release: Float,
         sampleRate: Int
@@ -125,12 +130,15 @@ class NoteSlot {
         frozenCutoff = cutoff
         frozenRes = res
         frozenAttack = attack
+        frozenDecay = decay
         frozenSustain = sustain
         frozenRelease = release
+        envState = 0
         zdfState1 = 0.0
         zdfState2 = 0.0
 
         attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (attack / 1000.0).coerceAtLeast(0.001)))
+        decayCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (decay / 1000.0).coerceAtLeast(0.001)))
         releaseCoeff = Math.exp(-1.0 / (sampleRate * (release / 1000.0).coerceAtLeast(0.001)))
         active = true
     }
@@ -144,6 +152,7 @@ data class LooperNoteEvent(
     val cutoff: Float,
     val res: Float,
     val attack: Float,
+    val decay: Float,
     val sustain: Float,
     val release: Float,
     val octave: Int
@@ -173,6 +182,7 @@ class SynthEngine(private val context: Context) {
     @Volatile var volume = 0.5f
     @Volatile var looperVolume = 1.0f
     @Volatile var attackMs = 15f
+    @Volatile var decayMs = 50f
     @Volatile var sustainLevel = 0.8f
     @Volatile var releaseMs = 200f
     @Volatile var cutoffFreq = 5000f
@@ -200,7 +210,6 @@ class SynthEngine(private val context: Context) {
     private var recordedAudioStream: FileOutputStream? = null
     private var wavFile: File? = null
     
-    // MIDI Recording Variables
     val recordedMidiNotes = java.util.concurrent.CopyOnWriteArrayList<MidiNoteEvent>()
     @Volatile var isMidiRecording = false
     private var midiStartTime = 0L
@@ -269,6 +278,7 @@ class SynthEngine(private val context: Context) {
                         cutoffFreq = cutoffFreq,
                         resonance = resonance,
                         attackMs = attackMs,
+                        decayMs = decayMs,
                         sustainLevel = sustainLevel,
                         releaseMs = releaseMs,
                         echoMix = echoMix,
@@ -337,6 +347,7 @@ class SynthEngine(private val context: Context) {
         cutoff: Float? = null,
         res: Float? = null,
         attack: Float? = null,
+        decay: Float? = null,
         sustain: Float? = null,
         release: Float? = null,
         targetOctave: Int? = null
@@ -355,6 +366,7 @@ class SynthEngine(private val context: Context) {
                     cutoff = cutoffFreq,
                     res = resonance,
                     attack = attackMs,
+                    decay = decayMs,
                     sustain = sustainLevel,
                     release = releaseMs,
                     octave = octaveShift
@@ -447,6 +459,7 @@ class SynthEngine(private val context: Context) {
                 cutoff = cutoff ?: cutoffFreq,
                 res = res ?: resonance,
                 attack = attack ?: attackMs,
+                decay = decay ?: decayMs,
                 sustain = sustain ?: sustainLevel,
                 release = release ?: releaseMs,
                 sampleRate = sampleRate
@@ -466,6 +479,7 @@ class SynthEngine(private val context: Context) {
                     cutoff = cutoffFreq,
                     res = resonance,
                     attack = attackMs,
+                    decay = decayMs,
                     sustain = sustainLevel,
                     release = releaseMs,
                     octave = octaveShift
@@ -531,6 +545,7 @@ class SynthEngine(private val context: Context) {
                                 cutoff = ev.cutoff,
                                 res = ev.res,
                                 attack = ev.attack,
+                                decay = ev.decay,
                                 sustain = ev.sustain,
                                 release = ev.release,
                                 targetOctave = ev.octave
@@ -598,7 +613,6 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-    // תיקון: העברת עצירת ההקלטה וסגירת הקובץ אל מחוץ ל-Main Thread כדי למנוע UI Jank
     fun stopAndSaveRecordingAsync(onSaved: (File?) -> Unit) {
         if (!isRecording) {
             onSaved(wavFile)
@@ -703,7 +717,6 @@ class SynthEngine(private val context: Context) {
         out.write(header, 0, 44)
     }
 
-    // תיקון: שימוש ב-ByteBuffer לעדכון כותרת WAV בצורה בטוחה ותקינה
     private fun updateWavHeader(file: File) {
         val totalAudioLen = file.length() - 44
         val totalDataLen = totalAudioLen + 36
@@ -711,13 +724,11 @@ class SynthEngine(private val context: Context) {
         RandomAccessFile(file, "rw").use { raf ->
             val buffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
 
-            // עדכון גודל ה-RIFF (בייטים 4-7)
             raf.seek(4)
             buffer.clear()
             buffer.putInt(totalDataLen.toInt())
             raf.write(buffer.array())
 
-            // עדכון גודל נתוני האודיו הכלליים בתוך ה-Data Chunk (בייטים 40-43)
             raf.seek(40)
             buffer.clear()
             buffer.putInt(totalAudioLen.toInt())
@@ -756,9 +767,6 @@ class SynthEngine(private val context: Context) {
         dspEngine.setExternalAudioBuffer(null)
     }
 
-    /**
-     * תיקון דליפת זיכרון: שימוש בבלוק try-finally לשחרור בטוח של ה-MediaCodec וה-MediaExtractor גם בזמן שגיאה.
-     */
     private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {    
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -898,6 +906,7 @@ fun SynthAppUI(engine: SynthEngine) {
     var currentWave by remember { mutableIntStateOf(3) }
     var vol by remember { mutableFloatStateOf(0.5f) }
     var attackVal by remember { mutableFloatStateOf(15f) }
+    var decayVal by remember { mutableFloatStateOf(50f) }
     var sustainVal by remember { mutableFloatStateOf(0.8f) }
     var releaseVal by remember { mutableFloatStateOf(200f) }
 
@@ -947,7 +956,6 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-    // --- הוספת הלאונצ'ר החדש לבחירת קובץ אודיו ---
     val loadAudioLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -967,6 +975,8 @@ fun SynthAppUI(engine: SynthEngine) {
         engine.volume = vol
         attackVal = prefs.getFloat("p_${slot}_attack", 15f)
         engine.attackMs = attackVal
+        decayVal = prefs.getFloat("p_${slot}_decay", 50f)
+        engine.decayMs = decayVal
         sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f)
         engine.sustainLevel = sustainVal
         releaseVal = prefs.getFloat("p_${slot}_release", 200f)
@@ -1002,6 +1012,7 @@ fun SynthAppUI(engine: SynthEngine) {
         prefs.edit().apply {
             putFloat("p_${slot}_vol", vol)
             putFloat("p_${slot}_attack", attackVal)
+            putFloat("p_${slot}_decay", decayVal)
             putFloat("p_${slot}_sustain", sustainVal)
             putFloat("p_${slot}_release", releaseVal)
             putFloat("p_${slot}_cutoff", cutoffVal)
@@ -1342,23 +1353,45 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-                    SynthSlider("ווליום נגינה", "${(vol * 100).toInt()}%", vol, accentColor = gold) { vol = it; engine.volume = it }
-                    SynthSlider("Attack (התקפה)", "${attackVal.toInt()}ms", attackVal, 5f..500f, gold) { attackVal = it; engine.attackMs = it }
-                    SynthSlider("Sustain (החזקה)", "${(sustainVal * 100).toInt()}%", sustainVal, 0f..1f, gold) { sustainVal = it; engine.sustainLevel = it }
-                    SynthSlider("Release (דעיכה)", "${releaseVal.toInt()}ms", releaseVal, 20f..2000f, gold) { releaseVal = it; engine.releaseMs = it }
+                    // שורת כפתורים מסתובבים (Knobs) עבור פרמטרי הסאונד וה-ADSR
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SynthKnob("ווליום", "${(vol * 100).toInt()}%", vol, accentColor = gold) { vol = it; engine.volume = it }
+                        SynthKnob("Attack", "${attackVal.toInt()}ms", attackVal, 5f..500f, gold) { attackVal = it; engine.attackMs = it }
+                        SynthKnob("Decay", "${decayVal.toInt()}ms", decayVal, 5f..1000f, gold) { decayVal = it; engine.decayMs = it }
+                        SynthKnob("Sustain", "${(sustainVal * 100).toInt()}%", sustainVal, 0f..1f, gold) { sustainVal = it; engine.sustainLevel = it }
+                        SynthKnob("Release", "${releaseVal.toInt()}ms", releaseVal, 20f..2000f, gold) { releaseVal = it; engine.releaseMs = it }
+                    }
                 }
 
-                1 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
-                    SynthSlider("Cutoff (חיתוך תדרים)", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
-                    SynthSlider("Resonance (תהודה)", "${(resVal * 100).toInt()}%", resVal, 0f..1f, gold) { resVal = it; engine.resonance = it }
-                    SynthSlider("Echo Mix (דיליי)", "${(echoVal * 100).toInt()}%", echoVal, 0f..1f, gold) { echoVal = it; engine.echoMix = it }
-                    SynthSlider("Glide (פליסנדו)", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
+                1 -> Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SynthKnob("Cutoff", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
+                        SynthKnob("Resonance", "${(resVal * 100).toInt()}%", resVal, 0f..1f, gold) { resVal = it; engine.resonance = it }
+                        SynthKnob("Echo Mix", "${(echoVal * 100).toInt()}%", echoVal, 0f..1f, gold) { echoVal = it; engine.echoMix = it }
+                        SynthKnob("Glide", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
+                    }
                 }
 
                 2 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceAround) {
-                    SynthSlider("עוצמת הלופר", "${(looperVolState * 100).toInt()}%", looperVolState, accentColor = gold) {
-                        looperVolState = it
-                        engine.setLooperVol(it) // קורא לפונקציה המעודכנת לעדכון גם של מנוע ה-DSP וגם של ה-MediaPlayer
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        SynthKnob("עוצמת לופר", "${(looperVolState * 100).toInt()}%", looperVolState, accentColor = gold) {
+                            looperVolState = it
+                            engine.setLooperVol(it)
+                        }
                     }
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1385,11 +1418,11 @@ fun SynthAppUI(engine: SynthEngine) {
                             onClick = {
                                 if (isLoopPlayState) {
                                     engine.stopLoopPlayback()
-                                    engine.pauseBackgroundAudio() // השהיית קובץ הרקע
+                                    engine.pauseBackgroundAudio()
                                     isLoopPlayState = false
                                 } else {
                                     engine.startLoopPlayback()
-                                    engine.resumeBackgroundAudio() // המשך ניגון קובץ הרקע
+                                    engine.resumeBackgroundAudio()
                                     isLoopPlayState = true
                                 }
                             },
@@ -1402,7 +1435,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-                    // --- הכפתור לטעינת קובץ שמע חיצוני ---
                     OutlinedButton(
                         onClick = { loadAudioLauncher.launch("audio/*") },
                         modifier = Modifier.fillMaxWidth().height(42.dp),
@@ -1414,7 +1446,7 @@ fun SynthAppUI(engine: SynthEngine) {
                     OutlinedButton(
                         onClick = {
                             engine.clearLoop()
-                            engine.stopBackgroundAudio() // איפוס ועצירת קובץ הרקע
+                            engine.stopBackgroundAudio()
                             isLoopRecState = false
                             isLoopPlayState = false
                         },
@@ -1559,7 +1591,7 @@ fun SynthAppUI(engine: SynthEngine) {
 }
 
 @Composable
-fun SynthSlider(
+fun SynthKnob(
     label: String,
     valueDisplay: String,
     value: Float,
@@ -1607,38 +1639,70 @@ fun SynthSlider(
         )
     }
 
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(4.dp)
+    ) {
+        Text(
+            text = label,
+            color = Color.White,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
+        Spacer(Modifier.height(4.dp))
 
-            Text(
-                text = valueDisplay,
-                color = accentColor,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.pointerInput(Unit) {
-                    detectTapGestures(onTap = {
-                        textInput = String.format("%.2f", value)
-                        showInputDialog = true
-                    })
-                }
-            )
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        val span = valueRange.endInclusive - valueRange.start
+                        val sensitivity = 0.005f * span
+                        val newValue = (value - dragAmount.y * sensitivity).coerceIn(valueRange)
+                        onValueChange(newValue)
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val radius = size.minDimension / 2f
+                val center = center
+
+                drawCircle(color = Color(0xFF1F1F1F), radius = radius, center = center)
+                drawCircle(color = Color(0xFF2A2A2A), radius = radius, center = center, style = Stroke(width = 2f))
+
+                val fraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
+                val angleDegrees = 135f + fraction * 270f
+                val angleRadians = Math.toRadians(angleDegrees.toDouble())
+
+                val lineLength = radius * 0.65f
+                val endX = center.x + (lineLength * kotlin.math.cos(angleRadians)).toFloat()
+                val endY = center.y + (lineLength * kotlin.math.sin(angleRadians)).toFloat()
+
+                drawLine(
+                    color = accentColor,
+                    start = center,
+                    end = Offset(endX, endY),
+                    strokeWidth = 3f
+                )
+            }
         }
-        Slider(
-            value = value,
-            valueRange = valueRange,
-            onValueChange = onValueChange,
-            colors = SliderDefaults.colors(
-                thumbColor = accentColor,
-                activeTrackColor = accentColor,
-                inactiveTrackColor = Color(0xFF2A2A2A)
-            )
+
+        Spacer(Modifier.height(2.dp))
+
+        Text(
+            text = valueDisplay,
+            color = accentColor,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    textInput = String.format("%.2f", value)
+                    showInputDialog = true
+                })
+            }
         )
     }
 }
-
-
