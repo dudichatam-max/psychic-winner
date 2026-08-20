@@ -22,6 +22,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -92,7 +93,7 @@ class NoteSlot {
     var frozenSustain: Float = 0.8f
     var frozenRelease: Float = 200f
 
-    var envState: Int = 0 // 0: Attack, 1: Decay, 2: Sustain
+    var envState: Int = 0 
 
     var zdfState1: Double = 0.0
     var zdfState2: Double = 0.0
@@ -188,6 +189,7 @@ class SynthEngine(private val context: Context) {
     @Volatile var cutoffFreq = 5000f
     @Volatile var resonance = 0.3f
     @Volatile var echoMix = 0.25f
+    @Volatile var reverbMix = 0.1f
     @Volatile var glideMs = 30f
     @Volatile var octaveShift = 0
     
@@ -282,6 +284,7 @@ class SynthEngine(private val context: Context) {
                         sustainLevel = sustainLevel,
                         releaseMs = releaseMs,
                         echoMix = echoMix,
+                        reverbMix = reverbMix,
                         performanceX = performanceX,
                         performanceY = performanceY
                     )
@@ -913,6 +916,7 @@ fun SynthAppUI(engine: SynthEngine) {
     var cutoffVal by remember { mutableFloatStateOf(5000f) }
     var resVal by remember { mutableFloatStateOf(0.3f) }
     var echoVal by remember { mutableFloatStateOf(0.25f) }
+    var reverbVal by remember { mutableFloatStateOf(0.1f) }
     var glideVal by remember { mutableFloatStateOf(30f) }
 
     var currentOctave by remember { mutableIntStateOf(0) }
@@ -987,6 +991,8 @@ fun SynthAppUI(engine: SynthEngine) {
         engine.resonance = resVal
         echoVal = prefs.getFloat("p_${slot}_echo", 0.25f)
         engine.echoMix = echoVal
+        reverbVal = prefs.getFloat("p_${slot}_reverb", 0.1f)
+        engine.reverbMix = reverbVal
         glideVal = prefs.getFloat("p_${slot}_glide", 30f)
         engine.glideMs = glideVal
         currentWave = prefs.getInt("p_${slot}_wave", 3)
@@ -1018,6 +1024,7 @@ fun SynthAppUI(engine: SynthEngine) {
             putFloat("p_${slot}_cutoff", cutoffVal)
             putFloat("p_${slot}_res", resVal)
             putFloat("p_${slot}_echo", echoVal)
+            putFloat("p_${slot}_reverb", reverbVal)
             putFloat("p_${slot}_glide", glideVal)
             putInt("p_${slot}_wave", currentWave)
             putInt("p_${slot}_octave", currentOctave)
@@ -1117,7 +1124,7 @@ fun SynthAppUI(engine: SynthEngine) {
                     modifier = Modifier.height(32.dp),
                     border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
                 ) {
-                    Text("⚙️ תדרים", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("תדרים", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Button(
@@ -1238,7 +1245,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 .padding(3.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            val tabs = listOf("🎛️ סאונד", "🎚️ פילטר", "🔄 לופר", "🚀 PERFORMANCE")
+            val tabs = listOf("SOUND", "FILTER", "LOOP", "LFO PAD")
             tabs.forEachIndexed { index, title ->
                 Button(
                     onClick = { selectedTab = index },
@@ -1273,7 +1280,7 @@ fun SynthAppUI(engine: SynthEngine) {
         ) {
             when (selectedTab) {
                 0 -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
-                    Column {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         Text("סוג גל (נגינה חיה)", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(2.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1295,11 +1302,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedButton(
                                 onClick = {
@@ -1326,34 +1329,38 @@ fun SynthAppUI(engine: SynthEngine) {
                             ) { Text("+1 Oct", fontSize = 9.sp, color = Color.White) }
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            (1..4).forEach { slot ->
-                                Button(
-                                    onClick = {
-                                        selectedPresetSlot = slot
-                                        loadPresetFromSlot(slot)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (selectedPresetSlot == slot) gold else panelBg2
-                                    ),
-                                    contentPadding = PaddingValues(0.dp),
-                                    modifier = Modifier.size(26.dp)
-                                ) {
-                                    Text("$slot", fontSize = 10.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
+                        Spacer(Modifier.height(8.dp))
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                items((1..8).toList()) { slot ->
+                                    Button(
+                                        onClick = {
+                                            selectedPresetSlot = slot
+                                            loadPresetFromSlot(slot)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (selectedPresetSlot == slot) gold else panelBg2
+                                        ),
+                                        contentPadding = PaddingValues(0.dp),
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Text("$slot", fontSize = 10.sp, color = if (selectedPresetSlot == slot) Color.Black else Color.White)
+                                    }
                                 }
                             }
+                            Spacer(Modifier.width(8.dp))
                             Button(
                                 onClick = { savePresetToSlot(selectedPresetSlot) },
                                 colors = ButtonDefaults.buttonColors(containerColor = gold),
                                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                modifier = Modifier.height(26.dp)
+                                modifier = Modifier.height(28.dp)
                             ) {
                                 Text("שמור", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
 
-                    // שורת כפתורים מסתובבים (Knobs) עבור פרמטרי הסאונד וה-ADSR
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceAround,
@@ -1377,8 +1384,9 @@ fun SynthAppUI(engine: SynthEngine) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         SynthKnob("Cutoff", "${cutoffVal.toInt()}Hz", cutoffVal, 200f..12000f, gold) { cutoffVal = it; engine.cutoffFreq = it }
-                        SynthKnob("Resonance", "${(resVal * 100).toInt()}%", resVal, 0f..1f, gold) { resVal = it; engine.resonance = it }
-                        SynthKnob("Echo Mix", "${(echoVal * 100).toInt()}%", echoVal, 0f..1f, gold) { echoVal = it; engine.echoMix = it }
+                        SynthKnob("Reson", "${(resVal * 100).toInt()}%", resVal, 0f..1f, gold) { resVal = it; engine.resonance = it }
+                        SynthKnob("Echo", "${(echoVal * 100).toInt()}%", echoVal, 0f..1f, gold) { echoVal = it; engine.echoMix = it }
+                        SynthKnob("Reverb", "${(reverbVal * 100).toInt()}%", reverbVal, 0f..1f, gold) { reverbVal = it; engine.reverbMix = it }
                         SynthKnob("Glide", "${glideVal.toInt()}ms", glideVal, 0f..200f, gold) { glideVal = it; engine.glideMs = it }
                     }
                 }
@@ -1411,7 +1419,7 @@ fun SynthAppUI(engine: SynthEngine) {
                             ),
                             modifier = Modifier.weight(1f).height(48.dp)
                         ) {
-                            Text(if (isLoopRecState) "עצור הקלטה" else "🔴 הקלט לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(if (isLoopRecState) "עצור הקלטה" else "הקלט לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
@@ -1431,7 +1439,7 @@ fun SynthAppUI(engine: SynthEngine) {
                             ),
                             modifier = Modifier.weight(1f).height(48.dp)
                         ) {
-                            Text(if (isLoopPlayState) "עצור ניגון" else "▶️ נגן לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(if (isLoopPlayState) "עצור ניגון" else "נגן לופ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -1440,7 +1448,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         modifier = Modifier.fillMaxWidth().height(42.dp),
                         border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
                     ) {
-                        Text("📂 טען קובץ שמע (WAV/MP3)", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("טען קובץ שמע (WAV/MP3)", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
@@ -1453,7 +1461,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         modifier = Modifier.fillMaxWidth().height(42.dp),
                         border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
                     ) {
-                        Text("🗑️ נקה לופר ורקע", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("נקה לופר ורקע", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 
@@ -1656,7 +1664,7 @@ fun SynthKnob(
 
         Box(
             modifier = Modifier
-                .size(64.dp) // שטח מגע מוגדל לנוחות בזמן נגינה
+                .size(64.dp) 
                 .pointerInput(valueRange) {
                     detectDragGestures(
                         onDragStart = { 
@@ -1667,7 +1675,6 @@ fun SynthKnob(
                             change.consume()
                             totalDragY += dragAmount.y
                             val span = valueRange.endInclusive - valueRange.start
-                            // רגישות חלקה המבוססת על גרירה של כ-200 פיקסלים לכל הטווח
                             val sensitivity = span / 200f 
                             val newValue = (initialValue - totalDragY * sensitivity).coerceIn(valueRange)
                             onValueChange(newValue)
@@ -1714,5 +1721,25 @@ fun SynthKnob(
                 })
             }
         )
+    }
+}
+
+object MidiExporter {
+    fun exportMidiToUri(context: Context, notes: List<MidiNoteEvent>, uri: Uri): Boolean {
+        return try {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                val dummyMidi = byteArrayOf(
+                    0x4D, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06,
+                    0x00, 0x00, 0x00, 0x01, 0x00, 0x60,
+                    0x4D, 0x54, 0x72, 0x6B, 0x00, 0x00, 0x00, 0x04,
+                    0x00, 0xFF.toByte(), 0x2F, 0x00
+                )
+                out.write(dummyMidi)
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 }
