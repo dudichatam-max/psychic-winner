@@ -1724,22 +1724,3 @@ fun SynthKnob(
     }
 }
 
-object MidiExporter {
-    fun exportMidiToUri(context: Context, notes: List<MidiNoteEvent>, uri: Uri): Boolean {
-        return try {
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                val dummyMidi = byteArrayOf(
-                    0x4D, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06,
-                    0x00, 0x00, 0x00, 0x01, 0x00, 0x60,
-                    0x4D, 0x54, 0x72, 0x6B, 0x00, 0x00, 0x00, 0x04,
-                    0x00, 0xFF.toByte(), 0x2F, 0x00
-                )
-                out.write(dummyMidi)
-            }
-            true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
-        }
-    }
-}
