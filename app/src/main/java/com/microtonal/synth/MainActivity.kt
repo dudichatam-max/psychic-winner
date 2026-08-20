@@ -1010,33 +1010,58 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 
     val importPresetLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let {
-            try {
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val lines = stream.bufferedReader().readLines()
-                    val editor = prefs.edit()
-                    for (line in lines) {
-                        if (line.startsWith("preset:")) {
-                            val parts = line.split("|")
-                            if (parts.size >= 4) {
-                                val slot = parts[0].removePrefix("preset:").toIntOrNull() ?: continue
-                                val name = parts[1]
-                                presetNames[slot] = name
-                                editor.putString("p_${slot}_name", name)
-                                editor.putBoolean("p_${slot}_exists", true)
-                                editor.apply()
+    val importPresetLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.GetContent()
+) { uri ->
+    uri?.let {
+        try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val lines = stream.bufferedReader().readLines()
+                val editor = prefs.edit()
+                for (line in lines) {
+                    if (line.startsWith("preset:")) {
+                        val parts = line.split("|")
+                        if (parts.size >= 4) {
+                            val slot = parts[0].removePrefix("preset:").toIntOrNull() ?: continue
+                            val name = parts[1]
+                            presetNames[slot] = name
+                            editor.putString("p_${slot}_name", name)
+                            
+                            // קריאה ושמירה של כל פרמטרי הצליל שנשמרו בייצוא
+                            val values = parts[2].split(",")
+                            if (values.size >= 11) {
+                                editor.putFloat("p_${slot}_vol", values[0].toFloatOrNull() ?: 0.5f)
+                                editor.putFloat("p_${slot}_attack", values[1].toFloatOrNull() ?: 15f)
+                                editor.putFloat("p_${slot}_decay", values[2].toFloatOrNull() ?: 50f)
+                                editor.putFloat("p_${slot}_sustain", values[3].toFloatOrNull() ?: 0.8f)
+                                editor.putFloat("p_${slot}_release", values[4].toFloatOrNull() ?: 200f)
+                                editor.putFloat("p_${slot}_cutoff", values[5].toFloatOrNull() ?: 5000f)
+                                editor.putFloat("p_${slot}_res", values[6].toFloatOrNull() ?: 0.3f)
+                                editor.putFloat("p_${slot}_echo", values[7].toFloatOrNull() ?: 0.25f)
+                                editor.putFloat("p_${slot}_glide", values[8].toFloatOrNull() ?: 30f)
+                                editor.putInt("p_${slot}_wave", values[9].toIntOrNull() ?: 3)
+                                editor.putInt("p_${slot}_octave", values[10].toIntOrNull() ?: 0)
                             }
+                            
+                            // שורה רביעית - תדרי המיקרוטונאל של הפריסט
+                            val freqs = parts[3]
+                            editor.putString("p_${slot}_freqs", freqs)
+                            
+                            editor.putBoolean("p_${slot}_exists", true)
                         }
                     }
                 }
-                Toast.makeText(context, "הפריסטים יובאו בהצלחה!", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(context, "שגיאה בייבוא פריסטים", Toast.LENGTH_SHORT).show()
+                editor.apply()
             }
+            // טעינה מחדש של פריסט 1 כדי להתעדכן מיד במסך
+            loadPresetFromSlot(1, showToast = false)
+            Toast.makeText(context, "הפריסטים יובאו בהצלחה!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(context, "שגיאה בייבוא פריסטים", Toast.LENGTH_SHORT).show()
         }
     }
+}
+
 
     fun loadPresetFromSlot(slot: Int, showToast: Boolean = true) {
         if (!prefs.getBoolean("p_${slot}_exists", false)) {
