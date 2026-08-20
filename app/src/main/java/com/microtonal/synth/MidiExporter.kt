@@ -13,7 +13,7 @@ object MidiExporter {
     private val baseFreqs = floatArrayOf(222.00f, 299.00f, 333.00f, 355.00f, 396.00f, 444.00f, 463.00f, 477.00f)
     private val baseNotes = intArrayOf(60, 62, 64, 65, 67, 69, 71, 72)
 
-    fun exportMidiToUri(context: Context, notes: List<LooperNoteEvent>, destinationUri: Uri): Boolean {
+    fun exportMidiToUri(context: Context, notes: List<MidiNoteEvent>, uri: Uri): Boolean {
         if (notes.isEmpty()) return false
         return try {
             val tempFile = File(context.cacheDir, "temp_siren.mid")
