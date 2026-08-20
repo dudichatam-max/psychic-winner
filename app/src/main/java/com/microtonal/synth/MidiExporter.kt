@@ -19,7 +19,8 @@ object MidiExporter {
             val tempFile = File(context.cacheDir, "temp_siren.mid")
             createMidiFile(notes, tempFile)
 
-            context.contentResolver.openOutputStream(destinationUri)?.use { out ->
+            // תיקון: שימוש ב-uri הנכון שהתקבל בפרמטרים
+            context.contentResolver.openOutputStream(uri)?.use { out ->
                 tempFile.inputStream().use { input ->
                     input.copyTo(out)
                 }
@@ -31,7 +32,8 @@ object MidiExporter {
         }
     }
 
-    private fun createMidiFile(notes: List<LooperNoteEvent>, outputFile: File) {
+    // תיקון: שינוי ל-MidiNoteEvent כדי להתאים למה שמועבר מ-MainActivity
+    private fun createMidiFile(notes: List<MidiNoteEvent>, outputFile: File) {
         val midiFile = FileOutputStream(outputFile)
         val dos = DataOutputStream(midiFile)
 
