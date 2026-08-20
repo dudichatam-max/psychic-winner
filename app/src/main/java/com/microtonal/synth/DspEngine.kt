@@ -101,6 +101,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
         cutoffFreq: Float,
         resonance: Float,
         attackMs: Float,
+        decayMs: Float,
         sustainLevel: Float,
         releaseMs: Float,
         echoMix: Float,
@@ -152,10 +153,15 @@ class DspEngine(private val sampleRate: Int = 44100) {
             val phaseNorm = slot.phase / (2.0 * PI)
 
             val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
+            val actualDecay = if (slot.isLooperNote) slot.frozenDecay else decayMs
 
             val attackCoeff = if (slot.attackCoeff > 0.0) slot.attackCoeff else {
                 val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
                 1.0 - Math.exp(-invSampleRate / (actualAttack / 1000.0).coerceAtLeast(0.001))
+            }
+
+            val decayCoeff = if (slot.decayCoeff > 0.0) slot.decayCoeff else {
+                1.0 - Math.exp(-invSampleRate / (actualDecay / 1000.0).coerceAtLeast(0.001))
             }
 
             val releaseCoeff = if (slot.releaseCoeff > 0.0) slot.releaseCoeff else {
@@ -163,9 +169,29 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 Math.exp(-invSampleRate / (actualRelease / 1000.0).coerceAtLeast(0.001))
             }
 
+            // --- מכונת מצבים מלאה לעטיפת ADSR ---
             if (!slot.isReleasing) {
-                slot.envelopeVolume += (actualSustain.toDouble() - slot.envelopeVolume) * attackCoeff
+                when (slot.envState) {
+                    0 -> { // Attack: עולה עד לשיא (1.0)
+                        slot.envelopeVolume += (1.0 - slot.envelopeVolume) * attackCoeff
+                        if (slot.envelopeVolume >= 0.99) {
+                            slot.envelopeVolume = 1.0
+                            slot.envState = 1 // מעבר לשלב Decay
+                        }
+                    }
+                    1 -> { // Decay: יורד מרמת השיא לעבר רמת ה-Sustain
+                        slot.envelopeVolume += (actualSustain.toDouble() - slot.envelopeVolume) * decayCoeff
+                        if (abs(slot.envelopeVolume - actualSustain.toDouble()) < 0.001) {
+                            slot.envelopeVolume = actualSustain.toDouble()
+                            slot.envState = 2 // מעבר לשלב Sustain
+                        }
+                    }
+                    else -> { // Sustain: שמירה על הרמה כל עוד התו לחוץ
+                        slot.envelopeVolume += (actualSustain.toDouble() - slot.envelopeVolume) * 0.01
+                    }
+                }
             } else {
+                // Release: דעיכה מלאה עד לסגירת הערוץ
                 slot.envelopeVolume *= releaseCoeff
                 if (slot.envelopeVolume < 0.0005) {
                     slot.envelopeVolume = 0.0
@@ -245,10 +271,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
         val synthLooperSample = (looperChannelMix * smoothedLooperVol).toFloat()
         val extAudioSampleScaled = (externalAudioSample * smoothedLooperVol).toFloat()
 
-        // finalLooperSample מכיל את השילוב לצורך הוויזואל וההקלטה
         val finalLooperSample = synthLooperSample + extAudioSampleScaled
-
-        // רק סינתיסייזר (נגינה חיה + לופר תווים) נכנסים לאפקט ה-Delay!
         val synthTotal = (finalLiveSample + synthLooperSample).toDouble()
 
         // Delay Effect
@@ -260,14 +283,10 @@ class DspEngine(private val sampleRate: Int = 44100) {
         delayFilterState = echoSample
 
         val feedback = 0.42
-        // מזינים רק את צלילי הסינתיסייזר ל-delayBuffer
         delayBuffer[delayWritePos] = (synthTotal + echoSample * feedback).toFloat()
         delayWritePos = (delayWritePos + 1) % delayBuffer.size
 
-        // הסינתיסייזר מעובד עם הדיליי
         val processedSynth = synthTotal + (echoSample * smoothedEchoMix)
-
-        // חיבור הקובץ החיצוני הנקי (Dry) יחד עם הסינתיסייזר המעובד
         var totalSample = processedSynth + extAudioSampleScaled.toDouble()
 
         // DC Blocker
@@ -275,7 +294,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
         dcX1 = totalSample
         dcY1 = if (dcSample.isNaN() || dcSample.isInfinite()) 0.0 else dcSample
 
-        // Soft Clipper (הסאונד המלא שיוצא ל-AudioTrack ומוקלט ל-WAV)
+        // Soft Clipper
         val masterSample = softSaturate(dcY1 * 0.52).toFloat()
 
         reusableFrame.liveSample = finalLiveSample
