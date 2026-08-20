@@ -1009,7 +1009,7 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-    val importPresetLauncher = rememberLauncherForActivityResult(
+
     val importPresetLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.GetContent()
 ) { uri ->
