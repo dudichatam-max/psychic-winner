@@ -180,9 +180,9 @@ class SynthEngine(private val context: Context) {
     private val recordingQueue = LinkedBlockingQueue<ByteArray>()
     private var recordingWriterThread: Thread? = null
 
+    // Live Keyboard Parameters
     @Volatile var waveformType = 3
     @Volatile var volume = 0.5f
-    @Volatile var looperVolume = 1.0f
     @Volatile var attackMs = 15f
     @Volatile var decayMs = 50f
     @Volatile var sustainLevel = 0.8f
@@ -193,10 +193,22 @@ class SynthEngine(private val context: Context) {
     @Volatile var glideMs = 30f
     @Volatile var octaveShift = 0
     
+    // Looper Specific Parameters
+    @Volatile var looperVolume = 1.0f
+    @Volatile var looperAttack = 15f
+    @Volatile var looperDecay = 50f
+    @Volatile var looperSustain = 0.8f
+    @Volatile var looperRelease = 200f
+    @Volatile var looperCutoff = 5000f
+    @Volatile var looperResonance = 0.3f
+    @Volatile var looperEcho = 0.25f
+    @Volatile var looperGlide = 30f
+
     @Volatile var performanceX: Float = 0f
     @Volatile var performanceY: Float = 0f
 
     private var lastPlayedFreq: Float = 440f
+    private var lastLooperPlayedFreq: Float = 440f
 
     val liveVisualizerBuffer = FloatArray(512)
     val looperVisualizerBuffer = FloatArray(512)
@@ -449,8 +461,13 @@ class SynthEngine(private val context: Context) {
         }
 
         if (slot != null) {
-            val startFreq = if (!isLooper && glideMs > 0f) lastPlayedFreq else freq
-            if (!isLooper) lastPlayedFreq = freq
+            val startFreq = if (isLooper) {
+                if (looperGlide > 0f) lastLooperPlayedFreq else freq
+            } else {
+                if (glideMs > 0f) lastPlayedFreq else freq
+            }
+            
+            if (isLooper) lastLooperPlayedFreq = freq else lastPlayedFreq = freq
 
             slot.updateAndActivate(
                 newBaseFreq = baseFreq,
@@ -544,12 +561,12 @@ class SynthEngine(private val context: Context) {
                                 baseFreq = ev.freq,
                                 isLooper = true,
                                 wave = ev.wave,
-                                cutoff = ev.cutoff,
-                                res = ev.res,
-                                attack = ev.attack,
-                                decay = ev.decay,
-                                sustain = ev.sustain,
-                                release = ev.release,
+                                cutoff = looperCutoff,
+                                res = looperResonance,
+                                attack = looperAttack,
+                                decay = looperDecay,
+                                sustain = looperSustain,
+                                release = looperRelease,
                                 targetOctave = ev.octave
                             )
                         } else {
@@ -923,7 +940,17 @@ fun SynthAppUI(engine: SynthEngine) {
 
     var isLoopRecState by remember { mutableStateOf(false) }
     var isLoopPlayState by remember { mutableStateOf(false) }
+    
+    // Looper Knobs States
     var looperVolState by remember { mutableFloatStateOf(1.0f) }
+    var looperCutoffState by remember { mutableFloatStateOf(5000f) }
+    var looperResState by remember { mutableFloatStateOf(0.3f) }
+    var looperAttackState by remember { mutableFloatStateOf(15f) }
+    var looperDecayState by remember { mutableFloatStateOf(50f) }
+    var looperSustainState by remember { mutableFloatStateOf(0.8f) }
+    var looperReleaseState by remember { mutableFloatStateOf(200f) }
+    var looperEchoState by remember { mutableFloatStateOf(0.25f) }
+    var looperGlideState by remember { mutableFloatStateOf(30f) }
 
     // Preset Names State for 8 presets
     val presetNames = remember {
@@ -977,7 +1004,6 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-    // Preset File Import / Export launchers
     val exportPresetLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
@@ -1008,7 +1034,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
     }
-
 
     fun loadPresetFromSlot(slot: Int, showToast: Boolean = true) {
         if (!prefs.getBoolean("p_${slot}_exists", false)) {
@@ -1048,57 +1073,56 @@ fun SynthAppUI(engine: SynthEngine) {
         }
         if (showToast) Toast.makeText(context, "פריסט $slot נטען", Toast.LENGTH_SHORT).show()
     }
+
     val importPresetLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.GetContent()
-) { uri ->
-    uri?.let {
-        try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                val lines = stream.bufferedReader().readLines()
-                val editor = prefs.edit()
-                for (line in lines) {
-                    if (line.startsWith("preset:")) {
-                        val parts = line.split("|")
-                        if (parts.size >= 4) {
-                            val slot = parts[0].removePrefix("preset:").toIntOrNull() ?: continue
-                            val name = parts[1]
-                            presetNames[slot] = name
-                            editor.putString("p_${slot}_name", name)
-                            
-                            // קריאה ושמירה של כל פרמטרי הצליל שנשמרו בייצוא
-                            val values = parts[2].split(",")
-                            if (values.size >= 11) {
-                                editor.putFloat("p_${slot}_vol", values[0].toFloatOrNull() ?: 0.5f)
-                                editor.putFloat("p_${slot}_attack", values[1].toFloatOrNull() ?: 15f)
-                                editor.putFloat("p_${slot}_decay", values[2].toFloatOrNull() ?: 50f)
-                                editor.putFloat("p_${slot}_sustain", values[3].toFloatOrNull() ?: 0.8f)
-                                editor.putFloat("p_${slot}_release", values[4].toFloatOrNull() ?: 200f)
-                                editor.putFloat("p_${slot}_cutoff", values[5].toFloatOrNull() ?: 5000f)
-                                editor.putFloat("p_${slot}_res", values[6].toFloatOrNull() ?: 0.3f)
-                                editor.putFloat("p_${slot}_echo", values[7].toFloatOrNull() ?: 0.25f)
-                                editor.putFloat("p_${slot}_glide", values[8].toFloatOrNull() ?: 30f)
-                                editor.putInt("p_${slot}_wave", values[9].toIntOrNull() ?: 3)
-                                editor.putInt("p_${slot}_octave", values[10].toIntOrNull() ?: 0)
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val lines = stream.bufferedReader().readLines()
+                    val editor = prefs.edit()
+                    for (line in lines) {
+                        if (line.startsWith("preset:")) {
+                            val parts = line.split("|")
+                            if (parts.size >= 4) {
+                                val slot = parts[0].removePrefix("preset:").toIntOrNull() ?: continue
+                                val name = parts[1]
+                                presetNames[slot] = name
+                                editor.putString("p_${slot}_name", name)
+                                
+                                val values = parts[2].split(",")
+                                if (values.size >= 11) {
+                                    editor.putFloat("p_${slot}_vol", values[0].toFloatOrNull() ?: 0.5f)
+                                    editor.putFloat("p_${slot}_attack", values[1].toFloatOrNull() ?: 15f)
+                                    editor.putFloat("p_${slot}_decay", values[2].toFloatOrNull() ?: 50f)
+                                    editor.putFloat("p_${slot}_sustain", values[3].toFloatOrNull() ?: 0.8f)
+                                    editor.putFloat("p_${slot}_release", values[4].toFloatOrNull() ?: 200f)
+                                    editor.putFloat("p_${slot}_cutoff", values[5].toFloatOrNull() ?: 5000f)
+                                    editor.putFloat("p_${slot}_res", values[6].toFloatOrNull() ?: 0.3f)
+                                    editor.putFloat("p_${slot}_echo", values[7].toFloatOrNull() ?: 0.25f)
+                                    editor.putFloat("p_${slot}_glide", values[8].toFloatOrNull() ?: 30f)
+                                    editor.putInt("p_${slot}_wave", values[9].toIntOrNull() ?: 3)
+                                    editor.putInt("p_${slot}_octave", values[10].toIntOrNull() ?: 0)
+                                }
+                                
+                                val freqs = parts[3]
+                                editor.putString("p_${slot}_freqs", freqs)
+                                
+                                editor.putBoolean("p_${slot}_exists", true)
                             }
-                            
-                            // שורה רביעית - תדרי המיקרוטונאל של הפריסט
-                            val freqs = parts[3]
-                            editor.putString("p_${slot}_freqs", freqs)
-                            
-                            editor.putBoolean("p_${slot}_exists", true)
                         }
                     }
+                    editor.apply()
                 }
-                editor.apply()
+                loadPresetFromSlot(1, showToast = false)
+                Toast.makeText(context, "הפריסטים יובאו בהצלחה!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "שגיאה בייבוא פריסטים", Toast.LENGTH_SHORT).show()
             }
-            // טעינה מחדש של פריסט 1 כדי להתעדכן מיד במסך
-            loadPresetFromSlot(1, showToast = false)
-            Toast.makeText(context, "הפריסטים יובאו בהצלחה!", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(context, "שגיאה בייבוא פריסטים", Toast.LENGTH_SHORT).show()
         }
     }
-}
+
     LaunchedEffect(Unit) {
         loadPresetFromSlot(1, showToast = false)
     }
@@ -1133,7 +1157,6 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-    // Dialog for renaming preset
     if (editingPresetId != null) {
         AlertDialog(
             onDismissRequest = { editingPresetId = null },
@@ -1226,7 +1249,6 @@ fun SynthAppUI(engine: SynthEngine) {
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- HEADER ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1296,7 +1318,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-        // --- OSCILLOSCOPE ---
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1356,7 +1377,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // --- TABS (SOUND | PRESET | LOOP | PAD) - No Emojis ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1390,7 +1410,6 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // --- TAB CONTENT ---
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1399,12 +1418,11 @@ fun SynthAppUI(engine: SynthEngine) {
                 .padding(6.dp)
         ) {
             when (selectedTab) {
-                                // --- SOUND TAB ---
+                // --- SOUND TAB ---
                 "SOUND" -> Column(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // 1. כיוון אוקטבה למעלה
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center,
@@ -1437,7 +1455,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         ) { Text("+1", fontSize = 10.sp, color = Color.White) }
                     }
 
-                    // 2. בחירת סוג הגל מתחת לאוקטבה (כל הסוגים נכנסים במסך בלי גלילה)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -1463,7 +1480,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-                    // 3. כפתורי והנובים של הסאונד (3 שורות של 3) מסודרים בדיוק כמו שהם
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -1487,15 +1503,13 @@ fun SynthAppUI(engine: SynthEngine) {
                     }
                 }
 
-
-                // --- PRESET TAB (8 Presets visible in one single window without scrolling, edit name + import/save device) ---
+                // --- PRESET TAB ---
                 "PRESET" -> Column(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("פריסטים (8 חריצים)", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 
-                    // 8 Presets in 2 columns of 4 rows, perfectly fitting without scrolling
                     val rows = (1..8).chunked(2)
                     rows.forEach { rowSlots ->
                         Row(
@@ -1554,7 +1568,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-                    // Import / Save device presets buttons
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1581,78 +1594,92 @@ fun SynthAppUI(engine: SynthEngine) {
                 // --- LOOP TAB ---
                 "LOOP" -> Column(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.SpaceAround
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center
+                    // 3x3 Grid for Looper Knobs (Separated DSP)
+                    Column(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.SpaceEvenly,
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        SynthKnob("עוצמת לופר", "${(looperVolState * 100).toInt()}%", looperVolState, accentColor = gold) {
-                            looperVolState = it
-                            engine.setLooperVol(it)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                            SynthKnob("Volume", "${(looperVolState * 100).toInt()}%", looperVolState, 0f..1f, gold) { looperVolState = it; engine.looperVolume = it; engine.setLooperVol(it) }
+                            SynthKnob("Cutoff", "${looperCutoffState.toInt()}Hz", looperCutoffState, 200f..12000f, gold) { looperCutoffState = it; engine.looperCutoff = it }
+                            SynthKnob("Resonance", "${(looperResState * 100).toInt()}%", looperResState, 0f..1f, gold) { looperResState = it; engine.looperResonance = it }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                            SynthKnob("Attack", "${looperAttackState.toInt()}ms", looperAttackState, 5f..500f, gold) { looperAttackState = it; engine.looperAttack = it }
+                            SynthKnob("Decay", "${looperDecayState.toInt()}ms", looperDecayState, 5f..1000f, gold) { looperDecayState = it; engine.looperDecay = it }
+                            SynthKnob("Sustain", "${(looperSustainState * 100).toInt()}%", looperSustainState, 0f..1f, gold) { looperSustainState = it; engine.looperSustain = it }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                            SynthKnob("Release", "${looperReleaseState.toInt()}ms", looperReleaseState, 20f..2000f, gold) { looperReleaseState = it; engine.looperRelease = it }
+                            SynthKnob("Echo Mix", "${(looperEchoState * 100).toInt()}%", looperEchoState, 0f..1f, gold) { looperEchoState = it; engine.looperEcho = it }
+                            SynthKnob("Glide", "${looperGlideState.toInt()}ms", looperGlideState, 0f..200f, gold) { looperGlideState = it; engine.looperGlide = it }
                         }
                     }
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                if (isLoopRecState) {
-                                    engine.stopLoopRecording()
+                    // 2x2 Grid for Buttons
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    if (isLoopRecState) {
+                                        engine.stopLoopRecording()
+                                        isLoopRecState = false
+                                    } else {
+                                        engine.startLoopRecording()
+                                        isLoopRecState = true
+                                        isLoopPlayState = false
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2),
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) { Text(if (isLoopRecState) "עצור הקלטה" else "הקלט לופ", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+
+                            Button(
+                                onClick = {
+                                    if (isLoopPlayState) {
+                                        engine.stopLoopPlayback()
+                                        engine.pauseBackgroundAudio()
+                                        isLoopPlayState = false
+                                    } else {
+                                        engine.startLoopPlayback()
+                                        engine.resumeBackgroundAudio()
+                                        isLoopPlayState = true
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2),
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) { Text(if (isLoopPlayState) "עצור ניגון" else "נגן לופ", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { loadAudioLauncher.launch("audio/*") },
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold)),
+                                contentPadding = PaddingValues(0.dp)
+                            ) { Text("טען שמע", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+
+                            OutlinedButton(
+                                onClick = {
+                                    engine.clearLoop()
+                                    engine.stopBackgroundAudio()
                                     isLoopRecState = false
-                                } else {
-                                    engine.startLoopRecording()
-                                    isLoopRecState = true
                                     isLoopPlayState = false
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isLoopRecState) Color(0xFFFF5252) else panelBg2
-                            ),
-                            modifier = Modifier.weight(1f).height(42.dp)
-                        ) {
-                            Text(if (isLoopRecState) "עצור הקלטה" else "הקלט לופ", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                },
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray)),
+                                contentPadding = PaddingValues(0.dp)
+                            ) { Text("נקה לופר", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                         }
-
-                        Button(
-                            onClick = {
-                                if (isLoopPlayState) {
-                                    engine.stopLoopPlayback()
-                                    engine.pauseBackgroundAudio()
-                                    isLoopPlayState = false
-                                } else {
-                                    engine.startLoopPlayback()
-                                    engine.resumeBackgroundAudio()
-                                    isLoopPlayState = true
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isLoopPlayState) Color(0xFF00C853) else panelBg2
-                            ),
-                            modifier = Modifier.weight(1f).height(42.dp)
-                        ) {
-                            Text(if (isLoopPlayState) "עצור ניגון" else "נגן לופ", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = { loadAudioLauncher.launch("audio/*") },
-                        modifier = Modifier.fillMaxWidth().height(36.dp),
-                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
-                    ) {
-                        Text("טען קובץ שמע (WAV/MP3)", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            engine.clearLoop()
-                            engine.stopBackgroundAudio()
-                            isLoopRecState = false
-                            isLoopPlayState = false
-                        },
-                        modifier = Modifier.fillMaxWidth().height(36.dp),
-                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
-                    ) {
-                        Text("נקה לופר ורקע", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 
@@ -1737,7 +1764,7 @@ fun SynthAppUI(engine: SynthEngine) {
 
         Spacer(Modifier.height(4.dp))
 
-        // --- MICROTONAL KEYBOARD (8 Keys: 222Hz to 477Hz) ---
+        // --- MICROTONAL KEYBOARD ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
