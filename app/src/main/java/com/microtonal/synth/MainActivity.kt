@@ -1399,63 +1399,71 @@ fun SynthAppUI(engine: SynthEngine) {
                 .padding(6.dp)
         ) {
             when (selectedTab) {
-                // --- SOUND TAB (Merged Sound + Filter, 9 knobs symmetrical in 3x3) ---
+                                // --- SOUND TAB ---
                 "SOUND" -> Column(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Top Bar inside Sound: Octave + Wave selector
+                    // 1. כיוון אוקטבה למעלה
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedButton(
+                        OutlinedButton(
+                            onClick = {
+                                if (currentOctave > -2) {
+                                    currentOctave--
+                                    engine.octaveShift = currentOctave
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(26.dp)
+                        ) { Text("-1", fontSize = 10.sp, color = Color.White) }
+
+                        Spacer(Modifier.width(8.dp))
+                        Text("Oct: $currentOctave", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+
+                        OutlinedButton(
+                            onClick = {
+                                if (currentOctave < 2) {
+                                    currentOctave++
+                                    engine.octaveShift = currentOctave
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(26.dp)
+                        ) { Text("+1", fontSize = 10.sp, color = Color.White) }
+                    }
+
+                    // 2. בחירת סוג הגל מתחת לאוקטבה (כל הסוגים נכנסים במסך בלי גלילה)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
+                        waves.forEachIndexed { index, name ->
+                            FilterChip(
+                                selected = currentWave == index,
                                 onClick = {
-                                    if (currentOctave > -2) {
-                                        currentOctave--
-                                        engine.octaveShift = currentOctave
-                                    }
+                                    currentWave = index
+                                    engine.setLiveWaveform(index)
                                 },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                                modifier = Modifier.height(24.dp)
-                            ) { Text("-1", fontSize = 9.sp, color = Color.White) }
-
-                            Text(" Oct: $currentOctave ", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-
-                            OutlinedButton(
-                                onClick = {
-                                    if (currentOctave < 2) {
-                                        currentOctave++
-                                        engine.octaveShift = currentOctave
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                                modifier = Modifier.height(24.dp)
-                            ) { Text("+1", fontSize = 9.sp, color = Color.White) }
-                        }
-
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            val waves = listOf("Sine", "Square", "Triangle", "Saw", "Noise")
-                            itemsIndexed(waves) { index, name ->
-                                FilterChip(
-                                    selected = currentWave == index,
-                                    onClick = {
-                                        currentWave = index
-                                        engine.setLiveWaveform(index)
-                                    },
-                                    label = { Text(name, fontSize = 9.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = gold,
-                                        selectedLabelColor = Color.Black
-                                    )
+                                label = { Text(name, fontSize = 8.sp, maxLines = 1) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 1.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = gold,
+                                    selectedLabelColor = Color.Black
                                 )
-                            }
+                            )
                         }
                     }
 
-                    // 9 Knobs Symmetrical Grid (3 rows of 3)
+                    // 3. כפתורי והנובים של הסאונד (3 שורות של 3) מסודרים בדיוק כמו שהם
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -1478,6 +1486,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
                 }
+
 
                 // --- PRESET TAB (8 Presets visible in one single window without scrolling, edit name + import/save device) ---
                 "PRESET" -> Column(
