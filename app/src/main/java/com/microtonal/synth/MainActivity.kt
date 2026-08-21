@@ -296,6 +296,7 @@ class SynthEngine(private val context: Context) {
                         sustainLevel = sustainLevel,
                         releaseMs = releaseMs,
                         echoMix = echoMix,
+                        looperEchoMix = looperEcho,
                         performanceX = performanceX,
                         performanceY = performanceY
                     )
