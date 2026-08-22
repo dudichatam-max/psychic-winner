@@ -172,6 +172,7 @@ class SynthEngine(private val context: Context) {
     var sampleRate: Int = 44100
     private var bufferSizeFrames: Int = 512
     private val dspEngine: DspEngine
+    val drumEngine: DrumEngine
     @Volatile private var isRunning = true
 
     private val maxVoices = 8
@@ -239,6 +240,7 @@ class SynthEngine(private val context: Context) {
         bufferSizeFrames = nativeBufferSizeStr?.toIntOrNull() ?: 256
 
         dspEngine = DspEngine(sampleRate)
+        drumEngine = DrumEngine(context)
 
         val minBufferSize = AudioTrack.getMinBufferSize(
             sampleRate,
@@ -283,6 +285,8 @@ class SynthEngine(private val context: Context) {
                 byteBuffer.clear()
 
                 for (i in buffer.indices) {
+                    val drumSmp = drumEngine.getNextSample()
+
                     val frame = dspEngine.processNextSample(
                         noteSlots = noteSlots,
                         maxVoices = maxVoices,
@@ -298,7 +302,8 @@ class SynthEngine(private val context: Context) {
                         echoMix = echoMix,
                         looperEchoMix = looperEcho,
                         performanceX = performanceX,
-                        performanceY = performanceY
+                        performanceY = performanceY,
+                        drumSample = drumSmp
                     )
 
                     val rawMaster = frame.masterSample
@@ -921,7 +926,7 @@ fun SynthAppUI(engine: SynthEngine) {
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
     var showTuningDialog by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableStateOf("SOUND") } // SOUND | PRESET | LOOP | PAD
+    var selectedTab by remember { mutableStateOf("SOUND") } // SOUND | PRESET | LOOP | PAD | DRUMS
 
     var currentWave by remember { mutableIntStateOf(3) }
     var vol by remember { mutableFloatStateOf(0.5f) }
@@ -1478,7 +1483,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 .padding(3.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            val tabs = listOf("SOUND", "PRESET", "LOOP", "PAD")
+            val tabs = listOf("SOUND", "PRESET", "LOOP", "PAD", "DRUMS")
             tabs.forEach { title ->
                 val isSelected = selectedTab == title
                 Button(
@@ -1913,6 +1918,16 @@ fun SynthAppUI(engine: SynthEngine) {
                         Text("LFO RATE", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
                         Text("Resonance", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp).rotate(-90f))
                     }
+                }
+                
+                // --- DRUMS TAB ---
+                "DRUMS" -> Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("DRUM ENGINE UI", color = gold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("הוסף כאן את ממשק הסקוונסר לתופים", color = Color.Gray, fontSize = 10.sp)
                 }
             }
         }
