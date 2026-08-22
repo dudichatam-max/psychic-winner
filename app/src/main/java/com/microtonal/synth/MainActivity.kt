@@ -961,7 +961,7 @@ fun SynthAppUI(engine: SynthEngine) {
     // --- Drum States ---
     var drumBpmState by remember { mutableFloatStateOf(120f) }
     var drumVolState by remember { mutableFloatStateOf(0.8f) }
-    var drumPlayingState by remember { mutableStateOf(true) }
+    var drumPlayingState by remember { mutableStateOf(false) }
     var activeLoadingTrack by remember { mutableIntStateOf(0) }
     var gridRefreshTrigger by remember { mutableLongStateOf(0L) }
 
