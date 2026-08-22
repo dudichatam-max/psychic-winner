@@ -16,6 +16,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.activity.result.contract.ActivityResultContracts.GetContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,16 +56,13 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
-
 class MainActivity : ComponentActivity() {
     private lateinit var synthEngine: SynthEngine
-
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         synthEngine = SynthEngine(this)
         synthEngine.start()
-
 
         setContent {
             MaterialTheme {
@@ -73,13 +71,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-
     override fun onDestroy() {
         super.onDestroy()
         synthEngine.stop()
     }
 }
-
 
 class NoteSlot {
     @Volatile var active: Boolean = false
@@ -91,7 +87,6 @@ class NoteSlot {
     @Volatile var isReleasing: Boolean = false
     @Volatile var waveform: Int = 0
 
-
     var isLooperNote: Boolean = false
     var frozenCutoff: Float = 5000f
     var frozenRes: Float = 0.3f
@@ -100,23 +95,18 @@ class NoteSlot {
     var frozenSustain: Float = 0.8f
     var frozenRelease: Float = 200f
 
-
     var envState: Int = 0 // 0: Attack, 1: Decay, 2: Sustain
-
 
     var zdfState1: Double = 0.0
     var zdfState2: Double = 0.0
     var smoothedCutoff: Float = 5000f
     var smoothedRes: Float = 0.3f
 
-
     var attackCoeff: Double = 0.0
     var decayCoeff: Double = 0.0
     var releaseCoeff: Double = 0.0
 
-
     private val lock = Any()
-
 
     fun updateAndActivate(
         newBaseFreq: Float,
@@ -150,14 +140,12 @@ class NoteSlot {
         zdfState1 = 0.0
         zdfState2 = 0.0
 
-
         attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (attack / 1000.0).coerceAtLeast(0.001)))
         decayCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (decay / 1000.0).coerceAtLeast(0.001)))
         releaseCoeff = Math.exp(-1.0 / (sampleRate * (release / 1000.0).coerceAtLeast(0.001)))
         active = true
     }
 }
-
 
 data class LooperNoteEvent(
     val timestampMs: Long,
@@ -173,7 +161,6 @@ data class LooperNoteEvent(
     val octave: Int
 )
 
-
 data class MidiNoteEvent(
     val timestampMs: Long,
     val isNoteOn: Boolean,
@@ -182,6 +169,68 @@ data class MidiNoteEvent(
     val octave: Int
 )
 
+class DrumEngine(var sampleRate: Int) {
+    @Volatile var isPlaying: Boolean = true
+    @Volatile var bpm: Float = 120f
+    @Volatile var masterVolume: Float = 0.8f
+
+    val numTracks = 4
+    val numSteps = 16
+
+    val grid = Array(numTracks) { BooleanArray(numSteps) }
+    val trackVolumes = FloatArray(numTracks) { 1.0f }
+    val drumSamples = arrayOfNulls<FloatArray>(numTracks)
+    val trackNames = arrayOf("Kick", "Snare", "Hi-Hat", "Perc")
+
+    private val playIndices = IntArray(numTracks) { -1 }
+    private var sampleCounter: Double = 0.0
+    var currentStep: Int = 0
+        private set
+
+    private val lock = Any()
+
+    fun setSample(track: Int, data: FloatArray) = synchronized(lock) {
+        if (track in 0 until numTracks) {
+            drumSamples[track] = data
+            playIndices[track] = -1
+        }
+    }
+
+    fun processNextSample(): Float {
+        if (!isPlaying) return 0f
+
+        val stepsPerSec = (bpm / 60.0) * 4.0
+        val samplesPerStep = sampleRate / stepsPerSec
+
+        sampleCounter += 1.0
+        if (sampleCounter >= samplesPerStep) {
+            sampleCounter -= samplesPerStep
+            currentStep = (currentStep + 1) % numSteps
+
+            for (t in 0 until numTracks) {
+                if (grid[t][currentStep] && drumSamples[t] != null) {
+                    playIndices[t] = 0
+                }
+            }
+        }
+
+        var mixedSample = 0f
+        for (t in 0 until numTracks) {
+            val idx = playIndices[t]
+            val sample = drumSamples[t]
+            if (idx >= 0 && sample != null) {
+                if (idx < sample.size) {
+                    mixedSample += sample[idx] * trackVolumes[t]
+                    playIndices[t] = idx + 1
+                } else {
+                    playIndices[t] = -1
+                }
+            }
+        }
+
+        return (mixedSample * masterVolume).coerceIn(-1.0f, 1.0f)
+    }
+}
 
 class SynthEngine(private val context: Context) {
     var sampleRate: Int = 44100
@@ -190,14 +239,11 @@ class SynthEngine(private val context: Context) {
     val drumEngine: DrumEngine
     @Volatile private var isRunning = true
 
-
     private val maxVoices = 8
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
-
     private val recordingQueue = LinkedBlockingQueue<ByteArray>()
     private var recordingWriterThread: Thread? = null
-
 
     // Live Keyboard Parameters
     @Volatile var waveformType = 3
@@ -223,18 +269,14 @@ class SynthEngine(private val context: Context) {
     @Volatile var looperEcho = 0.25f
     @Volatile var looperGlide = 30f
 
-
     @Volatile var performanceX: Float = 0f
     @Volatile var performanceY: Float = 0f
-
 
     private var lastPlayedFreq: Float = 440f
     private var lastLooperPlayedFreq: Float = 440f
 
-
     val liveVisualizerBuffer = FloatArray(512)
     val looperVisualizerBuffer = FloatArray(512)
-
 
     val recordedNotes = java.util.concurrent.CopyOnWriteArrayList<LooperNoteEvent>()
     private var isLoopRecording = false
@@ -242,7 +284,6 @@ class SynthEngine(private val context: Context) {
     private var loopStartTime = 0L
     private var loopDurationMs = 0L
     private var loopThread: Thread? = null
-
 
     @Volatile private var isRecording = false
     private var recordedAudioStream: FileOutputStream? = null
@@ -252,23 +293,18 @@ class SynthEngine(private val context: Context) {
     @Volatile var isMidiRecording = false
     private var midiStartTime = 0L
 
-
     private val audioTrack: AudioTrack
-
 
     init {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val nativeSampleRateStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
         val nativeBufferSizeStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
 
-
         sampleRate = nativeSampleRateStr?.toIntOrNull() ?: 44100
         bufferSizeFrames = nativeBufferSizeStr?.toIntOrNull() ?: 256
 
-
         dspEngine = DspEngine(sampleRate)
-        drumEngine = DrumEngine(sampleRate) //[span_2](start_span)[span_2](end_span)[span_3](start_span)[span_3](end_span) תיקון: העברת sampleRate במקום context
-
+        drumEngine = DrumEngine(sampleRate)
 
         val minBufferSize = AudioTrack.getMinBufferSize(
             sampleRate,
@@ -276,9 +312,7 @@ class SynthEngine(private val context: Context) {
             AudioFormat.ENCODING_PCM_16BIT
         )
 
-
         val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
-
 
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
@@ -300,29 +334,21 @@ class SynthEngine(private val context: Context) {
             .build()
     }
 
-
     fun start() {
         isRunning = true
         audioTrack.play()
 
-
         Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
-
 
             val bufferSize = 512
             val buffer = ShortArray(bufferSize)
             val byteBuffer = ByteBuffer.allocate(bufferSize * 2).order(ByteOrder.LITTLE_ENDIAN)
 
-
             while (isRunning) {
                 byteBuffer.clear()
 
-
                 for (i in buffer.indices) {
-                    val drumSmp = drumEngine.processSample() //[span_4](start_span)[span_4](end_span)[span_5](start_span)[span_5](end_span) תיקון: קריאה ל-processSample במקום getNextSample
-
-
                     val frame = dspEngine.processNextSample(
                         noteSlots = noteSlots,
                         maxVoices = maxVoices,
@@ -338,23 +364,19 @@ class SynthEngine(private val context: Context) {
                         echoMix = echoMix,
                         looperEchoMix = looperEcho,
                         performanceX = performanceX,
-                        performanceY = performanceY,
-                        drumSample = drumSmp
+                        performanceY = performanceY
                     )
 
-
-                    val rawMaster = frame.masterSample
+                    val drumSample = drumEngine.processNextSample()
+                    val rawMaster = (frame.masterSample + drumSample).coerceIn(-1.0f, 1.0f)
                     val shortVal = (rawMaster * Short.MAX_VALUE * 0.85f).toInt().coerceIn(-32768, 32767).toShort()
-
 
                     buffer[i] = shortVal
                     liveVisualizerBuffer[i] = frame.liveSample
                     looperVisualizerBuffer[i] = frame.looperSample
 
-
                     byteBuffer.putShort(shortVal)
                 }
-
 
                 if (isRecording) {
                     val recBytes = ByteArray(bufferSize * 2)
@@ -362,12 +384,10 @@ class SynthEngine(private val context: Context) {
                     recordingQueue.offer(recBytes)
                 }
 
-
                 audioTrack.write(buffer, 0, buffer.size)
             }
         }.start()
     }
-
 
     fun stop() {
         isRunning = false
@@ -377,12 +397,10 @@ class SynthEngine(private val context: Context) {
         audioTrack.release()
     }
 
-
     fun getEffectiveFrequency(baseFreq: Float, overrideOctave: Int? = null): Float {
         val octave = overrideOctave ?: octaveShift
         return baseFreq * Math.pow(2.0, octave.toDouble()).toFloat()
     }
-
 
     fun setLiveWaveform(wave: Int) {
         waveformType = wave
@@ -394,18 +412,15 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
     fun startMidiRecording() {
         recordedMidiNotes.clear()
         isMidiRecording = true
         midiStartTime = System.currentTimeMillis()
     }
 
-
     fun stopMidiRecording() {
         isMidiRecording = false
     }
-
 
     fun noteOn(
         baseFreq: Float,
@@ -421,7 +436,6 @@ class SynthEngine(private val context: Context) {
     ) {
         val effectiveOctave = if (isLooper) targetOctave else octaveShift
         val freq = getEffectiveFrequency(baseFreq, effectiveOctave)
-
 
         if (isLoopRecording && !isLooper) {
             val now = System.currentTimeMillis() - loopStartTime
@@ -454,9 +468,7 @@ class SynthEngine(private val context: Context) {
             )
         }
 
-
         var slot: NoteSlot? = null
-
 
         for (i in 0 until maxVoices) {
             val s = noteSlots[i]
@@ -465,7 +477,6 @@ class SynthEngine(private val context: Context) {
                 break
             }
         }
-
 
         if (slot != null) {
             slot.isReleasing = false
@@ -476,7 +487,6 @@ class SynthEngine(private val context: Context) {
             return
         }
 
-
         for (i in 0 until maxVoices) {
             val s = noteSlots[i]
             if (!s.active) {
@@ -484,7 +494,6 @@ class SynthEngine(private val context: Context) {
                 break
             }
         }
-
 
         if (slot == null) {
             var minVol = Double.MAX_VALUE
@@ -497,7 +506,6 @@ class SynthEngine(private val context: Context) {
             }
         }
 
-
         if (slot == null) {
             var minVol = Double.MAX_VALUE
             for (i in 0 until maxVoices) {
@@ -508,7 +516,6 @@ class SynthEngine(private val context: Context) {
                 }
             }
         }
-
 
         if (slot == null) {
             var minVol = Double.MAX_VALUE
@@ -521,7 +528,6 @@ class SynthEngine(private val context: Context) {
             }
         }
 
-
         if (slot != null) {
             val startFreq = if (isLooper) {
                 if (looperGlide > 0f) lastLooperPlayedFreq else freq
@@ -530,7 +536,6 @@ class SynthEngine(private val context: Context) {
             }
             
             if (isLooper) lastLooperPlayedFreq = freq else lastPlayedFreq = freq
-
 
             slot.updateAndActivate(
                 newBaseFreq = baseFreq,
@@ -548,7 +553,6 @@ class SynthEngine(private val context: Context) {
             )
         }
     }
-
 
     fun noteOff(baseFreq: Float, isLooper: Boolean = false) {
         if (isLoopRecording && !isLooper) {
@@ -582,7 +586,6 @@ class SynthEngine(private val context: Context) {
             )
         }
 
-
         for (i in 0 until maxVoices) {
             val slot = noteSlots[i]
             if (slot.active && slot.baseFreq == baseFreq && slot.isLooperNote == isLooper && !slot.isReleasing) {
@@ -592,13 +595,11 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
     fun startLoopRecording() {
         recordedNotes.clear()
         isLoopRecording = true
         loopStartTime = System.currentTimeMillis()
     }
-
 
     fun stopLoopRecording() {
         if (!isLoopRecording) return
@@ -606,24 +607,20 @@ class SynthEngine(private val context: Context) {
         loopDurationMs = System.currentTimeMillis() - loopStartTime
     }
 
-
     fun startLoopPlayback() {
         dspEngine.startExternalPlayback()
         if (recordedNotes.isEmpty() || loopDurationMs <= 0) return
         stopLoopPlayback()
         isLoopPlaying = true
 
-
         loopThread = Thread {
             while (isLoopPlaying) {
                 val start = System.currentTimeMillis()
                 var eventIndex = 0
 
-
                 while (isLoopPlaying) {
                     val elapsed = System.currentTimeMillis() - start
                     if (elapsed >= loopDurationMs) break
-
 
                     while (eventIndex < recordedNotes.size && recordedNotes[eventIndex].timestampMs <= elapsed) {
                         val ev = recordedNotes[eventIndex]
@@ -648,7 +645,6 @@ class SynthEngine(private val context: Context) {
                     try { Thread.sleep(1) } catch (_: Exception) {}
                 }
 
-
                 for (i in 0 until maxVoices) {
                     if (noteSlots[i].isLooperNote) {
                         noteSlots[i].active = false
@@ -657,7 +653,6 @@ class SynthEngine(private val context: Context) {
             }
         }.also { it.start() }
     }
-
 
     fun stopLoopPlayback() {
         isLoopPlaying = false
@@ -671,13 +666,11 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
     fun clearLoop() {
         stopLoopPlayback()
         recordedNotes.clear()
         loopDurationMs = 0L
     }
-
 
     fun startRecording() {
         try {
@@ -688,7 +681,6 @@ class SynthEngine(private val context: Context) {
             writeWavHeader(stream, 0L)
             recordingQueue.clear()
             isRecording = true
-
 
             recordingWriterThread = Thread {
                 while (isRecording || recordingQueue.isNotEmpty()) {
@@ -708,14 +700,12 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
     fun stopAndSaveRecordingAsync(onSaved: (File?) -> Unit) {
         if (!isRecording) {
             onSaved(wavFile)
             return
         }
         isRecording = false
-
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -724,7 +714,6 @@ class SynthEngine(private val context: Context) {
                     Thread.sleep(10)
                     waitTries++
                 }
-
 
                 recordingWriterThread?.join(1500)
                 recordingWriterThread = null
@@ -743,11 +732,9 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
     fun exportRecordingToUri(context: Context, destinationUri: Uri): Boolean {
         val sourceFile = wavFile ?: File(context.cacheDir, "temp_synth_recording.wav")
         if (!sourceFile.exists()) return false
-
 
         return try {
             context.contentResolver.openOutputStream(destinationUri)?.use { outputStream ->
@@ -762,13 +749,11 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
     private fun writeWavHeader(out: FileOutputStream, totalAudioLen: Long) {
         val totalDataLen = totalAudioLen + 36
         val longSampleRate = sampleRate.toLong()
         val channels = 1
         val byteRate = longSampleRate * channels * 2
-
 
         val header = ByteArray(44)
         header[0] = 'R'.code.toByte()
@@ -816,25 +801,20 @@ class SynthEngine(private val context: Context) {
         header[42] = (totalAudioLen shr 16 and 0xff).toByte()
         header[43] = (totalAudioLen shr 24 and 0xff).toByte()
 
-
         out.write(header, 0, 44)
     }
-
 
     private fun updateWavHeader(file: File) {
         val totalAudioLen = file.length() - 44
         val totalDataLen = totalAudioLen + 36
 
-
         RandomAccessFile(file, "rw").use { raf ->
             val buffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
-
 
             raf.seek(4)
             buffer.clear()
             buffer.putInt(totalDataLen.toInt())
             raf.write(buffer.array())
-
 
             raf.seek(40)
             buffer.clear()
@@ -843,11 +823,9 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
     fun setLooperVol(vol: Float) {
         looperVolume = vol
     }
-
 
     fun loadAndPlayBackgroundAudio(context: Context, uri: Uri) {
         CoroutineScope(Dispatchers.IO).launch {
@@ -863,24 +841,20 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
     fun pauseBackgroundAudio() {
         dspEngine.isExternalAudioPlaying = false
     }
 
-
     fun resumeBackgroundAudio() {
         dspEngine.isExternalAudioPlaying = true
     }
-
 
     fun stopBackgroundAudio() {
         dspEngine.stopExternalPlayback()
         dspEngine.setExternalAudioBuffer(null)
     }
 
-
-    private fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {    
+    fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {    
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         try {
@@ -968,7 +942,6 @@ class SynthEngine(private val context: Context) {
             val decodedSamplesCount = rawSize
             if (decodedSamplesCount <= 0) return null
 
-
             val ratio = fileSampleRate.toDouble() / sampleRate.toDouble()
             val targetSize = (decodedSamplesCount / ratio).toInt()
             val resampledData = FloatArray(targetSize)
@@ -1000,13 +973,11 @@ class SynthEngine(private val context: Context) {
     }
 }
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynthAppUI(engine: SynthEngine) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE) }
-
 
     val defaultFrequencies = remember {
         listOf(222.00f, 299.00f, 333.00f, 355.00f, 396.00f, 444.00f, 463.00f, 477.00f)
@@ -1016,10 +987,8 @@ fun SynthAppUI(engine: SynthEngine) {
     }
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
-
     var showTuningDialog by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableStateOf("SOUND") } // SOUND | PRESET | LOOP | PAD | DRUMS
-
+    var selectedTab by remember { mutableStateOf("SOUND") } // SOUND | PRESET | LOOP | PAD | DRUM
 
     var currentWave by remember { mutableIntStateOf(3) }
     var vol by remember { mutableFloatStateOf(0.5f) }
@@ -1028,17 +997,14 @@ fun SynthAppUI(engine: SynthEngine) {
     var sustainVal by remember { mutableFloatStateOf(0.8f) }
     var releaseVal by remember { mutableFloatStateOf(200f) }
 
-
     var cutoffVal by remember { mutableFloatStateOf(5000f) }
     var resVal by remember { mutableFloatStateOf(0.3f) }
     var echoVal by remember { mutableFloatStateOf(0.25f) }
     var glideVal by remember { mutableFloatStateOf(30f) }
 
-
     var currentOctave by remember { mutableIntStateOf(0) }
     var isRec by remember { mutableStateOf(false) }
     var isMidiRec by remember { mutableStateOf(false) }
-
 
     var isLoopRecState by remember { mutableStateOf(false) }
     var isLoopPlayState by remember { mutableStateOf(false) }
@@ -1054,12 +1020,17 @@ fun SynthAppUI(engine: SynthEngine) {
     var looperEchoState by remember { mutableFloatStateOf(0.25f) }
     var looperGlideState by remember { mutableFloatStateOf(30f) }
 
+    // --- Drum States ---
+    var drumBpmState by remember { mutableFloatStateOf(120f) }
+    var drumVolState by remember { mutableFloatStateOf(0.8f) }
+    var drumPlayingState by remember { mutableStateOf(true) }
+    var activeLoadingTrack by remember { mutableIntStateOf(0) }
+    var gridRefreshTrigger by remember { mutableLongStateOf(0L) }
 
     // --- 8 Pages Preset System States ---
     var selectedPresetPage by remember { mutableIntStateOf(1) }
     var activeLoadedPage by remember { mutableIntStateOf(-1) }
     var activeLoadedSlot by remember { mutableIntStateOf(-1) }
-
 
     val pageNames = remember {
         mutableStateMapOf<Int, String>().apply {
@@ -1068,7 +1039,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
     }
-
 
     val presetNames = remember {
         mutableStateMapOf<String, String>().apply {
@@ -1081,20 +1051,16 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-
     var editingPageId by remember { mutableStateOf<Int?>(null) }
     var tempPageNameInput by remember { mutableStateOf("") }
 
-
     var editingPresetKey by remember { mutableStateOf<String?>(null) }
     var tempPresetNameInput by remember { mutableStateOf("") }
-
 
     val gold = Color(0xFFD4AF37)
     val darkBg = Color(0xFF0A0A0A)
     val panelBg = Color(0xFF141414)
     val panelBg2 = Color(0xFF1A1A1A)
-
 
     val createWavLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("audio/wav")
@@ -1109,7 +1075,6 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-
     val createMidiLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("audio/midi")
     ) { uri ->
@@ -1123,7 +1088,6 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
-
     val loadAudioLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -1133,6 +1097,26 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
+    val loadDrumSampleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            val trackIdx = activeLoadingTrack
+            CoroutineScope(Dispatchers.IO).launch {
+                val pcm = engine.decodeAudioToPCM(context, uri)
+                if (pcm != null) {
+                    engine.drumEngine.setSample(trackIdx, pcm)
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "סאמפל נטען לערוץ ${engine.drumEngine.trackNames[trackIdx]}", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "שגיאה בטעינת קובץ האודיו", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
 
     fun loadPresetFromSlot(page: Int, slot: Int, showToast: Boolean = true) {
         val key = "p_${page}_s_${slot}"
@@ -1140,7 +1124,6 @@ fun SynthAppUI(engine: SynthEngine) {
             if (showToast) Toast.makeText(context, "פריסט $slot בעמוד $page עדיין ריק", Toast.LENGTH_SHORT).show()
             return
         }
-
 
         vol = prefs.getFloat("${key}_vol", 0.5f)
         engine.volume = vol
@@ -1165,7 +1148,6 @@ fun SynthAppUI(engine: SynthEngine) {
         currentOctave = prefs.getInt("${key}_octave", 0)
         engine.octaveShift = currentOctave
 
-
         val freqsStr = prefs.getString("${key}_freqs", null)
         if (freqsStr != null) {
             val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
@@ -1174,14 +1156,11 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-
         activeLoadedPage = page
         activeLoadedSlot = slot
 
-
         if (showToast) Toast.makeText(context, "פריסט $slot בעמוד $page נטען", Toast.LENGTH_SHORT).show()
     }
-
 
     fun savePresetToSlot(page: Int, slot: Int) {
         val key = "p_${page}_s_${slot}"
@@ -1207,7 +1186,6 @@ fun SynthAppUI(engine: SynthEngine) {
         activeLoadedSlot = slot
         Toast.makeText(context, "פריסט $slot בעמוד $page נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
     }
-
 
     val exportPresetLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -1244,7 +1222,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
     }
-
 
     val importPresetLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -1289,7 +1266,6 @@ fun SynthAppUI(engine: SynthEngine) {
                                 
                                 val freqs = parts[3]
                                 editor.putString("${key}_freqs", freqs)
-                                
                                 editor.putBoolean("${key}_exists", true)
                             }
                         }
@@ -1303,7 +1279,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
     }
-
 
     LaunchedEffect(Unit) {
         if (prefs.getBoolean("p_1_exists", false) && !prefs.getBoolean("p_1_s_1_exists", false)) {
@@ -1333,15 +1308,14 @@ fun SynthAppUI(engine: SynthEngine) {
         loadPresetFromSlot(1, 1, showToast = false)
     }
 
-
     var renderTrigger by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
         while (true) {
             delay(33)
             renderTrigger = System.currentTimeMillis()
+            gridRefreshTrigger = engine.drumEngine.currentStep.toLong()
         }
     }
-
 
     if (editingPageId != null) {
         AlertDialog(
@@ -1371,7 +1345,6 @@ fun SynthAppUI(engine: SynthEngine) {
         )
     }
 
-
     if (editingPresetKey != null) {
         AlertDialog(
             onDismissRequest = { editingPresetKey = null },
@@ -1400,12 +1373,10 @@ fun SynthAppUI(engine: SynthEngine) {
         )
     }
 
-
     if (showTuningDialog) {
         val freqTexts = remember {
             mutableStateListOf(*frequencies.map { it.toString() }.toTypedArray())
         }
-
 
         AlertDialog(
             onDismissRequest = { showTuningDialog = false },
@@ -1459,7 +1430,6 @@ fun SynthAppUI(engine: SynthEngine) {
         )
     }
 
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1476,7 +1446,6 @@ fun SynthAppUI(engine: SynthEngine) {
         ) {
             Text("SIREN", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(
                     onClick = { showTuningDialog = true },
@@ -1486,7 +1455,6 @@ fun SynthAppUI(engine: SynthEngine) {
                 ) {
                     Text("⚙️ תדרים", color = gold, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
-
 
                 Button(
                     onClick = {
@@ -1509,7 +1477,6 @@ fun SynthAppUI(engine: SynthEngine) {
                     Spacer(Modifier.width(3.dp))
                     Text(if (isMidiRec) "שמור MIDI" else "MIDI", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
-
 
                 Button(
                     onClick = {
@@ -1539,7 +1506,6 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1554,7 +1520,6 @@ fun SynthAppUI(engine: SynthEngine) {
                 val h = size.height
                 val halfH = h / 2f
 
-
                 val gridColor = Color(0xFF1F1F1F)
                 for (i in 1 until 8) {
                     val x = w * (i.toFloat() / 8)
@@ -1566,7 +1531,6 @@ fun SynthAppUI(engine: SynthEngine) {
                 }
                 drawLine(Color(0xFF2A2A2A), start = Offset(0f, halfH), end = Offset(w, halfH), strokeWidth = 1.5f)
 
-
                 val livePath = Path()
                 val liveCenterY = halfH / 2f
                 val liveStep = w / engine.liveVisualizerBuffer.size
@@ -1576,7 +1540,6 @@ fun SynthAppUI(engine: SynthEngine) {
                     if (i == 0) livePath.moveTo(x, y) else livePath.lineTo(x, y)
                 }
                 drawPath(livePath, gold, style = Stroke(width = 2f))
-
 
                 val looperPath = Path()
                 val looperCenterY = halfH + (halfH / 2f)
@@ -1589,7 +1552,6 @@ fun SynthAppUI(engine: SynthEngine) {
                 drawPath(looperPath, Color.White.copy(alpha = 0.7f), style = Stroke(width = 2f))
             }
 
-
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1601,9 +1563,7 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-
         Spacer(Modifier.height(4.dp))
-
 
         Row(
             modifier = Modifier
@@ -1612,7 +1572,7 @@ fun SynthAppUI(engine: SynthEngine) {
                 .padding(3.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            val tabs = listOf("SOUND", "PRESET", "LOOP", "PAD", "DRUMS")
+            val tabs = listOf("SOUND", "PRESET", "LOOP", "PAD", "DRUM")
             tabs.forEach { title ->
                 val isSelected = selectedTab == title
                 Button(
@@ -1636,9 +1596,7 @@ fun SynthAppUI(engine: SynthEngine) {
             }
         }
 
-
         Spacer(Modifier.height(4.dp))
-
 
         Box(
             modifier = Modifier
@@ -1669,11 +1627,9 @@ fun SynthAppUI(engine: SynthEngine) {
                             modifier = Modifier.height(26.dp)
                         ) { Text("-1", fontSize = 10.sp, color = Color.White) }
 
-
                         Spacer(Modifier.width(8.dp))
                         Text("Oct: $currentOctave", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(8.dp))
-
 
                         OutlinedButton(
                             onClick = {
@@ -1686,7 +1642,6 @@ fun SynthAppUI(engine: SynthEngine) {
                             modifier = Modifier.height(26.dp)
                         ) { Text("+1", fontSize = 10.sp, color = Color.White) }
                     }
-
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1713,7 +1668,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -1737,14 +1691,12 @@ fun SynthAppUI(engine: SynthEngine) {
                     }
                 }
 
-
                 // --- PRESET TAB ---
                 "PRESET" -> Column(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("פריסטים 8 חריצים", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1773,7 +1725,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-
                     val currentPName = pageNames[selectedPresetPage] ?: "עמוד $selectedPresetPage"
                     Row(
                         modifier = Modifier
@@ -1800,7 +1751,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-
                     val rows = (1..8).chunked(2)
                     rows.forEach { rowSlots ->
                         Row(
@@ -1811,7 +1761,6 @@ fun SynthAppUI(engine: SynthEngine) {
                                 val key = "p_${selectedPresetPage}_s_${slot}"
                                 val pName = presetNames[key] ?: "פריסט $slot"
                                 val isThisSlotLoaded = (activeLoadedPage == selectedPresetPage && activeLoadedSlot == slot)
-
 
                                 Box(
                                     modifier = Modifier
@@ -1841,14 +1790,12 @@ fun SynthAppUI(engine: SynthEngine) {
                                                 modifier = Modifier.height(22.dp).width(28.dp)
                                             ) { Text("טען", fontSize = 8.sp, color = Color.Black, fontWeight = FontWeight.Bold) }
 
-
                                             Button(
                                                 onClick = { savePresetToSlot(selectedPresetPage, slot) },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
                                                 contentPadding = PaddingValues(2.dp),
                                                 modifier = Modifier.height(22.dp).width(30.dp)
                                             ) { Text("שמור", fontSize = 8.sp, color = Color.White) }
-
 
                                             Button(
                                                 onClick = {
@@ -1865,7 +1812,6 @@ fun SynthAppUI(engine: SynthEngine) {
                             }
                         }
                     }
-
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1889,7 +1835,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
                 }
-
 
                 // --- LOOP TAB ---
                 "LOOP" -> Column(
@@ -1919,7 +1864,6 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -1941,7 +1885,6 @@ fun SynthAppUI(engine: SynthEngine) {
                                 contentPadding = PaddingValues(0.dp)
                             ) { Text(if (isLoopRecState) "עצור הקלטה" else "הקלט לופ", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
 
-
                             Button(
                                 onClick = {
                                     if (isLoopPlayState) {
@@ -1960,7 +1903,6 @@ fun SynthAppUI(engine: SynthEngine) {
                             ) { Text(if (isLoopPlayState) "עצור ניגון" else "נגן לופ", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                         }
 
-
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 onClick = { loadAudioLauncher.launch("audio/*") },
@@ -1968,7 +1910,6 @@ fun SynthAppUI(engine: SynthEngine) {
                                 border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold)),
                                 contentPadding = PaddingValues(0.dp)
                             ) { Text("טען שמע", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-
 
                             OutlinedButton(
                                 onClick = {
@@ -1994,7 +1935,6 @@ fun SynthAppUI(engine: SynthEngine) {
                     Spacer(Modifier.height(2.dp))
                     Text("משפיע על נגינה חיה בלבד. שחרר לחזרה אוטומטית למרכז.", color = Color.Gray, fontSize = 8.sp)
                     Spacer(Modifier.height(4.dp))
-
 
                     Box(
                         modifier = Modifier
@@ -2028,7 +1968,6 @@ fun SynthAppUI(engine: SynthEngine) {
                             val w = size.width
                             val h = size.height
 
-
                             val gridColor = Color(0xFF1F1F1F)
                             for (i in 1..4) {
                                 drawLine(gridColor, start = Offset(w * (i / 5f), 0f), end = Offset(w * (i / 5f), h))
@@ -2038,10 +1977,8 @@ fun SynthAppUI(engine: SynthEngine) {
                             drawLine(Color(0xFF2A2A2A), start = Offset(0f, h), end = Offset(w, h), strokeWidth = 2f)
                             drawLine(Color(0xFF2A2A2A), start = Offset(0f, 0f), end = Offset(0f, h), strokeWidth = 2f)
 
-
                             val cursorX = engine.performanceX * w
                             val cursorY = (1f - engine.performanceY) * h
-
 
                             drawCircle(
                                 color = gold.copy(alpha = 0.2f),
@@ -2061,27 +1998,139 @@ fun SynthAppUI(engine: SynthEngine) {
                             )
                         }
 
-
                         Text("LFO RATE", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
                         Text("Resonance", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp).rotate(-90f))
                     }
                 }
-                
-                // --- DRUMS TAB ---
-                "DRUMS" -> Column(
+
+                // --- DRUM TAB ---
+                "DRUM" -> Column(
                     modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("DRUM ENGINE UI", color = gold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("הוסף כאן את ממשק הסקוונסר לתופים", color = Color.Gray, fontSize = 10.sp)
+                    // Top Drum Controls Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("SPARTAN DRUM MACHINE", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Button(
+                                onClick = {
+                                    drumPlayingState = !drumPlayingState
+                                    engine.drumEngine.isPlaying = drumPlayingState
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = if (drumPlayingState) Color(0xFF00C853) else Color(0xFFFF5252)),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text(if (drumPlayingState) "נגן תופים" else "עצור תופים", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    // Knobs for Drum Master & BPM
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        SynthKnob("Drum Vol", "${(drumVolState * 100).toInt()}%", drumVolState, 0f..1f, gold) {
+                            drumVolState = it
+                            engine.drumEngine.masterVolume = it
+                        }
+                        SynthKnob("BPM", "${drumBpmState.toInt()}", drumBpmState, 60f..200f, gold) {
+                            drumBpmState = it
+                            engine.drumEngine.bpm = it
+                        }
+                    }
+
+                    // 4 Tracks Step Sequencer Grid
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(vertical = 2.dp),
+                        verticalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        val currentActiveStep = remember(gridRefreshTrigger) { engine.drumEngine.currentStep }
+
+                        for (t in 0 until 4) {
+                            val trackName = engine.drumEngine.trackNames[t]
+                            val isSampleLoaded = engine.drumEngine.drumSamples[t] != null
+
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().height(20.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = "${t + 1}. $trackName",
+                                            color = if (isSampleLoaded) gold else Color.Gray,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        OutlinedButton(
+                                            onClick = {
+                                                activeLoadingTrack = t
+                                                loadDrumSampleLauncher.launch("audio/*")
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                            modifier = Modifier.height(18.dp)
+                                        ) {
+                                            Text(if (isSampleLoaded) "החלף" else "טעון סאמפל", fontSize = 7.sp, color = gold)
+                                        }
+                                    }
+                                }
+
+                                Spacer(Modifier.height(1.dp))
+
+                                // 16 Steps row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    for (s in 0 until 16) {
+                                        val isActive = engine.drumEngine.grid[t][s]
+                                        val isCurrentStep = (drumPlayingState && s == currentActiveStep)
+
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(26.dp)
+                                                .background(
+                                                    color = when {
+                                                        isActive && isCurrentStep -> Color.White
+                                                        isActive -> gold
+                                                        isCurrentStep -> Color(0xFF333333)
+                                                        else -> panelBg2
+                                                    },
+                                                    shape = RoundedCornerShape(3.dp)
+                                                )
+                                                .border(
+                                                    width = 1.dp,
+                                                    color = if (isCurrentStep) gold else Color(0xFF2A2A2A),
+                                                    shape = RoundedCornerShape(3.dp)
+                                                )
+                                                .clickable {
+                                                    engine.drumEngine.grid[t][s] = !isActive
+                                                    gridRefreshTrigger = System.currentTimeMillis()
+                                                }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-
         Spacer(Modifier.height(4.dp))
-
 
         // --- MICROTONAL KEYBOARD ---
         Row(
@@ -2136,7 +2185,6 @@ fun SynthAppUI(engine: SynthEngine) {
     }
 }
 
-
 @Composable
 fun SynthKnob(
     label: String,
@@ -2150,7 +2198,6 @@ fun SynthKnob(
     var textInput by remember { mutableStateOf(value.toString()) }
     var initialValue by remember { mutableFloatStateOf(value) }
     var totalDragY by remember { mutableFloatStateOf(0f) }
-
 
     if (showInputDialog) {
         AlertDialog(
@@ -2185,7 +2232,6 @@ fun SynthKnob(
         )
     }
 
-
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.padding(2.dp)
@@ -2198,7 +2244,6 @@ fun SynthKnob(
             maxLines = 1
         )
         Spacer(Modifier.height(2.dp))
-
 
         Box(
             modifier = Modifier
@@ -2225,20 +2270,16 @@ fun SynthKnob(
                 val radius = size.minDimension / 2f
                 val center = center
 
-
                 drawCircle(color = Color(0xFF1F1F1F), radius = radius, center = center)
                 drawCircle(color = Color(0xFF2A2A2A), radius = radius, center = center, style = Stroke(width = 1.5f))
-
 
                 val fraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
                 val angleDegrees = 135f + fraction * 270f
                 val angleRadians = Math.toRadians(angleDegrees.toDouble())
 
-
                 val lineLength = radius * 0.65f
                 val endX = center.x + (lineLength * kotlin.math.cos(angleRadians)).toFloat()
                 val endY = center.y + (lineLength * kotlin.math.sin(angleRadians)).toFloat()
-
 
                 drawLine(
                     color = accentColor,
@@ -2249,9 +2290,7 @@ fun SynthKnob(
             }
         }
 
-
         Spacer(Modifier.height(1.dp))
-
 
         Text(
             text = valueDisplay,
