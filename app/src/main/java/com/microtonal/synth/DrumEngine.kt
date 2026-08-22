@@ -8,39 +8,45 @@ import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/**
+ * Spartan Drum Machine – independent from the live synth / DSP.
+ * 4 sample tracks × 16-step sequencer + master BPM / volume.
+ * Mixed into the main AudioTrack so WAV recording captures the drums.
+ */
 class DrumEngine(private val sampleRate: Int) {
 
-    // 4 סאמפלים
+    // 4 sample buffers
     val drumSamples = arrayOfNulls<FloatArray>(4)
 
-    // גריד 4×16
+    // 4 × 16 step grid
     val grid = Array(4) { BooleanArray(16) }
 
-    // ווליום נפרד לכל ערוץ
+    // Per-track volumes
     val trackVolumes = FloatArray(4) { 1.0f }
 
-    // שמות הערוצים (כדי שה-UI יוכל להציג)
+    // Display names
     val trackNames = arrayOf("Kick", "Snare", "Hi-Hat", "Perc")
 
-    // שליטה כללית
+    // Global controls
     @Volatile var masterVolume: Float = 0.8f
     @Volatile var bpm: Float = 120f
     @Volatile var isPlaying: Boolean = false
 
-    // הצעד הנוכחי – חייב להיות נגיש ל-UI בשביל ההדגשה
+    // Current step (readable by UI for highlighting)
     @Volatile var currentStep: Int = 0
         private set
 
     private val playIndices = IntArray(4) { -1 }
     private var stepPhase = 0.0
 
-    // -------------------------------------------------
-    // פונקציית העיבוד הראשית (נקראת מתוך ה-audio thread)
-    // -------------------------------------------------
+    // ------------------------------------------------------------------
+    // Real-time sample generation (called from the audio thread)
+    // ------------------------------------------------------------------
     fun processNextSample(): Float {
         if (!isPlaying) return 0f
 
-        val stepsPerSecond = (bpm / 60.0) * 4.0          // 16th notes
+        // Smooth BPM changes – no clicks when turning the knob live
+        val stepsPerSecond = (bpm / 60.0) * 4.0 // 16th notes
         stepPhase += stepsPerSecond / sampleRate
 
         if (stepPhase >= 1.0) {
@@ -71,16 +77,22 @@ class DrumEngine(private val sampleRate: Int) {
         return (mixed * masterVolume).coerceIn(-1f, 1f)
     }
 
-    // -------------------------------------------------
-    // טעינת סאמפל (מהגלריה / קבצים)
-    // -------------------------------------------------
+    // ------------------------------------------------------------------
+    // Load a sample from device storage (used by the UI launcher)
+    // ------------------------------------------------------------------
+    fun setSample(track: Int, data: FloatArray) {
+        if (track in 0 until 4) {
+            drumSamples[track] = data
+            playIndices[track] = -1
+        }
+    }
+
     suspend fun loadSample(context: Context, trackIndex: Int, uri: Uri): Boolean =
         withContext(Dispatchers.IO) {
             try {
                 val pcm = decodeAudio(context, uri)
                 if (pcm != null) {
-                    drumSamples[trackIndex] = pcm
-                    playIndices[trackIndex] = -1
+                    setSample(trackIndex, pcm)
                     true
                 } else false
             } catch (e: Exception) {
@@ -89,17 +101,9 @@ class DrumEngine(private val sampleRate: Int) {
             }
         }
 
-    // גרסה סינכרונית פשוטה (אם תרצה להשתמש בה מה-UI בלי coroutine)
-    fun setSample(track: Int, data: FloatArray) {
-        if (track in 0 until 4) {
-            drumSamples[track] = data
-            playIndices[track] = -1
-        }
-    }
-
-    // -------------------------------------------------
-    // פענוח אודיו → PCM Float (עם resampling)
-    // -------------------------------------------------
+    // ------------------------------------------------------------------
+    // Decode any supported audio file → mono Float PCM at engine sampleRate
+    // ------------------------------------------------------------------
     private fun decodeAudio(context: Context, uri: Uri): FloatArray? {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -121,8 +125,16 @@ class DrumEngine(private val sampleRate: Int) {
             extractor.selectTrack(trackIndex)
 
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
-            val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (_: Exception) { 1 }
-            val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (_: Exception) { 44100 }
+            val channels = try {
+                format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            } catch (_: Exception) {
+                1
+            }
+            val fileSampleRate = try {
+                format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            } catch (_: Exception) {
+                44100
+            }
 
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
@@ -140,10 +152,16 @@ class DrumEngine(private val sampleRate: Int) {
                     if (inputBuffer != null) {
                         val sampleSize = extractor.readSampleData(inputBuffer, 0)
                         if (sampleSize < 0) {
-                            codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            codec.queueInputBuffer(
+                                inIndex, 0, 0, 0,
+                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            )
                             isEOS = true
                         } else {
-                            codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
+                            codec.queueInputBuffer(
+                                inIndex, 0, sampleSize,
+                                extractor.sampleTime, 0
+                            )
                             extractor.advance()
                         }
                     }
@@ -179,9 +197,9 @@ class DrumEngine(private val sampleRate: Int) {
 
             if (rawSize <= 0) return null
 
-            // Resample ל-sampleRate של המנוע
+            // Linear resample to the engine sample rate
             val ratio = fileSampleRate.toDouble() / sampleRate
-            val targetSize = (rawSize / ratio).toInt()
+            val targetSize = (rawSize / ratio).toInt().coerceAtLeast(1)
             val resampled = FloatArray(targetSize)
 
             for (i in 0 until targetSize) {
@@ -200,8 +218,15 @@ class DrumEngine(private val sampleRate: Int) {
             e.printStackTrace()
             return null
         } finally {
-            try { codec?.stop(); codec?.release() } catch (_: Exception) {}
-            try { extractor.release() } catch (_: Exception) {}
+            try {
+                codec?.stop()
+                codec?.release()
+            } catch (_: Exception) {
+            }
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+            }
         }
     }
 }
