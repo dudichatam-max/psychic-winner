@@ -9,86 +9,105 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class DrumEngine(private val sampleRate: Int) {
-    // 4 מערכים לשמירת ה-PCM של 4 הסאמפלים (KICK, SNARE, HIHAT, PERC וכו')
-    val drumSamples = Array<FloatArray?>(4) { null }
-    
-    // מערך דו-מימדי 4x16 לשמירת הצעדים (Step Sequencer)
-    val grid = Array(4) { BooleanArray(16) }
-    
-    // ווליום נפרד לכל ערוץ
-    val volumes = FloatArray(4) { 0.8f }
-    
-    // ווליום מאסטר תופים ו-BPM
-    @Volatile var globalVolume = 1.0f
-    @Volatile var bpm = 120f
-    @Volatile var isPlaying = false
 
-    private var currentStep = 0
+    // 4 סאמפלים
+    val drumSamples = arrayOfNulls<FloatArray>(4)
+
+    // גריד 4×16
+    val grid = Array(4) { BooleanArray(16) }
+
+    // ווליום נפרד לכל ערוץ
+    val trackVolumes = FloatArray(4) { 1.0f }
+
+    // שמות הערוצים (כדי שה-UI יוכל להציג)
+    val trackNames = arrayOf("Kick", "Snare", "Hi-Hat", "Perc")
+
+    // שליטה כללית
+    @Volatile var masterVolume: Float = 0.8f
+    @Volatile var bpm: Float = 120f
+    @Volatile var isPlaying: Boolean = false
+
+    // הצעד הנוכחי – חייב להיות נגיש ל-UI בשביל ההדגשה
+    @Volatile var currentStep: Int = 0
+        private set
+
+    private val playIndices = IntArray(4) { -1 }
     private var stepPhase = 0.0
 
-    // שמירת אינדקס הנגינה הנוכחי של כל סאמפל (-1 אומר שלא מנגן כרגע)
-    private val playIndices = IntArray(4) { -1 }
-
-    fun processSample(): Float {
+    // -------------------------------------------------
+    // פונקציית העיבוד הראשית (נקראת מתוך ה-audio thread)
+    // -------------------------------------------------
+    fun processNextSample(): Float {
         if (!isPlaying) return 0f
 
-        // חישוב חלקיק הצעד הנוכחי כדי לאפשר שינוי BPM חלק בזמן אמת
-        val stepsPerSecond = (bpm / 60.0) * 4.0 // 4 צעדים בפעימה (16th notes)
+        val stepsPerSecond = (bpm / 60.0) * 4.0          // 16th notes
         stepPhase += stepsPerSecond / sampleRate
 
-        // כשעברנו לצעד הבא
         if (stepPhase >= 1.0) {
             stepPhase -= 1.0
             currentStep = (currentStep + 1) % 16
-            
-            // בדיקה האם יש טריגר להפעיל בצעד הנוכחי
-            for (i in 0 until 4) {
-                if (grid[i][currentStep] && drumSamples[i] != null) {
-                    playIndices[i] = 0 // הפעלת הסאמפל מחדש
+
+            for (t in 0 until 4) {
+                if (grid[t][currentStep] && drumSamples[t] != null) {
+                    playIndices[t] = 0
                 }
             }
         }
 
-        var outMix = 0f
-        for (i in 0 until 4) {
-            val idx = playIndices[i]
-            val buffer = drumSamples[i]
-            if (idx >= 0 && buffer != null) {
-                if (idx < buffer.size) {
-                    outMix += buffer[idx] * volumes[i]
-                    playIndices[i]++
+        var mixed = 0f
+        for (t in 0 until 4) {
+            val idx = playIndices[t]
+            val sample = drumSamples[t]
+            if (idx >= 0 && sample != null) {
+                if (idx < sample.size) {
+                    mixed += sample[idx] * trackVolumes[t]
+                    playIndices[t] = idx + 1
                 } else {
-                    // סיום הסאמפל
-                    playIndices[i] = -1
+                    playIndices[t] = -1
                 }
             }
         }
-        
-        return outMix * globalVolume
+
+        return (mixed * masterVolume).coerceIn(-1f, 1f)
     }
 
-    // פונקציית פענוח מבודדת לקבצי האודיו של התופים
-    suspend fun loadSample(context: Context, trackIndex: Int, uri: Uri): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val pcmData = decodeAudio(context, uri)
-            if (pcmData != null) {
-                drumSamples[trackIndex] = pcmData
-                return@withContext true
+    // -------------------------------------------------
+    // טעינת סאמפל (מהגלריה / קבצים)
+    // -------------------------------------------------
+    suspend fun loadSample(context: Context, trackIndex: Int, uri: Uri): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val pcm = decodeAudio(context, uri)
+                if (pcm != null) {
+                    drumSamples[trackIndex] = pcm
+                    playIndices[trackIndex] = -1
+                    true
+                } else false
+            } catch (e: Exception) {
+                e.printStackTrace()
+                false
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
-        return@withContext false
+
+    // גרסה סינכרונית פשוטה (אם תרצה להשתמש בה מה-UI בלי coroutine)
+    fun setSample(track: Int, data: FloatArray) {
+        if (track in 0 until 4) {
+            drumSamples[track] = data
+            playIndices[track] = -1
+        }
     }
 
+    // -------------------------------------------------
+    // פענוח אודיו → PCM Float (עם resampling)
+    // -------------------------------------------------
     private fun decodeAudio(context: Context, uri: Uri): FloatArray? {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         try {
             extractor.setDataSource(context, uri, null)
+
             var trackIndex = -1
             var format: MediaFormat? = null
-            
             for (i in 0 until extractor.trackCount) {
                 val f = extractor.getTrackFormat(i)
                 val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
@@ -98,24 +117,22 @@ class DrumEngine(private val sampleRate: Int) {
                     break
                 }
             }
-            
             if (trackIndex < 0 || format == null) return null
             extractor.selectTrack(trackIndex)
-            
+
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
-            val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (e: Exception) { 1 }
-            val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (e: Exception) { 44100 }
-            
+            val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (_: Exception) { 1 }
+            val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (_: Exception) { 44100 }
+
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
-            
-            var rawPcmData = FloatArray(1024 * 512) // חצי מגה-בייט לתופים זה די והותר
+
+            var raw = FloatArray(1024 * 512)
             var rawSize = 0
-            
             val info = MediaCodec.BufferInfo()
             var isEOS = false
-            
+
             while (!isEOS) {
                 val inIndex = codec.dequeueInputBuffer(10000)
                 if (inIndex >= 0) {
@@ -131,7 +148,7 @@ class DrumEngine(private val sampleRate: Int) {
                         }
                     }
                 }
-                
+
                 var outIndex = codec.dequeueOutputBuffer(info, 10000)
                 while (outIndex >= 0) {
                     val outputBuffer = codec.getOutputBuffer(outIndex)
@@ -139,18 +156,18 @@ class DrumEngine(private val sampleRate: Int) {
                         outputBuffer.position(info.offset)
                         outputBuffer.limit(info.offset + info.size)
                         val shortBuffer = outputBuffer.asShortBuffer()
-                        
+
                         if (channels == 2) {
                             while (shortBuffer.remaining() >= 2) {
-                                if (rawSize >= rawPcmData.size) rawPcmData = rawPcmData.copyOf(rawPcmData.size * 2)
-                                val left = shortBuffer.get() / 32768.0f
-                                val right = shortBuffer.get() / 32768.0f
-                                rawPcmData[rawSize++] = (left + right) / 2.0f
+                                if (rawSize >= raw.size) raw = raw.copyOf(raw.size * 2)
+                                val left = shortBuffer.get() / 32768f
+                                val right = shortBuffer.get() / 32768f
+                                raw[rawSize++] = (left + right) * 0.5f
                             }
                         } else {
                             while (shortBuffer.hasRemaining()) {
-                                if (rawSize >= rawPcmData.size) rawPcmData = rawPcmData.copyOf(rawPcmData.size * 2)
-                                rawPcmData[rawSize++] = shortBuffer.get() / 32768.0f
+                                if (rawSize >= raw.size) raw = raw.copyOf(raw.size * 2)
+                                raw[rawSize++] = shortBuffer.get() / 32768f
                             }
                         }
                     }
@@ -159,28 +176,26 @@ class DrumEngine(private val sampleRate: Int) {
                     outIndex = codec.dequeueOutputBuffer(info, 0)
                 }
             }
-            
-            val decodedSamplesCount = rawSize
-            if (decodedSamplesCount <= 0) return null
 
-            val ratio = fileSampleRate.toDouble() / sampleRate.toDouble()
-            val targetSize = (decodedSamplesCount / ratio).toInt()
-            val resampledData = FloatArray(targetSize)
-            
+            if (rawSize <= 0) return null
+
+            // Resample ל-sampleRate של המנוע
+            val ratio = fileSampleRate.toDouble() / sampleRate
+            val targetSize = (rawSize / ratio).toInt()
+            val resampled = FloatArray(targetSize)
+
             for (i in 0 until targetSize) {
-                val srcIdx = i * ratio
-                val idxInt = srcIdx.toInt()
-                val frac = (srcIdx - idxInt).toFloat()
-                if (idxInt + 1 < decodedSamplesCount) {
-                    val s0 = rawPcmData[idxInt]
-                    val s1 = rawPcmData[idxInt + 1]
-                    resampledData[i] = s0 + (s1 - s0) * frac
-                } else if (idxInt < decodedSamplesCount) {
-                    resampledData[i] = rawPcmData[idxInt]
+                val src = i * ratio
+                val idx = src.toInt()
+                val frac = (src - idx).toFloat()
+                resampled[i] = when {
+                    idx + 1 < rawSize -> raw[idx] + (raw[idx + 1] - raw[idx]) * frac
+                    idx < rawSize -> raw[idx]
+                    else -> 0f
                 }
             }
-            return resampledData
-            
+            return resampled
+
         } catch (e: Exception) {
             e.printStackTrace()
             return null
