@@ -30,7 +30,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
     private var smoothedLooperVol = 1.0
     private var smoothedEchoMix = 0.25
     private var smoothedLooperEchoMix = 0.25 // <--- הוספה: שליטת Echo נפרדת ללופר
-    
+    private var smoothedDrumVol = 1.0f
     private var smoothedPerfX = 0.0f
     private var smoothedPerfY = 0.0f
     
@@ -117,7 +117,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
         smoothedLooperVol += (looperVolume - smoothedLooperVol) * 0.005
         smoothedEchoMix += (echoMix - smoothedEchoMix) * 0.005
         smoothedLooperEchoMix += (looperEchoMix - smoothedLooperEchoMix) * 0.005 // <--- הוספה: החלקה ללופר אקו
-        
+        smoothedDrumVol += (drumVolume - smoothedDrumVol) * 0.005f
         smoothedPerfX += (performanceX - smoothedPerfX) * 0.005f
         smoothedPerfY += (performanceY - smoothedPerfY) * 0.005f
         
@@ -299,7 +299,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
         val processedSynth = synthTotal + echoSample
         
         // --- הוספה: שילוב התופים במיקס הכולל ---
-        val processedDrum = (drumSampleIn * drumVolume).toDouble()
+        val processedDrum = (drumSampleIn * smoothedDrumVol).toDouble()
         var totalSample = processedSynth + extAudioSampleScaled.toDouble() + processedDrum
 
         // DC Blocker
