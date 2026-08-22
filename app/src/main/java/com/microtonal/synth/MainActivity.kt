@@ -30,6 +30,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -52,6 +53,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
     private lateinit var synthEngine: SynthEngine
@@ -951,31 +953,34 @@ fun SynthAppUI(engine: SynthEngine) {
     var looperEchoState by remember { mutableFloatStateOf(0.25f) }
     var looperGlideState by remember { mutableFloatStateOf(30f) }
 
-    var currentPage by remember { mutableIntStateOf(1) }
-    var activePresetAbsoluteSlot by remember { mutableStateOf<Int?>(null) }
-    
-    // ניהול שמות העמודים
-    val pageTitles = remember {
+    // --- 8 Pages Preset System States ---
+    var selectedPresetPage by remember { mutableIntStateOf(1) }
+    var activeLoadedPage by remember { mutableIntStateOf(-1) }
+    var activeLoadedSlot by remember { mutableIntStateOf(-1) }
+
+    val pageNames = remember {
         mutableStateMapOf<Int, String>().apply {
-            for (i in 1..8) {
-                put(i, prefs.getString("page_${i}_title", "עמוד $i") ?: "עמוד $i")
+            for (p in 1..8) {
+                put(p, prefs.getString("page_${p}_name", "עמוד $p") ?: "עמוד $p")
             }
         }
     }
-    var editingPageId by remember { mutableStateOf<Int?>(null) }
-    var tempPageTitleInput by remember { mutableStateOf("") }
 
-    // Preset Names State for 64 presets (8 pages * 8 slots)
     val presetNames = remember {
-        mutableStateMapOf<Int, String>().apply {
-            for (i in 1..64) {
-                val defaultSlotNum = ((i - 1) % 8) + 1
-                put(i, prefs.getString("p_${i}_name", "Preset $defaultSlotNum") ?: "Preset $defaultSlotNum")
+        mutableStateMapOf<String, String>().apply {
+            for (p in 1..8) {
+                for (s in 1..8) {
+                    val key = "p_${p}_s_${s}"
+                    put(key, prefs.getString("${key}_name", "פריסט $s") ?: "פריסט $s")
+                }
             }
         }
     }
 
-    var editingPresetId by remember { mutableStateOf<Int?>(null) }
+    var editingPageId by remember { mutableStateOf<Int?>(null) }
+    var tempPageNameInput by remember { mutableStateOf("") }
+
+    var editingPresetKey by remember { mutableStateOf<String?>(null) }
     var tempPresetNameInput by remember { mutableStateOf("") }
 
     val gold = Color(0xFFD4AF37)
@@ -1018,33 +1023,105 @@ fun SynthAppUI(engine: SynthEngine) {
         }
     }
 
+    fun loadPresetFromSlot(page: Int, slot: Int, showToast: Boolean = true) {
+        val key = "p_${page}_s_${slot}"
+        if (!prefs.getBoolean("${key}_exists", false)) {
+            if (showToast) Toast.makeText(context, "פריסט $slot בעמוד $page עדיין ריק", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        vol = prefs.getFloat("${key}_vol", 0.5f)
+        engine.volume = vol
+        attackVal = prefs.getFloat("${key}_attack", 15f)
+        engine.attackMs = attackVal
+        decayVal = prefs.getFloat("${key}_decay", 50f)
+        engine.decayMs = decayVal
+        sustainVal = prefs.getFloat("${key}_sustain", 0.8f)
+        engine.sustainLevel = sustainVal
+        releaseVal = prefs.getFloat("${key}_release", 200f)
+        engine.releaseMs = releaseVal
+        cutoffVal = prefs.getFloat("${key}_cutoff", 5000f)
+        engine.cutoffFreq = cutoffVal
+        resVal = prefs.getFloat("${key}_res", 0.3f)
+        engine.resonance = resVal
+        echoVal = prefs.getFloat("${key}_echo", 0.25f)
+        engine.echoMix = echoVal
+        glideVal = prefs.getFloat("${key}_glide", 30f)
+        engine.glideMs = glideVal
+        currentWave = prefs.getInt("${key}_wave", 3)
+        engine.setLiveWaveform(currentWave)
+        currentOctave = prefs.getInt("${key}_octave", 0)
+        engine.octaveShift = currentOctave
+
+        val freqsStr = prefs.getString("${key}_freqs", null)
+        if (freqsStr != null) {
+            val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
+            if (list.size == frequencies.size) {
+                list.forEachIndexed { i, f -> frequencies[i] = f }
+            }
+        }
+
+        activeLoadedPage = page
+        activeLoadedSlot = slot
+
+        if (showToast) Toast.makeText(context, "פריסט $slot בעמוד $page נטען", Toast.LENGTH_SHORT).show()
+    }
+
+    fun savePresetToSlot(page: Int, slot: Int) {
+        val key = "p_${page}_s_${slot}"
+        val currentName = presetNames[key] ?: "פריסט $slot"
+        prefs.edit().apply {
+            putString("${key}_name", currentName)
+            putFloat("${key}_vol", vol)
+            putFloat("${key}_attack", attackVal)
+            putFloat("${key}_decay", decayVal)
+            putFloat("${key}_sustain", sustainVal)
+            putFloat("${key}_release", releaseVal)
+            putFloat("${key}_cutoff", cutoffVal)
+            putFloat("${key}_res", resVal)
+            putFloat("${key}_echo", echoVal)
+            putFloat("${key}_glide", glideVal)
+            putInt("${key}_wave", currentWave)
+            putInt("${key}_octave", currentOctave)
+            putString("${key}_freqs", frequencies.joinToString(","))
+            putBoolean("${key}_exists", true)
+            apply()
+        }
+        activeLoadedPage = page
+        activeLoadedSlot = slot
+        Toast.makeText(context, "פריסט $slot בעמוד $page נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
+    }
+
     val exportPresetLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         uri?.let {
             try {
                 val sb = StringBuilder()
-                sb.append("pageTitle|${pageTitles[currentPage]}\n")
-                for (i in 1..8) {
-                    val absoluteSlot = (currentPage - 1) * 8 + i
-                    sb.append("preset:$i|${presetNames[absoluteSlot]}|")
-                    sb.append("${prefs.getFloat("p_${absoluteSlot}_vol", 0.5f)},")
-                    sb.append("${prefs.getFloat("p_${absoluteSlot}_attack", 15f)},")
-                    sb.append("${prefs.getFloat("p_${absoluteSlot}_decay", 50f)},")
-                    sb.append("${prefs.getFloat("p_${absoluteSlot}_sustain", 0.8f)},")
-                    sb.append("${prefs.getFloat("p_${absoluteSlot}_release", 200f)},")
-                    sb.append("${prefs.getFloat("p_${absoluteSlot}_cutoff", 5000f)},")
-                    sb.append("${prefs.getFloat("p_${absoluteSlot}_res", 0.3f)},")
-                    sb.append("${prefs.getFloat("p_${absoluteSlot}_echo", 0.25f)},")
-                    sb.append("${prefs.getFloat("p_${absoluteSlot}_glide", 30f)},")
-                    sb.append("${prefs.getInt("p_${absoluteSlot}_wave", 3)},")
-                    sb.append("${prefs.getInt("p_${absoluteSlot}_octave", 0)}|")
-                    sb.append("${prefs.getString("p_${absoluteSlot}_freqs", "")}\n")
+                val page = selectedPresetPage
+                val pNameHeader = pageNames[page] ?: "עמוד $page"
+                sb.append("page:$page|$pNameHeader\n")
+                for (s in 1..8) {
+                    val key = "p_${page}_s_${s}"
+                    val pName = presetNames[key] ?: "פריסט $s"
+                    sb.append("preset:$s|$pName|")
+                    sb.append("${prefs.getFloat("${key}_vol", 0.5f)},")
+                    sb.append("${prefs.getFloat("${key}_attack", 15f)},")
+                    sb.append("${prefs.getFloat("${key}_decay", 50f)},")
+                    sb.append("${prefs.getFloat("${key}_sustain", 0.8f)},")
+                    sb.append("${prefs.getFloat("${key}_release", 200f)},")
+                    sb.append("${prefs.getFloat("${key}_cutoff", 5000f)},")
+                    sb.append("${prefs.getFloat("${key}_res", 0.3f)},")
+                    sb.append("${prefs.getFloat("${key}_echo", 0.25f)},")
+                    sb.append("${prefs.getFloat("${key}_glide", 30f)},")
+                    sb.append("${prefs.getInt("${key}_wave", 3)},")
+                    sb.append("${prefs.getInt("${key}_octave", 0)}|")
+                    sb.append("${prefs.getString("${key}_freqs", "")}\n")
                 }
                 context.contentResolver.openOutputStream(uri)?.use { stream ->
                     stream.write(sb.toString().toByteArray())
                 }
-                Toast.makeText(context, "עמוד $currentPage יוצא בהצלחה!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "פריסטים של עמוד $page יוצאו בהצלחה!", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, "שגיאה בייצוא פריסטים", Toast.LENGTH_SHORT).show()
             }
@@ -1059,117 +1136,83 @@ fun SynthAppUI(engine: SynthEngine) {
                 context.contentResolver.openInputStream(uri)?.use { stream ->
                     val lines = stream.bufferedReader().readLines()
                     val editor = prefs.edit()
+                    val page = selectedPresetPage
                     for (line in lines) {
-                        if (line.startsWith("pageTitle|")) {
-                            val title = line.split("|")[1]
-                            pageTitles[currentPage] = title
-                            editor.putString("page_${currentPage}_title", title)
+                        if (line.startsWith("page:")) {
+                            val parts = line.split("|")
+                            if (parts.size >= 2) {
+                                val name = parts[1]
+                                pageNames[page] = name
+                                editor.putString("page_${page}_name", name)
+                            }
                         } else if (line.startsWith("preset:")) {
                             val parts = line.split("|")
                             if (parts.size >= 4) {
-                                val fileSlot = parts[0].removePrefix("preset:").toIntOrNull() ?: continue
-                                val absoluteSlot = (currentPage - 1) * 8 + fileSlot
+                                val slot = parts[0].removePrefix("preset:").toIntOrNull() ?: continue
                                 val name = parts[1]
-                                presetNames[absoluteSlot] = name
-                                editor.putString("p_${absoluteSlot}_name", name)
+                                val key = "p_${page}_s_${slot}"
+                                presetNames[key] = name
+                                editor.putString("${key}_name", name)
                                 
                                 val values = parts[2].split(",")
                                 if (values.size >= 11) {
-                                    editor.putFloat("p_${absoluteSlot}_vol", values[0].toFloatOrNull() ?: 0.5f)
-                                    editor.putFloat("p_${absoluteSlot}_attack", values[1].toFloatOrNull() ?: 15f)
-                                    editor.putFloat("p_${absoluteSlot}_decay", values[2].toFloatOrNull() ?: 50f)
-                                    editor.putFloat("p_${absoluteSlot}_sustain", values[3].toFloatOrNull() ?: 0.8f)
-                                    editor.putFloat("p_${absoluteSlot}_release", values[4].toFloatOrNull() ?: 200f)
-                                    editor.putFloat("p_${absoluteSlot}_cutoff", values[5].toFloatOrNull() ?: 5000f)
-                                    editor.putFloat("p_${absoluteSlot}_res", values[6].toFloatOrNull() ?: 0.3f)
-                                    editor.putFloat("p_${absoluteSlot}_echo", values[7].toFloatOrNull() ?: 0.25f)
-                                    editor.putFloat("p_${absoluteSlot}_glide", values[8].toFloatOrNull() ?: 30f)
-                                    editor.putInt("p_${absoluteSlot}_wave", values[9].toIntOrNull() ?: 3)
-                                    editor.putInt("p_${absoluteSlot}_octave", values[10].toIntOrNull() ?: 0)
+                                    editor.putFloat("${key}_vol", values[0].toFloatOrNull() ?: 0.5f)
+                                    editor.putFloat("${key}_attack", values[1].toFloatOrNull() ?: 15f)
+                                    editor.putFloat("${key}_decay", values[2].toFloatOrNull() ?: 50f)
+                                    editor.putFloat("${key}_sustain", values[3].toFloatOrNull() ?: 0.8f)
+                                    editor.putFloat("${key}_release", values[4].toFloatOrNull() ?: 200f)
+                                    editor.putFloat("${key}_cutoff", values[5].toFloatOrNull() ?: 5000f)
+                                    editor.putFloat("${key}_res", values[6].toFloatOrNull() ?: 0.3f)
+                                    editor.putFloat("${key}_echo", values[7].toFloatOrNull() ?: 0.25f)
+                                    editor.putFloat("${key}_glide", values[8].toFloatOrNull() ?: 30f)
+                                    editor.putInt("${key}_wave", values[9].toIntOrNull() ?: 3)
+                                    editor.putInt("${key}_octave", values[10].toIntOrNull() ?: 0)
                                 }
                                 
                                 val freqs = parts[3]
-                                editor.putString("p_${absoluteSlot}_freqs", freqs)
-                                editor.putBoolean("p_${absoluteSlot}_exists", true)
+                                editor.putString("${key}_freqs", freqs)
+                                
+                                editor.putBoolean("${key}_exists", true)
                             }
                         }
                     }
                     editor.apply()
                 }
-                loadPresetFromSlot((currentPage - 1) * 8 + 1, showToast = false)
-                Toast.makeText(context, "עמוד הפריסטים יובא בהצלחה!", Toast.LENGTH_SHORT).show()
+                loadPresetFromSlot(selectedPresetPage, 1, showToast = false)
+                Toast.makeText(context, "פריסטים יובאו בהצלחה לעמוד $selectedPresetPage!", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, "שגיאה בייבוא פריסטים", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    fun loadPresetFromSlot(slot: Int, showToast: Boolean = true) {
-        if (!prefs.getBoolean("p_${slot}_exists", false)) {
-            if (showToast) Toast.makeText(context, "פריסט $slot עדיין ריק", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        activePresetAbsoluteSlot = slot
-
-        vol = prefs.getFloat("p_${slot}_vol", 0.5f)
-        engine.volume = vol
-        attackVal = prefs.getFloat("p_${slot}_attack", 15f)
-        engine.attackMs = attackVal
-        decayVal = prefs.getFloat("p_${slot}_decay", 50f)
-        engine.decayMs = decayVal
-        sustainVal = prefs.getFloat("p_${slot}_sustain", 0.8f)
-        engine.sustainLevel = sustainVal
-        releaseVal = prefs.getFloat("p_${slot}_release", 200f)
-        engine.releaseMs = releaseVal
-        cutoffVal = prefs.getFloat("p_${slot}_cutoff", 5000f)
-        engine.cutoffFreq = cutoffVal
-        resVal = prefs.getFloat("p_${slot}_res", 0.3f)
-        engine.resonance = resVal
-        echoVal = prefs.getFloat("p_${slot}_echo", 0.25f)
-        engine.echoMix = echoVal
-        glideVal = prefs.getFloat("p_${slot}_glide", 30f)
-        engine.glideMs = glideVal
-        currentWave = prefs.getInt("p_${slot}_wave", 3)
-        engine.setLiveWaveform(currentWave)
-        currentOctave = prefs.getInt("p_${slot}_octave", 0)
-        engine.octaveShift = currentOctave
-
-        val freqsStr = prefs.getString("p_${slot}_freqs", null)
-        if (freqsStr != null) {
-            val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
-            if (list.size == frequencies.size) {
-                list.forEachIndexed { i, f -> frequencies[i] = f }
-            }
-        }
-        if (showToast) Toast.makeText(context, "פריסט נטען בהצלחה", Toast.LENGTH_SHORT).show()
-    }
-
     LaunchedEffect(Unit) {
-        loadPresetFromSlot(1, showToast = false)
-    }
-
-    fun savePresetToSlot(slot: Int) {
-        val currentName = presetNames[slot] ?: "Preset ${((slot - 1) % 8) + 1}"
-        prefs.edit().apply {
-            putString("p_${slot}_name", currentName)
-            putFloat("p_${slot}_vol", vol)
-            putFloat("p_${slot}_attack", attackVal)
-            putFloat("p_${slot}_decay", decayVal)
-            putFloat("p_${slot}_sustain", sustainVal)
-            putFloat("p_${slot}_release", releaseVal)
-            putFloat("p_${slot}_cutoff", cutoffVal)
-            putFloat("p_${slot}_res", resVal)
-            putFloat("p_${slot}_echo", echoVal)
-            putFloat("p_${slot}_glide", glideVal)
-            putInt("p_${slot}_wave", currentWave)
-            putInt("p_${slot}_octave", currentOctave)
-            putString("p_${slot}_freqs", frequencies.joinToString(","))
-            putBoolean("p_${slot}_exists", true)
-            apply()
+        // Migration support for legacy single-page presets
+        if (prefs.getBoolean("p_1_exists", false) && !prefs.getBoolean("p_1_s_1_exists", false)) {
+            val editor = prefs.edit()
+            for (i in 1..8) {
+                val oldKey = "p_$i"
+                val newKey = "p_1_s_$i"
+                if (prefs.getBoolean("${oldKey}_exists", false)) {
+                    editor.putString("${newKey}_name", prefs.getString("${oldKey}_name", "Preset $i"))
+                    editor.putFloat("${newKey}_vol", prefs.getFloat("${oldKey}_vol", 0.5f))
+                    editor.putFloat("${newKey}_attack", prefs.getFloat("${oldKey}_attack", 15f))
+                    editor.putFloat("${newKey}_decay", prefs.getFloat("${oldKey}_decay", 50f))
+                    editor.putFloat("${newKey}_sustain", prefs.getFloat("${oldKey}_sustain", 0.8f))
+                    editor.putFloat("${newKey}_release", prefs.getFloat("${oldKey}_release", 200f))
+                    editor.putFloat("${newKey}_cutoff", prefs.getFloat("${oldKey}_cutoff", 5000f))
+                    editor.putFloat("${newKey}_res", prefs.getFloat("${oldKey}_res", 0.3f))
+                    editor.putFloat("${newKey}_echo", prefs.getFloat("${oldKey}_echo", 0.25f))
+                    editor.putFloat("${newKey}_glide", prefs.getFloat("${oldKey}_glide", 30f))
+                    editor.putInt("${newKey}_wave", prefs.getInt("${oldKey}_wave", 3))
+                    editor.putInt("${newKey}_octave", prefs.getInt("${oldKey}_octave", 0))
+                    editor.putString("${newKey}_freqs", prefs.getString("${oldKey}_freqs", ""))
+                    editor.putBoolean("${newKey}_exists", true)
+                }
+            }
+            editor.apply()
         }
-        activePresetAbsoluteSlot = slot
-        Toast.makeText(context, "פריסט נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
+        loadPresetFromSlot(1, 1, showToast = false)
     }
 
     var renderTrigger by remember { mutableLongStateOf(0L) }
@@ -1183,11 +1226,11 @@ fun SynthAppUI(engine: SynthEngine) {
     if (editingPageId != null) {
         AlertDialog(
             onDismissRequest = { editingPageId = null },
-            title = { Text("ערוך כותרת לעמוד $editingPageId", color = gold, fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+            title = { Text("ערוך שם עמוד $editingPageId", color = gold, fontSize = 14.sp, fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
-                    value = tempPageTitleInput,
-                    onValueChange = { tempPageTitleInput = it },
+                    value = tempPageNameInput,
+                    onValueChange = { tempPageNameInput = it },
                     singleLine = true,
                     textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 12.sp)
                 )
@@ -1195,8 +1238,8 @@ fun SynthAppUI(engine: SynthEngine) {
             confirmButton = {
                 Button(onClick = {
                     editingPageId?.let { id ->
-                        pageTitles[id] = tempPageTitleInput
-                        prefs.edit().putString("page_${id}_title", tempPageTitleInput).apply()
+                        pageNames[id] = tempPageNameInput
+                        prefs.edit().putString("page_${id}_name", tempPageNameInput).apply()
                     }
                     editingPageId = null
                 }) { Text("שמור") }
@@ -1208,9 +1251,9 @@ fun SynthAppUI(engine: SynthEngine) {
         )
     }
 
-    if (editingPresetId != null) {
+    if (editingPresetKey != null) {
         AlertDialog(
-            onDismissRequest = { editingPresetId = null },
+            onDismissRequest = { editingPresetKey = null },
             title = { Text("ערוך שם פריסט", color = gold, fontSize = 14.sp, fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
@@ -1222,15 +1265,15 @@ fun SynthAppUI(engine: SynthEngine) {
             },
             confirmButton = {
                 Button(onClick = {
-                    editingPresetId?.let { id ->
-                        presetNames[id] = tempPresetNameInput
-                        prefs.edit().putString("p_${id}_name", tempPresetNameInput).apply()
+                    editingPresetKey?.let { key ->
+                        presetNames[key] = tempPresetNameInput
+                        prefs.edit().putString("${key}_name", tempPresetNameInput).apply()
                     }
-                    editingPresetId = null
+                    editingPresetKey = null
                 }) { Text("שמור") }
             },
             dismissButton = {
-                OutlinedButton(onClick = { editingPresetId = null }) { Text("ביטול") }
+                OutlinedButton(onClick = { editingPresetKey = null }) { Text("ביטול") }
             },
             containerColor = panelBg2
         )
@@ -1561,45 +1604,62 @@ fun SynthAppUI(engine: SynthEngine) {
                 ) {
                     Text("פריסטים 8 חריצים", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 
-                    // 1. מספרי עמודים
+                    // 1. 8 Page Selector Buttons
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         for (p in 1..8) {
-                            val isSelectedPage = currentPage == p
-                            Text(
-                                text = p.toString(),
-                                color = if (isSelectedPage) gold else Color.Gray,
-                                fontSize = 14.sp,
-                                fontWeight = if (isSelectedPage) FontWeight.Bold else FontWeight.Normal,
+                            val isPageSelected = selectedPresetPage == p
+                            Button(
+                                onClick = { selectedPresetPage = p },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isPageSelected) gold else panelBg2
+                                ),
+                                contentPadding = PaddingValues(0.dp),
                                 modifier = Modifier
-                                    .clickable { currentPage = p }
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
+                                    .weight(1f)
+                                    .height(24.dp),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    "$p",
+                                    color = if (isPageSelected) Color.Black else Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
 
-                    // 2. כותרת עמוד ניתנת לעריכה
+                    // 2. Editable Page Title
+                    val currentPName = pageNames[selectedPresetPage] ?: "עמוד $selectedPresetPage"
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 1.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = pageTitles[currentPage] ?: "עמוד $currentPage", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "עמוד $selectedPresetPage: $currentPName",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                         OutlinedButton(
                             onClick = {
-                                editingPageId = currentPage
-                                tempPageTitleInput = pageTitles[currentPage] ?: ""
+                                editingPageId = selectedPresetPage
+                                tempPageNameInput = currentPName
                             },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 1.dp),
-                            modifier = Modifier.height(22.dp),
-                            border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
-                        ) { Text("ערוך שם עמוד", color = Color.Gray, fontSize = 8.sp) }
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(22.dp)
+                        ) {
+                            Text("ערוך שם עמוד", fontSize = 8.sp, color = gold)
+                        }
                     }
 
-                    // 3. חריצי הפריסטים
+                    // 3. 8 Slots for selected page
                     val rows = (1..8).chunked(2)
                     rows.forEach { rowSlots ->
                         Row(
@@ -1607,15 +1667,15 @@ fun SynthAppUI(engine: SynthEngine) {
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             rowSlots.forEach { slot ->
-                                val absoluteSlot = (currentPage - 1) * 8 + slot
-                                val pName = presetNames[absoluteSlot] ?: "Preset $slot"
-                                val isLoaded = activePresetAbsoluteSlot == absoluteSlot
-                                
+                                val key = "p_${selectedPresetPage}_s_${slot}"
+                                val pName = presetNames[key] ?: "פריסט $slot"
+                                val isThisSlotLoaded = (activeLoadedPage == selectedPresetPage && activeLoadedSlot == slot)
+
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .background(panelBg2, RoundedCornerShape(6.dp))
-                                        .border(1.dp, if (isLoaded) gold else Color(0xFF2A2A2A), RoundedCornerShape(6.dp))
+                                        .background(if (isThisSlotLoaded) gold.copy(alpha = 0.2f) else panelBg2, RoundedCornerShape(6.dp))
+                                        .border(1.dp, if (isThisSlotLoaded) gold else Color(0xFF2A2A2A), RoundedCornerShape(6.dp))
                                         .padding(4.dp)
                                 ) {
                                     Row(
@@ -1625,22 +1685,22 @@ fun SynthAppUI(engine: SynthEngine) {
                                     ) {
                                         Text(
                                             text = "$slot. $pName",
-                                            color = if (isLoaded) gold else Color.White,
+                                            color = if (isThisSlotLoaded) gold else Color.White,
                                             fontSize = 9.sp,
-                                            fontWeight = if (isLoaded) FontWeight.Bold else FontWeight.Normal,
                                             maxLines = 1,
-                                            modifier = Modifier.weight(1f)
+                                            modifier = Modifier.weight(1f),
+                                            fontWeight = if (isThisSlotLoaded) FontWeight.Bold else FontWeight.Normal
                                         )
                                         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                             Button(
-                                                onClick = { loadPresetFromSlot(absoluteSlot) },
-                                                colors = ButtonDefaults.buttonColors(containerColor = gold),
+                                                onClick = { loadPresetFromSlot(selectedPresetPage, slot) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = if (isThisSlotLoaded) gold else Color(0xFFD4AF37)),
                                                 contentPadding = PaddingValues(2.dp),
                                                 modifier = Modifier.height(22.dp).width(28.dp)
-                                            ) { Text("טען", fontSize = 8.sp, color = Color.Black) }
+                                            ) { Text("טען", fontSize = 8.sp, color = Color.Black, fontWeight = FontWeight.Bold) }
 
                                             Button(
-                                                onClick = { savePresetToSlot(absoluteSlot) },
+                                                onClick = { savePresetToSlot(selectedPresetPage, slot) },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
                                                 contentPadding = PaddingValues(2.dp),
                                                 modifier = Modifier.height(22.dp).width(30.dp)
@@ -1648,7 +1708,7 @@ fun SynthAppUI(engine: SynthEngine) {
 
                                             Button(
                                                 onClick = {
-                                                    editingPresetId = absoluteSlot
+                                                    editingPresetKey = key
                                                     tempPresetNameInput = pName
                                                 },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF555555)),
@@ -1662,7 +1722,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         }
                     }
 
-                    // 4. כפתורי ייצוא וייבוא
+                    // 4. Import / Export per Page
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1673,15 +1733,15 @@ fun SynthAppUI(engine: SynthEngine) {
                             contentPadding = PaddingValues(2.dp),
                             border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
                         ) {
-                            Text("ייבוא עמוד פריסטים", color = gold, fontSize = 9.sp)
+                            Text("ייבוא עמוד מ-JSON", color = gold, fontSize = 9.sp)
                         }
                         Button(
-                            onClick = { exportPresetLauncher.launch("Siren_Page_${currentPage}_Presets_${System.currentTimeMillis()}.json") },
+                            onClick = { exportPresetLauncher.launch("Siren_Page${selectedPresetPage}_${System.currentTimeMillis()}.json") },
                             colors = ButtonDefaults.buttonColors(containerColor = gold),
                             modifier = Modifier.weight(1f).height(28.dp),
                             contentPadding = PaddingValues(2.dp)
                         ) {
-                            Text("שמירת עמוד למכשיר", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("ייצוא עמוד ל-JSON", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
