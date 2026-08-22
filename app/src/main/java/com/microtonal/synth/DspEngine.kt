@@ -7,6 +7,7 @@ import kotlin.math.sin
 class DspFrame(
     var liveSample: Float = 0f,
     var looperSample: Float = 0f,
+    var drumSample: Float = 0f, // <--- הוספה: שמירת סאמפל התופים במסגרת
     var masterSample: Float = 0f
 )
 
@@ -108,7 +109,9 @@ class DspEngine(private val sampleRate: Int = 44100) {
         echoMix: Float,
         looperEchoMix: Float, // <--- הוספה: פרמטר לופר אקו
         performanceX: Float,
-        performanceY: Float
+        performanceY: Float,
+        drumSampleIn: Float = 0f, // <--- הוספה: אות התופים הנכנס מה-DrumEngine
+        drumVolume: Float = 1.0f  // <--- הוספה: שליטת ווליום ערוץ התופים
     ): DspFrame {
         smoothedLiveVol += (liveVolume - smoothedLiveVol) * 0.005
         smoothedLooperVol += (looperVolume - smoothedLooperVol) * 0.005
@@ -294,7 +297,10 @@ class DspEngine(private val sampleRate: Int = 44100) {
         delayWritePos = (delayWritePos + 1) % delayBuffer.size
 
         val processedSynth = synthTotal + echoSample
-        var totalSample = processedSynth + extAudioSampleScaled.toDouble()
+        
+        // --- הוספה: שילוב התופים במיקס הכולל ---
+        val processedDrum = (drumSampleIn * drumVolume).toDouble()
+        var totalSample = processedSynth + extAudioSampleScaled.toDouble() + processedDrum
 
         // DC Blocker
         val dcSample = totalSample - dcX1 + 0.995 * dcY1
@@ -306,6 +312,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
         reusableFrame.liveSample = finalLiveSample
         reusableFrame.looperSample = finalLooperSample
+        reusableFrame.drumSample = processedDrum.toFloat() // <--- הוספה: עדכון למסגרת
         reusableFrame.masterSample = masterSample
 
         return reusableFrame
