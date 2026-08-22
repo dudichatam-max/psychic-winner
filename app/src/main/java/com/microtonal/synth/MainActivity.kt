@@ -962,6 +962,7 @@ fun SynthAppUI(engine: SynthEngine) {
     var drumBpmState by remember { mutableFloatStateOf(120f) }
     var drumVolState by remember { mutableFloatStateOf(0.8f) }
     var drumPlayingState by remember { mutableStateOf(false) }
+    val trackVolStates = remember { List(4) { mutableFloatStateOf(1.0f) } }
     var activeLoadingTrack by remember { mutableIntStateOf(0) }
     var gridRefreshTrigger by remember { mutableLongStateOf(0L) }
 
@@ -1982,6 +1983,26 @@ fun SynthAppUI(engine: SynthEngine) {
                         SynthKnob("BPM", "${drumBpmState.toInt()}", drumBpmState, 60f..200f, gold) {
                             drumBpmState = it
                             engine.drumEngine.bpm = it
+                        }
+                    }
+
+                    // Individual track volumes
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        for (t in 0 until 4) {
+                            val name = engine.drumEngine.trackNames[t].take(4)
+                            SynthKnob(
+                                label = name,
+                                valueDisplay = "${(trackVolStates[t].floatValue * 100).toInt()}%",
+                                value = trackVolStates[t].floatValue,
+                                valueRange = 0f..1f,
+                                accentColor = gold
+                            ) {
+                                trackVolStates[t].floatValue = it
+                                engine.drumEngine.trackVolumes[t] = it
+                            }
                         }
                     }
 
