@@ -169,68 +169,6 @@ data class MidiNoteEvent(
     val octave: Int
 )
 
-class DrumEngine(var sampleRate: Int) {
-    @Volatile var isPlaying: Boolean = true
-    @Volatile var bpm: Float = 120f
-    @Volatile var masterVolume: Float = 0.8f
-
-    val numTracks = 4
-    val numSteps = 16
-
-    val grid = Array(numTracks) { BooleanArray(numSteps) }
-    val trackVolumes = FloatArray(numTracks) { 1.0f }
-    val drumSamples = arrayOfNulls<FloatArray>(numTracks)
-    val trackNames = arrayOf("Kick", "Snare", "Hi-Hat", "Perc")
-
-    private val playIndices = IntArray(numTracks) { -1 }
-    private var sampleCounter: Double = 0.0
-    var currentStep: Int = 0
-        private set
-
-    private val lock = Any()
-
-    fun setSample(track: Int, data: FloatArray) = synchronized(lock) {
-        if (track in 0 until numTracks) {
-            drumSamples[track] = data
-            playIndices[track] = -1
-        }
-    }
-
-    fun processNextSample(): Float {
-        if (!isPlaying) return 0f
-
-        val stepsPerSec = (bpm / 60.0) * 4.0
-        val samplesPerStep = sampleRate / stepsPerSec
-
-        sampleCounter += 1.0
-        if (sampleCounter >= samplesPerStep) {
-            sampleCounter -= samplesPerStep
-            currentStep = (currentStep + 1) % numSteps
-
-            for (t in 0 until numTracks) {
-                if (grid[t][currentStep] && drumSamples[t] != null) {
-                    playIndices[t] = 0
-                }
-            }
-        }
-
-        var mixedSample = 0f
-        for (t in 0 until numTracks) {
-            val idx = playIndices[t]
-            val sample = drumSamples[t]
-            if (idx >= 0 && sample != null) {
-                if (idx < sample.size) {
-                    mixedSample += sample[idx] * trackVolumes[t]
-                    playIndices[t] = idx + 1
-                } else {
-                    playIndices[t] = -1
-                }
-            }
-        }
-
-        return (mixedSample * masterVolume).coerceIn(-1.0f, 1.0f)
-    }
-}
 
 class SynthEngine(private val context: Context) {
     var sampleRate: Int = 44100
