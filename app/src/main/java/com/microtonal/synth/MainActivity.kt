@@ -1966,7 +1966,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 modifier = Modifier.height(26.dp)
                             ) {
-                                Text(if (drumPlayingState) "נגן תופים" else "עצור תופים", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                Text(if (drumPlayingState) "עצור תופים" else "נגן תופים", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
