@@ -7,6 +7,7 @@ import android.media.MediaFormat
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.microtonal.synth.R
 
 /**
  * Spartan Drum Machine – independent from the live synth / DSP.
@@ -229,4 +230,136 @@ class DrumEngine(private val sampleRate: Int) {
             }
         }
     }
+   suspend fun loadDefaultKit(context: Context): Boolean = withContext(Dispatchers.IO) {
+    val resourceIds = intArrayOf(
+        R.raw.kick,
+        R.raw.snare,
+        R.raw.high,
+        R.raw.perc
+    )
+    var success = true
+
+    for (i in 0 until 4) {
+        try {
+            val afd = context.resources.openRawResourceFd(resourceIds[i])
+            val pcm = decodeAudioFromFd(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            if (pcm != null) {
+                setSample(i, pcm)
+            } else {
+                success = false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            success = false
+        }
+    }
+    success
+}
+
+private fun decodeAudioFromFd(
+    fd: java.io.FileDescriptor,
+    offset: Long,
+    length: Long
+): FloatArray? {
+    val extractor = MediaExtractor()
+    var codec: MediaCodec? = null
+    try {
+        extractor.setDataSource(fd, offset, length)
+
+        var trackIndex = -1
+        var format: MediaFormat? = null
+        for (i in 0 until extractor.trackCount) {
+            val f = extractor.getTrackFormat(i)
+            val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
+            if (mime.startsWith("audio/")) {
+                trackIndex = i
+                format = f
+                break
+            }
+        }
+        if (trackIndex < 0 || format == null) return null
+        extractor.selectTrack(trackIndex)
+
+        val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+        val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (_: Exception) { 1 }
+        val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (_: Exception) { 44100 }
+
+        codec = MediaCodec.createDecoderByType(mime)
+        codec.configure(format, null, null, 0)
+        codec.start()
+
+        var raw = FloatArray(1024 * 256)
+        var rawSize = 0
+        val info = MediaCodec.BufferInfo()
+        var isEOS = false
+
+        while (!isEOS) {
+            val inIndex = codec.dequeueInputBuffer(10000)
+            if (inIndex >= 0) {
+                val inputBuffer = codec.getInputBuffer(inIndex)
+                if (inputBuffer != null) {
+                    val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                    if (sampleSize < 0) {
+                        codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        isEOS = true
+                    } else {
+                        codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
+                        extractor.advance()
+                    }
+                }
+            }
+
+            var outIndex = codec.dequeueOutputBuffer(info, 10000)
+            while (outIndex >= 0) {
+                val outputBuffer = codec.getOutputBuffer(outIndex)
+                if (outputBuffer != null && info.size > 0) {
+                    outputBuffer.position(info.offset)
+                    outputBuffer.limit(info.offset + info.size)
+                    val shortBuffer = outputBuffer.asShortBuffer()
+
+                    if (channels == 2) {
+                        while (shortBuffer.remaining() >= 2) {
+                            if (rawSize >= raw.size) raw = raw.copyOf(raw.size * 2)
+                            val left = shortBuffer.get() / 32768f
+                            val right = shortBuffer.get() / 32768f
+                            raw[rawSize++] = (left + right) * 0.5f
+                        }
+                    } else {
+                        while (shortBuffer.hasRemaining()) {
+                            if (rawSize >= raw.size) raw = raw.copyOf(raw.size * 2)
+                            raw[rawSize++] = shortBuffer.get() / 32768f
+                        }
+                    }
+                }
+                codec.releaseOutputBuffer(outIndex, false)
+                if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
+                outIndex = codec.dequeueOutputBuffer(info, 0)
+            }
+        }
+
+        if (rawSize <= 0) return null
+
+        val ratio = fileSampleRate.toDouble() / sampleRate
+        val targetSize = (rawSize / ratio).toInt().coerceAtLeast(1)
+        val resampled = FloatArray(targetSize)
+        for (i in 0 until targetSize) {
+            val src = i * ratio
+            val idx = src.toInt()
+            val frac = (src - idx).toFloat()
+            resampled[i] = when {
+                idx + 1 < rawSize -> raw[idx] + (raw[idx + 1] - raw[idx]) * frac
+                idx < rawSize -> raw[idx]
+                else -> 0f
+            }
+        }
+        return resampled
+    } catch (e: Exception) {
+        e.printStackTrace()
+        return null
+    } finally {
+        try { codec?.stop(); codec?.release() } catch (_: Exception) {}
+        try { extractor.release() } catch (_: Exception) {}
+    }
+} 
 }
