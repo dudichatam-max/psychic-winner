@@ -914,7 +914,7 @@ class SynthEngine(private val context: Context) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynthAppUI(engine: SynthEngine) {
-    
+   val context = LocalContext.current 
     val prefs = remember { context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE) }
 
     val defaultFrequencies = remember {
@@ -968,7 +968,7 @@ fun SynthAppUI(engine: SynthEngine) {
     var useDefaultKit by remember { mutableStateOf(true) }
 var defaultKitLoaded by remember { mutableStateOf(false) }
 val scope = rememberCoroutineScope()
-val context = LocalContext.current
+
 
     // --- 8 Pages Preset System States ---
     var selectedPresetPage by remember { mutableIntStateOf(1) }
