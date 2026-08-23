@@ -41,6 +41,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -2073,39 +2074,55 @@ LaunchedEffect(Unit) {
                     }
 
                     // Knobs for Drum Master & BPM
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceAround
-                    ) {
-                        SynthKnob("Drum Vol", "${(drumVolState * 100).toInt()}%", drumVolState, 0f..1f, gold) {
-                            drumVolState = it
-                            engine.drumEngine.masterVolume = it
-                        }
-                        SynthKnob("BPM", "${drumBpmState.toInt()}", drumBpmState, 60f..200f, gold) {
-                            drumBpmState = it
-                            engine.drumEngine.bpm = it
-                        }
-                    }
+Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceAround
+) {
+    SynthKnob(
+        label = "Drum Vol",
+        valueDisplay = "${(drumVolState * 100).toInt()}%",
+        value = drumVolState,
+        valueRange = 0f..1f,
+        accentColor = gold,
+        knobSize = 44.dp
+    ) {
+        drumVolState = it
+        engine.drumEngine.masterVolume = it
+    }
+    SynthKnob(
+        label = "BPM",
+        valueDisplay = "${drumBpmState.toInt()}",
+        value = drumBpmState,
+        valueRange = 60f..200f,
+        accentColor = gold,
+        knobSize = 44.dp
+    ) {
+        drumBpmState = it
+        engine.drumEngine.bpm = it
+    }
+}
+                    
+// Individual track volumes
+Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceAround
+) {
+    for (t in 0 until 4) {
+        val name = engine.drumEngine.trackNames[t].take(4)
+        SynthKnob(
+            label = name,
+            valueDisplay = "${(trackVolStates[t].floatValue * 100).toInt()}%",
+            value = trackVolStates[t].floatValue,
+            valueRange = 0f..1f,
+            accentColor = gold,
+            knobSize = 40.dp          // ← קטן יותר
+        ) {
+            trackVolStates[t].floatValue = it
+            engine.drumEngine.trackVolumes[t] = it
+        }
+    }
+}
 
-                    // Individual track volumes
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceAround
-                    ) {
-                        for (t in 0 until 4) {
-                            val name = engine.drumEngine.trackNames[t].take(4)
-                            SynthKnob(
-                                label = name,
-                                valueDisplay = "${(trackVolStates[t].floatValue * 100).toInt()}%",
-                                value = trackVolStates[t].floatValue,
-                                valueRange = 0f..1f,
-                                accentColor = gold
-                            ) {
-                                trackVolStates[t].floatValue = it
-                                engine.drumEngine.trackVolumes[t] = it
-                            }
-                        }
-                    }
 // --- 8 Pattern slots + Save ---
 Row(
     modifier = Modifier
@@ -2185,8 +2202,7 @@ Row(
 
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().height(20.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth().height(16.dp),                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2223,7 +2239,7 @@ Row(
                                         Box(
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .height(26.dp)
+                                                .height(22.dp)
                                                 .background(
                                                     color = when {
                                                         isActive && isCurrentStep -> Color.White
@@ -2314,6 +2330,7 @@ fun SynthKnob(
     value: Float,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
     accentColor: Color = Color(0xFFD4AF37),
+knobSize: Dp = 52.dp,
     onValueChange: (Float) -> Unit
 ) {
     var showInputDialog by remember { mutableStateOf(false) }
@@ -2369,7 +2386,7 @@ fun SynthKnob(
 
         Box(
             modifier = Modifier
-                .size(52.dp)
+                .size(knobSize)
                 .pointerInput(valueRange) {
                     detectDragGestures(
                         onDragStart = { 
