@@ -965,6 +965,10 @@ fun SynthAppUI(engine: SynthEngine) {
     val trackVolStates = remember { List(4) { mutableFloatStateOf(1.0f) } }
     var activeLoadingTrack by remember { mutableIntStateOf(0) }
     var gridRefreshTrigger by remember { mutableLongStateOf(0L) }
+    var useDefaultKit by remember { mutableStateOf(true) }
+var defaultKitLoaded by remember { mutableStateOf(false) }
+val scope = rememberCoroutineScope()
+val context = LocalContext.current
 
     // --- 8 Pages Preset System States ---
     var selectedPresetPage by remember { mutableIntStateOf(1) }
@@ -1948,13 +1952,23 @@ fun SynthAppUI(engine: SynthEngine) {
                     verticalArrangement = Arrangement.SpaceBetween,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // טעינה אוטומטית של ערכת ברירת המחדל
+LaunchedEffect(Unit) {
+    if (!defaultKitLoaded) {
+        val ok = engine.drumEngine.loadDefaultKit(context)
+        if (ok) {
+            defaultKitLoaded = true
+            useDefaultKit = true
+        }
+    }
+}
                     // Top Drum Controls Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("SPARTAN DRUM MACHINE", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("DRUM MACHINE", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Button(
@@ -1968,6 +1982,39 @@ fun SynthAppUI(engine: SynthEngine) {
                             ) {
                                 Text(if (drumPlayingState) "עצור תופים" else "נגן תופים", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
                             }
+                            Button(
+        onClick = {
+            if (useDefaultKit) {
+                for (i in 0 until 4) {
+                    engine.drumEngine.drumSamples[i] = null
+                }
+                useDefaultKit = false
+            } else {
+                scope.launch {
+                    val ok = engine.drumEngine.loadDefaultKit(context)
+                    if (ok) {
+                        useDefaultKit = true
+                        Toast.makeText(context, "ערכת ברירת מחדל נטענה", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "שגיאה בטעינת הערכה", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        },
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (useDefaultKit) gold else panelBg2
+        ),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+        modifier = Modifier.height(26.dp)
+    ) {
+        Text(
+            if (useDefaultKit) "ערכת ברירת מחדל" else "טעינה ידנית",
+            fontSize = 9.sp,
+            color = if (useDefaultKit) Color.Black else gold,
+            fontWeight = FontWeight.Bold
+        )
+    }
+                        }
                         }
                     }
 
