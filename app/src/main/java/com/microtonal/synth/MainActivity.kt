@@ -2015,7 +2015,7 @@ LaunchedEffect(Unit) {
         )
     }
                         }
-                        }
+                        
                     }
 
                     // Knobs for Drum Master & BPM
