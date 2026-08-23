@@ -910,6 +910,48 @@ class SynthEngine(private val context: Context) {
         }
     }
 }
+private fun saveDrumPatterns(prefs: android.content.SharedPreferences, engine: SynthEngine) {
+    val edit = prefs.edit()
+    for (i in 0 until 8) {
+        val p = engine.drumEngine.patterns[i]
+        val gridStr = buildString {
+            for (t in 0..3) {
+                for (s in 0..15) {
+                    append(if (p.grid[t][s]) '1' else '0')
+                }
+            }
+        }
+        edit.putString("drum_p${i}_grid", gridStr)
+        edit.putFloat("drum_p${i}_bpm", p.bpm)
+        edit.putFloat("drum_p${i}_master", p.masterVolume)
+        for (t in 0..3) {
+            edit.putFloat("drum_p${i}_tv$t", p.trackVolumes[t])
+        }
+    }
+    edit.putInt("drum_current_pattern", engine.drumEngine.currentPatternIndex)
+    edit.apply()
+}
+
+private fun loadDrumPatterns(prefs: android.content.SharedPreferences, engine: SynthEngine) {
+    for (i in 0 until 8) {
+        val gridStr = prefs.getString("drum_p${i}_grid", null)
+        if (gridStr != null && gridStr.length == 64) {
+            val g = Array(4) { BooleanArray(16) }
+            var idx = 0
+            for (t in 0..3) {
+                for (s in 0..15) {
+                    g[t][s] = gridStr[idx++] == '1'
+                }
+            }
+            val bpm = prefs.getFloat("drum_p${i}_bpm", 120f)
+            val master = prefs.getFloat("drum_p${i}_master", 0.8f)
+            val tvs = FloatArray(4) { t -> prefs.getFloat("drum_p${i}_tv$t", 1.0f) }
+            engine.drumEngine.patterns[i] = DrumEngine.DrumPattern(g, bpm, master, tvs)
+        }
+    }
+    val cur = prefs.getInt("drum_current_pattern", 0).coerceIn(0, 7)
+    engine.drumEngine.loadPattern(cur)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -968,6 +1010,7 @@ fun SynthAppUI(engine: SynthEngine) {
     var useDefaultKit by remember { mutableStateOf(true) }
 var defaultKitLoaded by remember { mutableStateOf(false) }
 val scope = rememberCoroutineScope()
+var selectedDrumPattern by remember { mutableIntStateOf(0) }
 
 
     // --- 8 Pages Preset System States ---
@@ -1962,6 +2005,17 @@ LaunchedEffect(Unit) {
         }
     }
 }
+// טעינת 8 חריצי המקצב השמורים
+LaunchedEffect(Unit) {
+    loadDrumPatterns(prefs, engine)
+    selectedDrumPattern = engine.drumEngine.currentPatternIndex
+    drumBpmState = engine.drumEngine.bpm
+    drumVolState = engine.drumEngine.masterVolume
+    for (t in 0 until 4) {
+        trackVolStates[t].floatValue = engine.drumEngine.trackVolumes[t]
+    }
+    gridRefreshTrigger = System.currentTimeMillis()
+}
                     // Top Drum Controls Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2052,6 +2106,68 @@ LaunchedEffect(Unit) {
                             }
                         }
                     }
+// --- 8 Pattern slots + Save ---
+Row(
+    modifier = Modifier
+        .fillMaxWidth()
+        .padding(vertical = 2.dp),
+    horizontalArrangement = Arrangement.spacedBy(2.dp),
+    verticalAlignment = Alignment.CenterVertically
+) {
+    for (i in 0 until 8) {
+        val isSelected = selectedDrumPattern == i
+        Button(
+            onClick = {
+                engine.drumEngine.loadPattern(i)
+                selectedDrumPattern = i
+                drumBpmState = engine.drumEngine.bpm
+                drumVolState = engine.drumEngine.masterVolume
+                for (t in 0 until 4) {
+                    trackVolStates[t].floatValue = engine.drumEngine.trackVolumes[t]
+                }
+                gridRefreshTrigger = System.currentTimeMillis()
+            },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isSelected) gold else panelBg2
+            ),
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier
+                .weight(1f)
+                .height(24.dp),
+            shape = RoundedCornerShape(4.dp)
+        ) {
+            Text(
+                text = "${i + 1}",
+                color = if (isSelected) Color.Black else Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+
+    Button(
+        onClick = {
+            engine.drumEngine.saveCurrentToPattern(selectedDrumPattern)
+            saveDrumPatterns(prefs, engine)
+            Toast.makeText(
+                context,
+                "מקצב נשמר בחריץ ${selectedDrumPattern + 1}",
+                Toast.LENGTH_SHORT
+            ).show()
+        },
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+        modifier = Modifier.height(24.dp),
+        shape = RoundedCornerShape(4.dp)
+    ) {
+        Text(
+            text = "שמור",
+            fontSize = 9.sp,
+            color = Color.White,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
 
                     // 4 Tracks Step Sequencer Grid
                     Column(
