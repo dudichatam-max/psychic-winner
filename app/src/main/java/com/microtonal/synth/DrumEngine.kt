@@ -120,7 +120,7 @@ class DrumEngine(private val sampleRate: Int) {
         if (!dir.exists()) dir.mkdirs()
         for (t in 0 until 4) {
             val sample = drumSamples[t]
-            val file = File(dir, "kit\( {kitIndex}_t \){t}.pcm")
+            val file = File(dir, "kit" + kitIndex + "_t" + t + ".pcm")
             if (sample != null && sample.isNotEmpty()) {
                 try {
                     FileOutputStream(file).use { fos ->
@@ -142,7 +142,7 @@ class DrumEngine(private val sampleRate: Int) {
         val dir = File(context.filesDir, "drum_kits")
         var anyLoaded = false
         for (t in 0 until 4) {
-            val file = File(dir, "kit\( {kitIndex}_t \){t}.pcm")
+            val file = File(dir, "kit" + kitIndex + "_t" + t + ".pcm")
             if (file.exists()) {
                 try {
                     val bytes = file.readBytes()
