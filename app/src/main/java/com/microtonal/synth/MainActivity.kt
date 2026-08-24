@@ -1,4 +1,4 @@
-package com.microtonal.synth
+﻿package com.microtonal.synth
  
 import android.content.Context
 import android.media.AudioAttributes
@@ -58,14 +58,20 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 
+
+
 class MainActivity : ComponentActivity() {
     private lateinit var synthEngine: SynthEngine
+
+
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         synthEngine = SynthEngine(this)
         synthEngine.start()
+
+
 
 
         setContent {
@@ -76,11 +82,15 @@ class MainActivity : ComponentActivity() {
     }
 
 
+
+
     override fun onDestroy() {
         super.onDestroy()
         synthEngine.stop()
     }
 }
+
+
 
 
 class NoteSlot {
@@ -94,6 +104,8 @@ class NoteSlot {
     @Volatile var waveform: Int = 0
 
 
+
+
     var isLooperNote: Boolean = false
     var frozenCutoff: Float = 5000f
     var frozenRes: Float = 0.3f
@@ -103,7 +115,11 @@ class NoteSlot {
     var frozenRelease: Float = 200f
 
 
+
+
     var envState: Int = 0 // 0: Attack, 1: Decay, 2: Sustain
+
+
 
 
     var zdfState1: Double = 0.0
@@ -112,12 +128,18 @@ class NoteSlot {
     var smoothedRes: Float = 0.3f
 
 
+
+
     var attackCoeff: Double = 0.0
     var decayCoeff: Double = 0.0
     var releaseCoeff: Double = 0.0
 
 
+
+
     private val lock = Any()
+
+
 
 
     fun updateAndActivate(
@@ -153,12 +175,16 @@ class NoteSlot {
         zdfState2 = 0.0
 
 
+
+
         attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (attack / 1000.0).coerceAtLeast(0.001)))
         decayCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (decay / 1000.0).coerceAtLeast(0.001)))
         releaseCoeff = Math.exp(-1.0 / (sampleRate * (release / 1000.0).coerceAtLeast(0.001)))
         active = true
     }
 }
+
+
 
 
 data class LooperNoteEvent(
@@ -176,11 +202,15 @@ data class LooperNoteEvent(
 )
 
 
+
+
 data class PadEvent(
     val timestampMs: Long,
     val x: Float,
     val y: Float
 )
+
+
 
 
 data class MidiNoteEvent(
@@ -194,6 +224,10 @@ data class MidiNoteEvent(
 
 
 
+
+
+
+
 class SynthEngine(private val context: Context) {
     var sampleRate: Int = 44100
     private var bufferSizeFrames: Int = 512
@@ -202,12 +236,18 @@ class SynthEngine(private val context: Context) {
     @Volatile private var isRunning = true
 
 
+
+
     private val maxVoices = 8
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
 
+
+
     private val recordingQueue = LinkedBlockingQueue<ByteArray>()
     private var recordingWriterThread: Thread? = null
+
+
 
 
     // Live Keyboard Parameters
@@ -235,16 +275,24 @@ class SynthEngine(private val context: Context) {
     @Volatile var looperGlide = 30f
 
 
+
+
     @Volatile var performanceX: Float = 0f
     @Volatile var performanceY: Float = 0f
+
+
 
 
     private var lastPlayedFreq: Float = 440f
     private var lastLooperPlayedFreq: Float = 440f
 
 
+
+
     val liveVisualizerBuffer = FloatArray(512)
     val looperVisualizerBuffer = FloatArray(512)
+
+
 
 
     val recordedNotes = java.util.concurrent.CopyOnWriteArrayList<LooperNoteEvent>()
@@ -257,6 +305,8 @@ class SynthEngine(private val context: Context) {
     private var lastPadSampleTime = 0L
 
 
+
+
     @Volatile private var isRecording = false
     private var recordedAudioStream: FileOutputStream? = null
     private var wavFile: File? = null
@@ -266,7 +316,11 @@ class SynthEngine(private val context: Context) {
     private var midiStartTime = 0L
 
 
+
+
     private val audioTrack: AudioTrack
+
+
 
 
     init {
@@ -275,12 +329,18 @@ class SynthEngine(private val context: Context) {
         val nativeBufferSizeStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
 
 
+
+
         sampleRate = nativeSampleRateStr?.toIntOrNull() ?: 44100
         bufferSizeFrames = nativeBufferSizeStr?.toIntOrNull() ?: 256
 
 
+
+
         dspEngine = DspEngine(sampleRate)
         drumEngine = DrumEngine(sampleRate)
+
+
 
 
         val minBufferSize = AudioTrack.getMinBufferSize(
@@ -290,7 +350,11 @@ class SynthEngine(private val context: Context) {
         )
 
 
+
+
         val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 4)
+
+
 
 
         audioTrack = AudioTrack.Builder()
@@ -314,13 +378,19 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun start() {
         isRunning = true
         audioTrack.play()
 
 
+
+
         Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+
+
 
 
             val bufferSize = 512
@@ -328,8 +398,12 @@ class SynthEngine(private val context: Context) {
             val byteBuffer = ByteBuffer.allocate(bufferSize * 2).order(ByteOrder.LITTLE_ENDIAN)
 
 
+
+
             while (isRunning) {
                 byteBuffer.clear()
+
+
 
 
                 for (i in buffer.indices) {
@@ -352,9 +426,13 @@ class SynthEngine(private val context: Context) {
                     )
 
 
+
+
                     val drumSample = drumEngine.processNextSample()
                     val rawMaster = (frame.masterSample + drumSample).coerceIn(-1.0f, 1.0f)
                     val shortVal = (rawMaster * Short.MAX_VALUE * 0.85f).toInt().coerceIn(-32768, 32767).toShort()
+
+
 
 
                     buffer[i] = shortVal
@@ -362,8 +440,12 @@ class SynthEngine(private val context: Context) {
                     looperVisualizerBuffer[i] = frame.looperSample
 
 
+
+
                     byteBuffer.putShort(shortVal)
                 }
+
+
 
 
                 // Sample Performance Pad position while loop-recording (~every 15 ms)
@@ -376,6 +458,8 @@ class SynthEngine(private val context: Context) {
                 }
 
 
+
+
                 if (isRecording) {
                     val recBytes = ByteArray(bufferSize * 2)
                     System.arraycopy(byteBuffer.array(), 0, recBytes, 0, recBytes.size)
@@ -383,10 +467,14 @@ class SynthEngine(private val context: Context) {
                 }
 
 
+
+
                 audioTrack.write(buffer, 0, buffer.size)
             }
         }.start()
     }
+
+
 
 
     fun stop() {
@@ -398,10 +486,14 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun getEffectiveFrequency(baseFreq: Float, overrideOctave: Int? = null): Float {
         val octave = overrideOctave ?: octaveShift
         return baseFreq * Math.pow(2.0, octave.toDouble()).toFloat()
     }
+
+
 
 
     fun setLiveWaveform(wave: Int) {
@@ -415,6 +507,8 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun startMidiRecording() {
         recordedMidiNotes.clear()
         isMidiRecording = true
@@ -422,9 +516,13 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun stopMidiRecording() {
         isMidiRecording = false
     }
+
+
 
 
     fun noteOn(
@@ -441,6 +539,8 @@ class SynthEngine(private val context: Context) {
     ) {
         val effectiveOctave = if (isLooper) targetOctave else octaveShift
         val freq = getEffectiveFrequency(baseFreq, effectiveOctave)
+
+
 
 
         if (isLoopRecording && !isLooper) {
@@ -475,7 +575,11 @@ class SynthEngine(private val context: Context) {
         }
 
 
+
+
         var slot: NoteSlot? = null
+
+
 
 
         for (i in 0 until maxVoices) {
@@ -485,6 +589,8 @@ class SynthEngine(private val context: Context) {
                 break
             }
         }
+
+
 
 
         if (slot != null) {
@@ -497,6 +603,8 @@ class SynthEngine(private val context: Context) {
         }
 
 
+
+
         for (i in 0 until maxVoices) {
             val s = noteSlots[i]
             if (!s.active) {
@@ -504,6 +612,8 @@ class SynthEngine(private val context: Context) {
                 break
             }
         }
+
+
 
 
         if (slot == null) {
@@ -518,6 +628,8 @@ class SynthEngine(private val context: Context) {
         }
 
 
+
+
         if (slot == null) {
             var minVol = Double.MAX_VALUE
             for (i in 0 until maxVoices) {
@@ -528,6 +640,8 @@ class SynthEngine(private val context: Context) {
                 }
             }
         }
+
+
 
 
         if (slot == null) {
@@ -542,6 +656,8 @@ class SynthEngine(private val context: Context) {
         }
 
 
+
+
         if (slot != null) {
             val startFreq = if (isLooper) {
                 if (looperGlide > 0f) lastLooperPlayedFreq else freq
@@ -550,6 +666,8 @@ class SynthEngine(private val context: Context) {
             }
             
             if (isLooper) lastLooperPlayedFreq = freq else lastPlayedFreq = freq
+
+
 
 
             slot.updateAndActivate(
@@ -568,6 +686,8 @@ class SynthEngine(private val context: Context) {
             )
         }
     }
+
+
 
 
     fun noteOff(baseFreq: Float, isLooper: Boolean = false) {
@@ -603,6 +723,8 @@ class SynthEngine(private val context: Context) {
         }
 
 
+
+
         for (i in 0 until maxVoices) {
             val slot = noteSlots[i]
             if (slot.active && slot.baseFreq == baseFreq && slot.isLooperNote == isLooper && !slot.isReleasing) {
@@ -611,6 +733,8 @@ class SynthEngine(private val context: Context) {
             }
         }
     }
+
+
 
 
     fun startLoopRecording() {
@@ -622,6 +746,8 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun stopLoopRecording() {
         if (!isLoopRecording) return
         isLoopRecording = false
@@ -631,11 +757,15 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun startLoopPlayback() {
         dspEngine.startExternalPlayback()
         if ((recordedNotes.isEmpty() && recordedPadEvents.isEmpty()) || loopDurationMs <= 0) return
         stopLoopPlayback()
         isLoopPlaying = true
+
+
 
 
         loopThread = Thread {
@@ -645,9 +775,13 @@ class SynthEngine(private val context: Context) {
                 var padIndex = 0
 
 
+
+
                 while (isLoopPlaying) {
                     val elapsed = System.currentTimeMillis() - start
                     if (elapsed >= loopDurationMs) break
+
+
 
 
                     // Replay note events
@@ -673,6 +807,8 @@ class SynthEngine(private val context: Context) {
                     }
 
 
+
+
                     // Replay Performance Pad (LFO / Res) automation
                     while (padIndex < recordedPadEvents.size && recordedPadEvents[padIndex].timestampMs <= elapsed) {
                         val pe = recordedPadEvents[padIndex]
@@ -682,8 +818,12 @@ class SynthEngine(private val context: Context) {
                     }
 
 
+
+
                     try { Thread.sleep(1) } catch (_: Exception) {}
                 }
+
+
 
 
                 for (i in 0 until maxVoices) {
@@ -697,6 +837,8 @@ class SynthEngine(private val context: Context) {
             }
         }.also { it.start() }
     }
+
+
 
 
     fun stopLoopPlayback() {
@@ -714,12 +856,16 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun clearLoop() {
         stopLoopPlayback()
         recordedNotes.clear()
         recordedPadEvents.clear()
         loopDurationMs = 0L
     }
+
+
 
 
     fun startRecording() {
@@ -731,6 +877,8 @@ class SynthEngine(private val context: Context) {
             writeWavHeader(stream, 0L)
             recordingQueue.clear()
             isRecording = true
+
+
 
 
             recordingWriterThread = Thread {
@@ -752,12 +900,16 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun stopAndSaveRecordingAsync(onSaved: (File?) -> Unit) {
         if (!isRecording) {
             onSaved(wavFile)
             return
         }
         isRecording = false
+
+
 
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -767,6 +919,8 @@ class SynthEngine(private val context: Context) {
                     Thread.sleep(10)
                     waitTries++
                 }
+
+
 
 
                 recordingWriterThread?.join(1500)
@@ -787,9 +941,13 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun exportRecordingToUri(context: Context, destinationUri: Uri): Boolean {
         val sourceFile = wavFile ?: File(context.cacheDir, "temp_synth_recording.wav")
         if (!sourceFile.exists()) return false
+
+
 
 
         return try {
@@ -806,11 +964,15 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     private fun writeWavHeader(out: FileOutputStream, totalAudioLen: Long) {
         val totalDataLen = totalAudioLen + 36
         val longSampleRate = sampleRate.toLong()
         val channels = 1
         val byteRate = longSampleRate * channels * 2
+
+
 
 
         val header = ByteArray(44)
@@ -860,8 +1022,12 @@ class SynthEngine(private val context: Context) {
         header[43] = (totalAudioLen shr 24 and 0xff).toByte()
 
 
+
+
         out.write(header, 0, 44)
     }
+
+
 
 
     private fun updateWavHeader(file: File) {
@@ -869,14 +1035,20 @@ class SynthEngine(private val context: Context) {
         val totalDataLen = totalAudioLen + 36
 
 
+
+
         RandomAccessFile(file, "rw").use { raf ->
             val buffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
+
+
 
 
             raf.seek(4)
             buffer.clear()
             buffer.putInt(totalDataLen.toInt())
             raf.write(buffer.array())
+
+
 
 
             raf.seek(40)
@@ -887,9 +1059,13 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun setLooperVol(vol: Float) {
         looperVolume = vol
     }
+
+
 
 
     fun loadAndPlayBackgroundAudio(context: Context, uri: Uri) {
@@ -907,9 +1083,13 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun pauseBackgroundAudio() {
         dspEngine.isExternalAudioPlaying = false
     }
+
+
 
 
     fun resumeBackgroundAudio() {
@@ -917,10 +1097,14 @@ class SynthEngine(private val context: Context) {
     }
 
 
+
+
     fun stopBackgroundAudio() {
         dspEngine.stopExternalPlayback()
         dspEngine.setExternalAudioBuffer(null)
     }
+
+
 
 
     fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {    
@@ -1012,6 +1196,8 @@ class SynthEngine(private val context: Context) {
             if (decodedSamplesCount <= 0) return null
 
 
+
+
             val ratio = fileSampleRate.toDouble() / sampleRate.toDouble()
             val targetSize = (decodedSamplesCount / ratio).toInt()
             val resampledData = FloatArray(targetSize)
@@ -1042,49 +1228,59 @@ class SynthEngine(private val context: Context) {
         }
     }
 }
-private fun saveDrumPatterns(prefs: android.content.SharedPreferences, engine: SynthEngine) {
+private fun saveAllDrumKits(prefs: android.content.SharedPreferences, engine: SynthEngine) {
     val edit = prefs.edit()
-    for (i in 0 until 8) {
-        val p = engine.drumEngine.patterns[i]
-        val gridStr = buildString {
-            for (t in 0..3) {
-                for (s in 0..15) {
-                    append(if (p.grid[t][s]) '1' else '0')
+    for (k in 0 until 8) {
+        val kit = engine.drumEngine.kits[k]
+        edit.putString("drum_kit${k}_name", kit.name)
+        for (i in 0 until 8) {
+            val p = kit.patterns[i]
+            val gridStr = buildString {
+                for (t in 0..3) {
+                    for (s in 0..15) {
+                        append(if (p.grid[t][s]) '1' else '0')
+                    }
                 }
             }
-        }
-        edit.putString("drum_p${i}_grid", gridStr)
-        edit.putFloat("drum_p${i}_bpm", p.bpm)
-        edit.putFloat("drum_p${i}_master", p.masterVolume)
-        for (t in 0..3) {
-            edit.putFloat("drum_p${i}_tv$t", p.trackVolumes[t])
+            edit.putString("drum_kit\( {k}_p \){i}_grid", gridStr)
+            edit.putFloat("drum_kit\( {k}_p \){i}_bpm", p.bpm)
+            edit.putFloat("drum_kit\( {k}_p \){i}_master", p.masterVolume)
+            for (t in 0..3) {
+                edit.putFloat("drum_kit\( {k}_p \){i}_tv$t", p.trackVolumes[t])
+            }
         }
     }
+    edit.putInt("drum_current_kit", engine.drumEngine.currentKitIndex)
     edit.putInt("drum_current_pattern", engine.drumEngine.currentPatternIndex)
     edit.apply()
 }
 
-
-private fun loadDrumPatterns(prefs: android.content.SharedPreferences, engine: SynthEngine) {
-    for (i in 0 until 8) {
-        val gridStr = prefs.getString("drum_p${i}_grid", null)
-        if (gridStr != null && gridStr.length == 64) {
-            val g = Array(4) { BooleanArray(16) }
-            var idx = 0
-            for (t in 0..3) {
-                for (s in 0..15) {
-                    g[t][s] = gridStr[idx++] == '1'
+private fun loadAllDrumKits(prefs: android.content.SharedPreferences, engine: SynthEngine) {
+    for (k in 0 until 8) {
+        val name = prefs.getString("drum_kit${k}_name", "סגנון ${k + 1}") ?: "סגנון ${k + 1}"
+        engine.drumEngine.kits[k].name = name
+        for (i in 0 until 8) {
+            val gridStr = prefs.getString("drum_kit\( {k}_p \){i}_grid", null)
+            if (gridStr != null && gridStr.length == 64) {
+                val g = Array(4) { BooleanArray(16) }
+                var idx = 0
+                for (t in 0..3) {
+                    for (s in 0..15) {
+                        g[t][s] = gridStr[idx++] == '1'
+                    }
                 }
+                val bpm = prefs.getFloat("drum_kit\( {k}_p \){i}_bpm", 120f)
+                val master = prefs.getFloat("drum_kit\( {k}_p \){i}_master", 0.8f)
+                val tvs = FloatArray(4) { t -> prefs.getFloat("drum_kit\( {k}_p \){i}_tv$t", 1.0f) }
+                engine.drumEngine.kits[k].patterns[i] = DrumEngine.DrumPattern(g, bpm, master, tvs)
             }
-            val bpm = prefs.getFloat("drum_p${i}_bpm", 120f)
-            val master = prefs.getFloat("drum_p${i}_master", 0.8f)
-            val tvs = FloatArray(4) { t -> prefs.getFloat("drum_p${i}_tv$t", 1.0f) }
-            engine.drumEngine.patterns[i] = DrumEngine.DrumPattern(g, bpm, master, tvs)
         }
     }
-    val cur = prefs.getInt("drum_current_pattern", 0).coerceIn(0, 7)
-    engine.drumEngine.loadPattern(cur)
+    val curKit = prefs.getInt("drum_current_kit", 0).coerceIn(0, 7)
+    engine.drumEngine.currentKitIndex = curKit
 }
+
+
 
 
 /**
@@ -1117,10 +1313,12 @@ private fun syncLiveToLooper(
     engine.looperVolume = vol
     engine.setLooperVol(vol)
 
+
     setLooperCutoffState(cutoffVal)
     engine.looperCutoff = cutoffVal
     setLooperResState(resVal)
     engine.looperResonance = resVal
+
 
     setLooperAttackState(attackVal)
     engine.looperAttack = attackVal
@@ -1131,12 +1329,66 @@ private fun syncLiveToLooper(
     setLooperReleaseState(releaseVal)
     engine.looperRelease = releaseVal
 
+
     setLooperEchoState(echoVal)
     engine.looperEcho = echoVal
     setLooperGlideState(glideVal)
     engine.looperGlide = glideVal
 
+
     Toast.makeText(context, "Synch: Live → Looper", Toast.LENGTH_SHORT).show()
+}
+
+private fun saveAllDrumKits(prefs: android.content.SharedPreferences, engine: SynthEngine) {
+    val edit = prefs.edit()
+    for (k in 0 until 8) {
+        val kit = engine.drumEngine.kits[k]
+        edit.putString("drum_kit" + k + "_name", kit.name)
+        for (i in 0 until 8) {
+            val p = kit.patterns[i]
+            val gridStr = buildString {
+                for (t in 0..3) {
+                    for (s in 0..15) {
+                        append(if (p.grid[t][s]) '1' else '0')
+                    }
+                }
+            }
+            edit.putString("drum_kit" + k + "_p" + i + "_grid", gridStr)
+            edit.putFloat("drum_kit" + k + "_p" + i + "_bpm", p.bpm)
+            edit.putFloat("drum_kit" + k + "_p" + i + "_master", p.masterVolume)
+            for (t in 0..3) {
+                edit.putFloat("drum_kit" + k + "_p" + i + "_tv" + t, p.trackVolumes[t])
+            }
+        }
+    }
+    edit.putInt("drum_current_kit", engine.drumEngine.currentKitIndex)
+    edit.putInt("drum_current_pattern", engine.drumEngine.currentPatternIndex)
+    edit.apply()
+}
+
+private fun loadAllDrumKits(prefs: android.content.SharedPreferences, engine: SynthEngine) {
+    for (k in 0 until 8) {
+        val name = prefs.getString("drum_kit" + k + "_name", "סגנון " + (k + 1)) ?: ("סגנון " + (k + 1))
+        engine.drumEngine.kits[k].name = name
+        for (i in 0 until 8) {
+            val gridStr = prefs.getString("drum_kit" + k + "_p" + i + "_grid", null)
+            if (gridStr != null && gridStr.length == 64) {
+                val g = Array(4) { BooleanArray(16) }
+                var idx = 0
+                for (t in 0..3) {
+                    for (s in 0..15) {
+                        g[t][s] = gridStr[idx++] == '1'
+                    }
+                }
+                val bpm = prefs.getFloat("drum_kit" + k + "_p" + i + "_bpm", 120f)
+                val master = prefs.getFloat("drum_kit" + k + "_p" + i + "_master", 0.8f)
+                val tvs = FloatArray(4) { t -> prefs.getFloat("drum_kit" + k + "_p" + i + "_tv" + t, 1.0f) }
+                engine.drumEngine.kits[k].patterns[i] = DrumEngine.DrumPattern(g, bpm, master, tvs)
+            }
+        }
+    }
+    val curKit = prefs.getInt("drum_current_kit", 0).coerceIn(0, 7)
+    engine.drumEngine.currentKitIndex = curKit
 }
 
 
@@ -1145,6 +1397,8 @@ private fun syncLiveToLooper(
 fun SynthAppUI(engine: SynthEngine) {
    val context = LocalContext.current 
     val prefs = remember { context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE) }
+
+
 
 
     val defaultFrequencies = remember {
@@ -1156,8 +1410,12 @@ fun SynthAppUI(engine: SynthEngine) {
     val noteNames = listOf("דו", "רה", "מי", "פה", "סול", "לה", "סי", "אל")
 
 
+
+
     var showTuningDialog by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf("SOUND") } // SOUND | PRESET | LOOP | PAD | DRUM
+
+
 
 
     var currentWave by remember { mutableStateOf(3) }
@@ -1168,15 +1426,21 @@ fun SynthAppUI(engine: SynthEngine) {
     var releaseVal by remember { mutableStateOf(200f) }
 
 
+
+
     var cutoffVal by remember { mutableStateOf(5000f) }
     var resVal by remember { mutableStateOf(0.3f) }
     var echoVal by remember { mutableStateOf(0.25f) }
     var glideVal by remember { mutableStateOf(30f) }
 
 
+
+
     var currentOctave by remember { mutableStateOf(0) }
     var isRec by remember { mutableStateOf(false) }
     var isMidiRec by remember { mutableStateOf(false) }
+
+
 
 
     var isLoopRecState by remember { mutableStateOf(false) }
@@ -1194,6 +1458,8 @@ fun SynthAppUI(engine: SynthEngine) {
     var looperGlideState by remember { mutableStateOf(30f) }
 
 
+
+
     // --- Drum States ---
     var drumBpmState by remember { mutableStateOf(120f) }
     var drumVolState by remember { mutableStateOf(0.8f) }
@@ -1205,6 +1471,13 @@ fun SynthAppUI(engine: SynthEngine) {
 var defaultKitLoaded by remember { mutableStateOf(false) }
 val scope = rememberCoroutineScope()
 var selectedDrumPattern by remember { mutableStateOf(0) }
+var showStyleDialog by remember { mutableStateOf(false) }
+var editingKitIndex by remember { mutableStateOf(-1) }
+var tempKitName by remember { mutableStateOf("") }
+
+
+
+
 
 
 
@@ -1215,6 +1488,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
     var activeLoadedSlot by remember { mutableStateOf(-1) }
 
 
+
+
     val pageNames = remember {
         mutableStateMapOf<Int, String>().apply {
             for (p in 1..8) {
@@ -1222,6 +1497,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
             }
         }
     }
+
+
 
 
     val presetNames = remember {
@@ -1236,18 +1513,26 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
     }
 
 
+
+
     var editingPageId by remember { mutableStateOf<Int?>(null) }
     var tempPageNameInput by remember { mutableStateOf("") }
+
+
 
 
     var editingPresetKey by remember { mutableStateOf<String?>(null) }
     var tempPresetNameInput by remember { mutableStateOf("") }
 
 
+
+
     val gold = Color(0xFFD4AF37)
     val darkBg = Color(0xFF0A0A0A)
     val panelBg = Color(0xFF141414)
     val panelBg2 = Color(0xFF1A1A1A)
+
+
 
 
     val createWavLauncher = rememberLauncherForActivityResult(
@@ -1264,6 +1549,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
     }
 
 
+
+
     val createMidiLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("audio/midi")
     ) { uri ->
@@ -1278,6 +1565,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
     }
 
 
+
+
     val loadAudioLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -1286,6 +1575,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
             isLoopPlayState = true
         }
     }
+
+
 
 
     val loadDrumSampleLauncher = rememberLauncherForActivityResult(
@@ -1310,12 +1601,16 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
     }
 
 
+
+
     fun loadPresetFromSlot(page: Int, slot: Int, showToast: Boolean = true) {
         val key = "p_${page}_s_${slot}"
         if (!prefs.getBoolean("${key}_exists", false)) {
             if (showToast) Toast.makeText(context, "פריסט $slot בעמוד $page עדיין ריק", Toast.LENGTH_SHORT).show()
             return
         }
+
+
 
 
         vol = prefs.getFloat("${key}_vol", 0.5f)
@@ -1342,6 +1637,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
         engine.octaveShift = currentOctave
 
 
+
+
         val freqsStr = prefs.getString("${key}_freqs", null)
         if (freqsStr != null) {
             val list = freqsStr.split(",").mapNotNull { it.toFloatOrNull() }
@@ -1351,12 +1648,18 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
         }
 
 
+
+
         activeLoadedPage = page
         activeLoadedSlot = slot
 
 
+
+
         if (showToast) Toast.makeText(context, "פריסט $slot בעמוד $page נטען", Toast.LENGTH_SHORT).show()
     }
+
+
 
 
     fun savePresetToSlot(page: Int, slot: Int) {
@@ -1383,6 +1686,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
         activeLoadedSlot = slot
         Toast.makeText(context, "פריסט $slot בעמוד $page נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
     }
+
+
 
 
     val exportPresetLauncher = rememberLauncherForActivityResult(
@@ -1420,6 +1725,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
             }
         }
     }
+
+
 
 
     val importPresetLauncher = rememberLauncherForActivityResult(
@@ -1480,6 +1787,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
     }
 
 
+
+
     LaunchedEffect(Unit) {
         if (prefs.getBoolean("p_1_exists", false) && !prefs.getBoolean("p_1_s_1_exists", false)) {
             val editor = prefs.edit()
@@ -1509,6 +1818,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
     }
 
 
+
+
     var renderTrigger by remember { mutableStateOf(0L) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -1517,6 +1828,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
             gridRefreshTrigger = engine.drumEngine.currentStep.toLong()
         }
     }
+
+
 
 
     if (editingPageId != null) {
@@ -1546,6 +1859,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
             containerColor = panelBg2
         )
     }
+
+
 
 
     if (editingPresetKey != null) {
@@ -1581,7 +1896,6 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
         val freqTexts = remember {
             mutableStateListOf(*frequencies.map { it.toString() }.toTypedArray())
         }
-
 
         AlertDialog(
             onDismissRequest = { showTuningDialog = false },
@@ -1636,6 +1950,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
     }
 
 
+
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1653,6 +1969,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
             Text("SIREN", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
 
+
+
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(
                     onClick = { showTuningDialog = true },
@@ -1662,6 +1980,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                 ) {
                     Text("⚙️ תדרים", color = gold, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
+
+
 
 
                 // Synch: copy current LIVE Sound params → Looper params
@@ -1698,6 +2018,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                 }
 
 
+
+
                 Button(
                     onClick = {
                         if (isMidiRec) {
@@ -1719,6 +2041,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                     Spacer(Modifier.width(3.dp))
                     Text(if (isMidiRec) "שמור MIDI" else "MIDI", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
+
+
 
 
                 Button(
@@ -1750,6 +2074,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
         }
 
 
+
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1765,6 +2091,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                 val halfH = h / 2f
 
 
+
+
                 val gridColor = Color(0xFF1F1F1F)
                 for (i in 1 until 8) {
                     val x = w * (i.toFloat() / 8)
@@ -1777,6 +2105,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                 drawLine(Color(0xFF2A2A2A), start = Offset(0f, halfH), end = Offset(w, halfH), strokeWidth = 1.5f)
 
 
+
+
                 val livePath = Path()
                 val liveCenterY = halfH / 2f
                 val liveStep = w / engine.liveVisualizerBuffer.size
@@ -1786,6 +2116,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                     if (i == 0) livePath.moveTo(x, y) else livePath.lineTo(x, y)
                 }
                 drawPath(livePath, gold, style = Stroke(width = 2f))
+
+
 
 
                 val looperPath = Path()
@@ -1800,6 +2132,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
             }
 
 
+
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1812,7 +2146,11 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
         }
 
 
+
+
         Spacer(Modifier.height(4.dp))
+
+
 
 
         Row(
@@ -1847,7 +2185,11 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
         }
 
 
+
+
         Spacer(Modifier.height(4.dp))
+
+
 
 
         Box(
@@ -1880,9 +2222,13 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                         ) { Text("-1", fontSize = 10.sp, color = Color.White) }
 
 
+
+
                         Spacer(Modifier.width(8.dp))
                         Text("Oct: $currentOctave", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(8.dp))
+
+
 
 
                         OutlinedButton(
@@ -1896,6 +2242,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                             modifier = Modifier.height(26.dp)
                         ) { Text("+1", fontSize = 10.sp, color = Color.White) }
                     }
+
+
 
 
                     Row(
@@ -1924,6 +2272,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                     }
 
 
+
+
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -1948,12 +2298,16 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                 }
 
 
+
+
                 // --- PRESET TAB ---
                 "PRESET" -> Column(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("פריסטים 8 חריצים", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+
 
 
                     Row(
@@ -1984,6 +2338,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                     }
 
 
+
+
                     val currentPName = pageNames[selectedPresetPage] ?: "עמוד $selectedPresetPage"
                     Row(
                         modifier = Modifier
@@ -2011,6 +2367,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                     }
 
 
+
+
                     val rows = (1..8).chunked(2)
                     rows.forEach { rowSlots ->
                         Row(
@@ -2021,6 +2379,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                                 val key = "p_${selectedPresetPage}_s_${slot}"
                                 val pName = presetNames[key] ?: "פריסט $slot"
                                 val isThisSlotLoaded = (activeLoadedPage == selectedPresetPage && activeLoadedSlot == slot)
+
+
 
 
                                 Box(
@@ -2052,12 +2412,16 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                                             ) { Text("טען", fontSize = 8.sp, color = Color.Black, fontWeight = FontWeight.Bold) }
 
 
+
+
                                             Button(
                                                 onClick = { savePresetToSlot(selectedPresetPage, slot) },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
                                                 contentPadding = PaddingValues(2.dp),
                                                 modifier = Modifier.height(22.dp).width(30.dp)
                                             ) { Text("שמור", fontSize = 8.sp, color = Color.White) }
+
+
 
 
                                             Button(
@@ -2075,6 +2439,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                             }
                         }
                     }
+
+
 
 
                     Row(
@@ -2099,6 +2465,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                         }
                     }
                 }
+
+
 
 
                 // --- LOOP TAB ---
@@ -2130,6 +2498,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                     }
 
 
+
+
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -2152,6 +2522,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                             ) { Text(if (isLoopRecState) "עצור הקלטה" else "הקלט לופ", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
 
 
+
+
                             Button(
                                 onClick = {
                                     if (isLoopPlayState) {
@@ -2171,6 +2543,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                         }
 
 
+
+
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 onClick = { loadAudioLauncher.launch("audio/*") },
@@ -2178,6 +2552,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                                 border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold)),
                                 contentPadding = PaddingValues(0.dp)
                             ) { Text("טען שמע", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+
+
 
 
                             OutlinedButton(
@@ -2204,6 +2580,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                     Spacer(Modifier.height(2.dp))
                     Text("LFO + Resonance • נרשם גם ללופ. שחרר לחזרה למרכז.", color = Color.Gray, fontSize = 8.sp)
                     Spacer(Modifier.height(4.dp))
+
+
 
 
                     Box(
@@ -2239,6 +2617,8 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                             val h = size.height
 
 
+
+
                             val gridColor = Color(0xFF1F1F1F)
                             for (i in 1..4) {
                                 drawLine(gridColor, start = Offset(w * (i / 5f), 0f), end = Offset(w * (i / 5f), h))
@@ -2249,8 +2629,12 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                             drawLine(Color(0xFF2A2A2A), start = Offset(0f, 0f), end = Offset(0f, h), strokeWidth = 2f)
 
 
+
+
                             val cursorX = engine.performanceX * w
                             val cursorY = (1f - engine.performanceY) * h
+
+
 
 
                             drawCircle(
@@ -2272,302 +2656,248 @@ var selectedDrumPattern by remember { mutableStateOf(0) }
                         }
 
 
+
+
                         Text("LFO RATE", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
                         Text("Resonance", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp).rotate(-90f))
                     }
                 }
 
 
+
+
                 // --- DRUM TAB ---
-                "DRUM" -> Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.SpaceBetween,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // טעינה אוטומטית של ערכת ברירת המחדל
-LaunchedEffect(Unit) {
-    if (!defaultKitLoaded) {
-        val ok = engine.drumEngine.loadDefaultKit(context)
-        if (ok) {
-            defaultKitLoaded = true
-            useDefaultKit = true
-        }
-    }
-}
-// טעינת 8 חריצי המקצב השמורים
-LaunchedEffect(Unit) {
-    loadDrumPatterns(prefs, engine)
-    selectedDrumPattern = engine.drumEngine.currentPatternIndex
-    drumBpmState = engine.drumEngine.bpm
-    drumVolState = engine.drumEngine.masterVolume
-    for (t in 0 until 4) {
-        trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
-    }
-    gridRefreshTrigger = System.currentTimeMillis()
-}
-                    // Top Drum Controls Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("DRUM MACHINE", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+"DRUM" -> Column(
+    modifier = Modifier.fillMaxSize(),
+    verticalArrangement = Arrangement.SpaceBetween,
+    horizontalAlignment = Alignment.CenterHorizontally
+) {
+    LaunchedEffect(Unit) {
+        loadAllDrumKits(prefs, engine)
+        val curKit = engine.drumEngine.currentKitIndex
+        engine.drumEngine.loadKit(curKit, context)
 
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Button(
-                                onClick = {
-                                    drumPlayingState = !drumPlayingState
-                                    engine.drumEngine.isPlaying = drumPlayingState
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = if (drumPlayingState) Color(0xFF00C853) else Color(0xFFFF5252)),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.height(26.dp)
-                            ) {
-                                Text(if (drumPlayingState) "עצור תופים" else "נגן תופים", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                            }
-                            Button(
-        onClick = {
-            if (useDefaultKit) {
-                for (i in 0 until 4) {
-                    engine.drumEngine.drumSamples[i] = null
-                }
-                useDefaultKit = false
-            } else {
-                scope.launch {
-                    val ok = engine.drumEngine.loadDefaultKit(context)
-                    if (ok) {
-                        useDefaultKit = true
-                        Toast.makeText(context, "ערכת ברירת מחדל נטענה", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "שגיאה בטעינת הערכה", Toast.LENGTH_SHORT).show()
-                    }
-                }
+        val hasSamples = engine.drumEngine.drumSamples.any { it != null }
+        if (!hasSamples) {
+            val ok = engine.drumEngine.loadDefaultKit(context)
+            if (ok) {
+                defaultKitLoaded = true
+                useDefaultKit = true
             }
-        },
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (useDefaultKit) gold else panelBg2
-        ),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-        modifier = Modifier.height(26.dp)
-    ) {
-        Text(
-            if (useDefaultKit) "ערכת ברירת מחדל" else "טעינה ידנית",
-            fontSize = 9.sp,
-            color = if (useDefaultKit) Color.Black else gold,
-            fontWeight = FontWeight.Bold
-        )
+        } else {
+            useDefaultKit = false
+            defaultKitLoaded = true
+        }
+
+        selectedDrumPattern = engine.drumEngine.currentPatternIndex
+        drumBpmState = engine.drumEngine.bpm
+        drumVolState = engine.drumEngine.masterVolume
+        for (t in 0 until 4) {
+            trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
+        }
+        gridRefreshTrigger = System.currentTimeMillis()
     }
+
+    // Top controls
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("DRUM MACHINE", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = {
+                    drumPlayingState = !drumPlayingState
+                    engine.drumEngine.isPlaying = drumPlayingState
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = if (drumPlayingState) Color(0xFF00C853) else Color(0xFFFF5252)),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier.height(26.dp)
+            ) {
+                Text(if (drumPlayingState) "עצור תופים" else "נגן תופים", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+            }
+
+            Button(
+                onClick = {
+                    if (useDefaultKit) {
+                        for (i in 0 until 4) engine.drumEngine.drumSamples[i] = null
+                        useDefaultKit = false
+                    } else {
+                        scope.launch {
+                            val ok = engine.drumEngine.loadDefaultKit(context)
+                            if (ok) {
+                                useDefaultKit = true
+                                Toast.makeText(context, "ערכת ברירת מחדל נטענה", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "שגיאה בטעינת הערכה", Toast.LENGTH_SHORT).show()
+                            }
                         }
-                        
                     }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = if (useDefaultKit) gold else panelBg2),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier.height(26.dp)
+            ) {
+                Text(
+                    if (useDefaultKit) "ערכת ברירת מחדל" else "טעינה ידנית",
+                    fontSize = 9.sp,
+                    color = if (useDefaultKit) Color.Black else gold,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
-
-                    // Knobs for Drum Master & BPM
-Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.SpaceAround
-) {
-    SynthKnob(
-        label = "Drum Vol",
-        valueDisplay = "${(drumVolState * 100).toInt()}%",
-        value = drumVolState,
-        valueRange = 0f..1f,
-        accentColor = gold,
-        knobSize = 44.dp
-    ) {
-        drumVolState = it
-        engine.drumEngine.masterVolume = it
-    }
-    SynthKnob(
-        label = "BPM",
-        valueDisplay = "${drumBpmState.toInt()}",
-        value = drumBpmState,
-        valueRange = 60f..200f,
-        accentColor = gold,
-        knobSize = 44.dp
-    ) {
-        drumBpmState = it
-        engine.drumEngine.bpm = it
-    }
-}
-                    
-// Individual track volumes
-Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.SpaceAround
-) {
-    for (t in 0 until 4) {
-        val name = engine.drumEngine.trackNames[t].take(4)
-        SynthKnob(
-            label = name,
-            valueDisplay = "${(trackVolStates[t].value * 100).toInt()}%",
-            value = trackVolStates[t].value,
-            valueRange = 0f..1f,
-            accentColor = gold,
-            knobSize = 40.dp          // ← קטן יותר
-        ) {
-            trackVolStates[t].value = it
-            engine.drumEngine.trackVolumes[t] = it
+            Button(
+                onClick = { showStyleDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier.height(26.dp)
+            ) {
+                Text("סגנון", fontSize = 9.sp, color = gold, fontWeight = FontWeight.Bold)
+            }
         }
     }
-}
 
+    // Knobs Master + BPM
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+        SynthKnob("Drum Vol", "${(drumVolState * 100).toInt()}%", drumVolState, 0f..1f, gold, 44.dp) {
+            drumVolState = it
+            engine.drumEngine.masterVolume = it
+        }
+        SynthKnob("BPM", "${drumBpmState.toInt()}", drumBpmState, 60f..200f, gold, 44.dp) {
+            drumBpmState = it
+            engine.drumEngine.bpm = it
+        }
+    }
 
-// --- 8 Pattern slots + Save ---
-Row(
-    modifier = Modifier
-        .fillMaxWidth()
-        .padding(vertical = 2.dp),
-    horizontalArrangement = Arrangement.spacedBy(2.dp),
-    verticalAlignment = Alignment.CenterVertically
-) {
-    for (i in 0 until 8) {
-        val isSelected = selectedDrumPattern == i
+    // Track volumes
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+        for (t in 0 until 4) {
+            val name = engine.drumEngine.trackNames[t].take(4)
+            SynthKnob(name, "${(trackVolStates[t].value * 100).toInt()}%", trackVolStates[t].value, 0f..1f, gold, 40.dp) {
+                trackVolStates[t].value = it
+                engine.drumEngine.trackVolumes[t] = it
+            }
+        }
+    }
+
+    // 8 Pattern slots + Save
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        for (i in 0 until 8) {
+            val isSelected = selectedDrumPattern == i
+            Button(
+                onClick = {
+                    engine.drumEngine.loadPattern(i)
+                    selectedDrumPattern = i
+                    drumBpmState = engine.drumEngine.bpm
+                    drumVolState = engine.drumEngine.masterVolume
+                    for (t in 0 until 4) trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
+                    gridRefreshTrigger = System.currentTimeMillis()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = if (isSelected) gold else panelBg2),
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.weight(1f).height(24.dp),
+                shape = RoundedCornerShape(4.dp)
+            ) {
+                Text("${i + 1}", color = if (isSelected) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
         Button(
             onClick = {
-                engine.drumEngine.loadPattern(i)
-                selectedDrumPattern = i
-                drumBpmState = engine.drumEngine.bpm
-                drumVolState = engine.drumEngine.masterVolume
-                for (t in 0 until 4) {
-                    trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
-                }
-                gridRefreshTrigger = System.currentTimeMillis()
+                engine.drumEngine.saveCurrentToPattern(selectedDrumPattern)
+                saveAllDrumKits(prefs, engine)
+                Toast.makeText(context, "מקצב נשמר בחריץ ${selectedDrumPattern + 1}", Toast.LENGTH_SHORT).show()
             },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isSelected) gold else panelBg2
-            ),
-            contentPadding = PaddingValues(0.dp),
-            modifier = Modifier
-                .weight(1f)
-                .height(24.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+            modifier = Modifier.height(24.dp),
             shape = RoundedCornerShape(4.dp)
         ) {
-            Text(
-                text = "${i + 1}",
-                color = if (isSelected) Color.Black else Color.White,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text("שמור", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
         }
     }
 
-
-    Button(
-        onClick = {
-            engine.drumEngine.saveCurrentToPattern(selectedDrumPattern)
-            saveDrumPatterns(prefs, engine)
-            Toast.makeText(
-                context,
-                "מקצב נשמר בחריץ ${selectedDrumPattern + 1}",
-                Toast.LENGTH_SHORT
-            ).show()
-        },
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
-        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-        modifier = Modifier.height(24.dp),
-        shape = RoundedCornerShape(4.dp)
+    // Grid
+    Column(
+        modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = 2.dp),
+        verticalArrangement = Arrangement.SpaceEvenly
     ) {
-        Text(
-            text = "שמור",
-            fontSize = 9.sp,
-            color = Color.White,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
+        val currentActiveStep = remember(gridRefreshTrigger) { engine.drumEngine.currentStep }
 
+        for (t in 0 until 4) {
+            val trackName = engine.drumEngine.trackNames[t]
+            val isSampleLoaded = engine.drumEngine.drumSamples[t] != null
 
-                    // 4 Tracks Step Sequencer Grid
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .padding(vertical = 2.dp),
-                        verticalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        val currentActiveStep = remember(gridRefreshTrigger) { engine.drumEngine.currentStep }
-
-
-                        for (t in 0 until 4) {
-                            val trackName = engine.drumEngine.trackNames[t]
-                            val isSampleLoaded = engine.drumEngine.drumSamples[t] != null
-
-
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().height(16.dp),                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(
-                                            text = "${t + 1}. $trackName",
-                                            color = if (isSampleLoaded) gold else Color.Gray,
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        OutlinedButton(
-                                            onClick = {
-                                                activeLoadingTrack = t
-                                                loadDrumSampleLauncher.launch("audio/*")
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                                            modifier = Modifier.height(18.dp)
-                                        ) {
-                                            Text(if (isSampleLoaded) "החלף" else "טעון סאמפל", fontSize = 7.sp, color = gold)
-                                        }
-                                    }
-                                }
-
-
-                                Spacer(Modifier.height(1.dp))
-
-
-                                // 16 Steps row
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    for (s in 0 until 16) {
-                                        val isActive = engine.drumEngine.grid[t][s]
-                                        val isCurrentStep = (drumPlayingState && s == currentActiveStep)
-
-
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(22.dp)
-                                                .background(
-                                                    color = when {
-                                                        isActive && isCurrentStep -> Color.White
-                                                        isActive -> gold
-                                                        isCurrentStep -> Color(0xFF333333)
-                                                        else -> panelBg2
-                                                    },
-                                                    shape = RoundedCornerShape(3.dp)
-                                                )
-                                                .border(
-                                                    width = 1.dp,
-                                                    color = if (isCurrentStep) gold else Color(0xFF2A2A2A),
-                                                    shape = RoundedCornerShape(3.dp)
-                                                )
-                                                .clickable {
-                                                    engine.drumEngine.grid[t][s] = !isActive
-                                                    gridRefreshTrigger = System.currentTimeMillis()
-                                                }
-                                        )
-                                    }
-                                }
-                            }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "${t + 1}. $trackName",
+                            color = if (isSampleLoaded) gold else Color.Gray,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                activeLoadingTrack = t
+                                loadDrumSampleLauncher.launch("audio/*")
+                            },
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                            modifier = Modifier.height(18.dp)
+                        ) {
+                            Text(if (isSampleLoaded) "החלף" else "טעון סאמפל", fontSize = 7.sp, color = gold)
                         }
+                    }
+                }
+
+                Spacer(Modifier.height(1.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    for (s in 0 until 16) {
+                        val isActive = engine.drumEngine.grid[t][s]
+                        val isCurrentStep = drumPlayingState && s == currentActiveStep
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(22.dp)
+                                .background(
+                                    color = when {
+                                        isActive && isCurrentStep -> Color.White
+                                        isActive -> gold
+                                        isCurrentStep -> Color(0xFF333333)
+                                        else -> panelBg2
+                                    },
+                                    shape = RoundedCornerShape(3.dp)
+                                )
+                                .border(1.dp, if (isCurrentStep) gold else Color(0xFF2A2A2A), RoundedCornerShape(3.dp))
+                                .clickable {
+                                    engine.drumEngine.grid[t][s] = !isActive
+                                    gridRefreshTrigger = System.currentTimeMillis()
+                                }
+                        )
                     }
                 }
             }
         }
+    }
+}                
+
 
 
         Spacer(Modifier.height(4.dp))
+
+
 
 
         // --- MICROTONAL KEYBOARD ---
@@ -2624,6 +2954,8 @@ Row(
 }
 
 
+
+
 @Composable
 fun SynthKnob(
     label: String,
@@ -2638,6 +2970,8 @@ knobSize: Dp = 52.dp,
     var textInput by remember { mutableStateOf(value.toString()) }
     var initialValue by remember { mutableStateOf(value) }
     var totalDragY by remember { mutableStateOf(0f) }
+
+
 
 
     if (showInputDialog) {
@@ -2674,6 +3008,8 @@ knobSize: Dp = 52.dp,
     }
 
 
+
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.padding(2.dp)
@@ -2686,6 +3022,8 @@ knobSize: Dp = 52.dp,
             maxLines = 1
         )
         Spacer(Modifier.height(2.dp))
+
+
 
 
         Box(
@@ -2714,8 +3052,12 @@ knobSize: Dp = 52.dp,
                 val center = center
 
 
+
+
                 drawCircle(color = Color(0xFF1F1F1F), radius = radius, center = center)
                 drawCircle(color = Color(0xFF2A2A2A), radius = radius, center = center, style = Stroke(width = 1.5f))
+
+
 
 
                 val fraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
@@ -2723,9 +3065,13 @@ knobSize: Dp = 52.dp,
                 val angleRadians = Math.toRadians(angleDegrees.toDouble())
 
 
+
+
                 val lineLength = radius * 0.65f
                 val endX = center.x + (lineLength * kotlin.math.cos(angleRadians)).toFloat()
                 val endY = center.y + (lineLength * kotlin.math.sin(angleRadians)).toFloat()
+
+
 
 
                 drawLine(
@@ -2738,7 +3084,11 @@ knobSize: Dp = 52.dp,
         }
 
 
+
+
         Spacer(Modifier.height(1.dp))
+
+
 
 
         Text(
