@@ -1,4 +1,5 @@
-package com.microtonal.synth
+﻿package com.microtonal.synth
+
 
 import android.content.Context
 import android.media.MediaCodec
@@ -13,11 +14,13 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
+
 /**
  * Spartan Drum Machine + 8 Style/Kit system
  * Clean version – no redeclarations
  */
 class DrumEngine(private val sampleRate: Int) {
+
 
     // ------------------------------------------------------------------
     // Core playback state
@@ -27,15 +30,19 @@ class DrumEngine(private val sampleRate: Int) {
     val trackVolumes = FloatArray(4) { 1.0f }
     val trackNames = arrayOf("Kick", "Snare", "Hi-Hat", "Perc")
 
+
     @Volatile var masterVolume: Float = 0.8f
     @Volatile var bpm: Float = 120f
     @Volatile var isPlaying: Boolean = false
 
+
     @Volatile var currentStep: Int = 0
         private set
 
+
     private val playIndices = IntArray(4) { -1 }
     private var stepPhase = 0.0
+
 
     // ------------------------------------------------------------------
     // Pattern
@@ -54,8 +61,10 @@ class DrumEngine(private val sampleRate: Int) {
         )
     }
 
+
     val patterns = Array(8) { DrumPattern() }
     @Volatile var currentPatternIndex: Int = 0
+
 
     // ------------------------------------------------------------------
     // 8 Kits / Styles
@@ -65,8 +74,10 @@ class DrumEngine(private val sampleRate: Int) {
         val patterns: Array<DrumPattern> = Array(8) { DrumPattern() }
     )
 
+
     val kits = Array(8) { i -> DrumKit("סגנון " + (i + 1)) }
     @Volatile var currentKitIndex: Int = 0
+
 
     // ------------------------------------------------------------------
     // Pattern management
@@ -83,6 +94,7 @@ class DrumEngine(private val sampleRate: Int) {
         currentPatternIndex = index
     }
 
+
     fun saveCurrentToPattern(index: Int = currentPatternIndex) {
         if (index !in 0 until 8) return
         val g = Array(4) { t -> grid[t].copyOf() }
@@ -94,11 +106,13 @@ class DrumEngine(private val sampleRate: Int) {
         )
         currentPatternIndex = index
 
+
         // keep current kit in sync
         if (currentKitIndex in 0 until 8) {
             kits[currentKitIndex].patterns[index] = patterns[index].deepCopy()
         }
     }
+
 
     // ------------------------------------------------------------------
     // Kit management
@@ -115,10 +129,12 @@ class DrumEngine(private val sampleRate: Int) {
         loadKitSamples(context, index)
     }
 
+
     fun saveCurrentKit(index: Int = currentKitIndex, context: Context) {
         if (index !in 0 until 8) return
         // first flush current working pattern
         saveCurrentToPattern(currentPatternIndex)
+
 
         val kit = kits[index]
         for (i in 0 until 8) {
@@ -127,6 +143,7 @@ class DrumEngine(private val sampleRate: Int) {
         currentKitIndex = index
         saveKitSamples(context, index)
     }
+
 
     private fun saveKitSamples(context: Context, kitIndex: Int) {
         val dir = File(context.filesDir, "drum_kits")
@@ -151,6 +168,7 @@ class DrumEngine(private val sampleRate: Int) {
             }
         }
     }
+
 
     private fun loadKitSamples(context: Context, kitIndex: Int): Boolean {
         val dir = File(context.filesDir, "drum_kits")
@@ -182,6 +200,7 @@ class DrumEngine(private val sampleRate: Int) {
         return anyLoaded
     }
 
+
     // ------------------------------------------------------------------
     // Sample management
     // ------------------------------------------------------------------
@@ -192,14 +211,17 @@ class DrumEngine(private val sampleRate: Int) {
         }
     }
 
+
     // ------------------------------------------------------------------
     // Real-time processing
     // ------------------------------------------------------------------
     fun processNextSample(): Float {
         if (!isPlaying) return 0f
 
+
         val stepsPerSecond = (bpm / 60.0) * 4.0
         stepPhase += stepsPerSecond / sampleRate
+
 
         if (stepPhase >= 1.0) {
             stepPhase -= 1.0
@@ -210,6 +232,7 @@ class DrumEngine(private val sampleRate: Int) {
                 }
             }
         }
+
 
         var mixed = 0f
         for (t in 0 until 4) {
@@ -227,6 +250,7 @@ class DrumEngine(private val sampleRate: Int) {
         return (mixed * masterVolume).coerceIn(-1f, 1f)
     }
 
+
     // ------------------------------------------------------------------
     // Load sample from URI
     // ------------------------------------------------------------------
@@ -243,6 +267,7 @@ class DrumEngine(private val sampleRate: Int) {
                 false
             }
         }
+
 
     private fun decodeAudio(context: Context, uri: Uri): FloatArray? {
         val extractor = MediaExtractor()
@@ -263,18 +288,22 @@ class DrumEngine(private val sampleRate: Int) {
             if (trackIndex < 0 || format == null) return null
             extractor.selectTrack(trackIndex)
 
+
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
             val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (_: Exception) { 1 }
             val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (_: Exception) { 44100 }
+
 
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
 
+
             var raw = FloatArray(1024 * 512)
             var rawSize = 0
             val info = MediaCodec.BufferInfo()
             var isEOS = false
+
 
             while (!isEOS) {
                 val inIndex = codec.dequeueInputBuffer(10000)
@@ -291,6 +320,7 @@ class DrumEngine(private val sampleRate: Int) {
                         }
                     }
                 }
+
 
                 var outIndex = codec.dequeueOutputBuffer(info, 10000)
                 while (outIndex >= 0) {
@@ -319,7 +349,9 @@ class DrumEngine(private val sampleRate: Int) {
                 }
             }
 
+
             if (rawSize <= 0) return null
+
 
             val ratio = fileSampleRate.toDouble() / sampleRate
             val targetSize = (rawSize / ratio).toInt().coerceAtLeast(1)
@@ -344,6 +376,7 @@ class DrumEngine(private val sampleRate: Int) {
         }
     }
 
+
     // ------------------------------------------------------------------
     // Default kit (raw resources)
     // ------------------------------------------------------------------
@@ -364,6 +397,7 @@ class DrumEngine(private val sampleRate: Int) {
         success
     }
 
+
     private fun decodeAudioFromFd(fd: java.io.FileDescriptor, offset: Long, length: Long): FloatArray? {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -383,18 +417,22 @@ class DrumEngine(private val sampleRate: Int) {
             if (trackIndex < 0 || format == null) return null
             extractor.selectTrack(trackIndex)
 
+
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
             val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (_: Exception) { 1 }
             val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (_: Exception) { 44100 }
+
 
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
 
+
             var raw = FloatArray(1024 * 256)
             var rawSize = 0
             val info = MediaCodec.BufferInfo()
             var isEOS = false
+
 
             while (!isEOS) {
                 val inIndex = codec.dequeueInputBuffer(10000)
@@ -411,6 +449,7 @@ class DrumEngine(private val sampleRate: Int) {
                         }
                     }
                 }
+
 
                 var outIndex = codec.dequeueOutputBuffer(info, 10000)
                 while (outIndex >= 0) {
@@ -439,7 +478,9 @@ class DrumEngine(private val sampleRate: Int) {
                 }
             }
 
+
             if (rawSize <= 0) return null
+
 
             val ratio = fileSampleRate.toDouble() / sampleRate
             val targetSize = (rawSize / ratio).toInt().coerceAtLeast(1)
