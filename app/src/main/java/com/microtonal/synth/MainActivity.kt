@@ -2763,238 +2763,235 @@ var tempKitName by remember { mutableStateOf("") }
 
 
                 // --- DRUM TAB ---
-"DRUM" -> Column(
-    modifier = Modifier.fillMaxSize(),
-    verticalArrangement = Arrangement.SpaceBetween,
-    horizontalAlignment = Alignment.CenterHorizontally
-) {
-    LaunchedEffect(Unit) {
-        loadAllDrumKits(prefs, engine)
-        val curKit = engine.drumEngine.currentKitIndex
-        engine.drumEngine.loadKit(curKit, context)
+                "DRUM" -> Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    LaunchedEffect(Unit) {
+                        loadAllDrumKits(prefs, engine)
+                        val curKit = engine.drumEngine.currentKitIndex
+                        engine.drumEngine.loadKit(curKit, context)
 
-        val hasSamples = engine.drumEngine.drumSamples.any { it != null }
-        if (!hasSamples) {
-            val ok = engine.drumEngine.loadDefaultKit(context)
-            if (ok) {
-                defaultKitLoaded = true
-                useDefaultKit = true
-            }
-        } else {
-            useDefaultKit = false
-            defaultKitLoaded = true
-        }
-
-        selectedDrumPattern = engine.drumEngine.currentPatternIndex
-        drumBpmState = engine.drumEngine.bpm
-        drumVolState = engine.drumEngine.masterVolume
-        for (t in 0 until 4) {
-            trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
-        }
-        gridRefreshTrigger = System.currentTimeMillis()
-    }
-
-    // Top controls
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text("DRUM MACHINE", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Button(
-                onClick = {
-                    drumPlayingState = !drumPlayingState
-                    engine.drumEngine.isPlaying = drumPlayingState
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = if (drumPlayingState) Color(0xFF00C853) else Color(0xFFFF5252)),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier.height(26.dp)
-            ) {
-                Text(if (drumPlayingState) "עצור תופים" else "נגן תופים", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
-            }
-
-            Button(
-                onClick = {
-                    if (useDefaultKit) {
-                        for (i in 0 until 4) engine.drumEngine.drumSamples[i] = null
-                        useDefaultKit = false
-                    } else {
-                        scope.launch {
+                        val hasSamples = engine.drumEngine.drumSamples.any { it != null }
+                        if (!hasSamples) {
                             val ok = engine.drumEngine.loadDefaultKit(context)
                             if (ok) {
+                                defaultKitLoaded = true
                                 useDefaultKit = true
-                                Toast.makeText(context, "ערכת ברירת מחדל נטענה", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "שגיאה בטעינת הערכה", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            useDefaultKit = false
+                            defaultKitLoaded = true
+                        }
+
+                        selectedDrumPattern = engine.drumEngine.currentPatternIndex
+                        drumBpmState = engine.drumEngine.bpm
+                        drumVolState = engine.drumEngine.masterVolume
+                        for (t in 0 until 4) {
+                            trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
+                        }
+                        gridRefreshTrigger = System.currentTimeMillis()
+                    }
+
+                    // Top controls
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("DRUM MACHINE", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Button(
+                                onClick = {
+                                    drumPlayingState = !drumPlayingState
+                                    engine.drumEngine.isPlaying = drumPlayingState
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = if (drumPlayingState) Color(0xFF00C853) else Color(0xFFFF5252)),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text(if (drumPlayingState) "עצור תופים" else "נגן תופים", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    if (useDefaultKit) {
+                                        for (i in 0 until 4) engine.drumEngine.drumSamples[i] = null
+                                        useDefaultKit = false
+                                    } else {
+                                        scope.launch {
+                                            val ok = engine.drumEngine.loadDefaultKit(context)
+                                            if (ok) {
+                                                useDefaultKit = true
+                                                Toast.makeText(context, "ערכת ברירת מחדל נטענה", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "שגיאה בטעינת הערכה", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = if (useDefaultKit) gold else panelBg2),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text(
+                                    if (useDefaultKit) "ערכת ברירת מחדל" else "טעינה ידנית",
+                                    fontSize = 9.sp,
+                                    color = if (useDefaultKit) Color.Black else gold,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Button(
+                                onClick = { showStyleDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text("סגנון", fontSize = 9.sp, color = gold, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = if (useDefaultKit) gold else panelBg2),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier.height(26.dp)
-            ) {
-                Text(
-                    if (useDefaultKit) "ערכת ברירת מחדל" else "טעינה ידנית",
-                    fontSize = 9.sp,
-                    color = if (useDefaultKit) Color.Black else gold,
-                    fontWeight = FontWeight.Bold
-                )
-            }
 
-            Button(
-                onClick = { showStyleDialog = true },
-                colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier.height(26.dp)
-            ) {
-                Text("סגנון", fontSize = 9.sp, color = gold, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
+                    // Knobs Master + BPM
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                        SynthKnob("Drum Vol", "${(drumVolState * 100).toInt()}%", drumVolState, 0f..1f, gold, 44.dp) {
+                            drumVolState = it
+                            engine.drumEngine.masterVolume = it
+                        }
+                        SynthKnob("BPM", "${drumBpmState.toInt()}", drumBpmState, 60f..200f, gold, 44.dp) {
+                            drumBpmState = it
+                            engine.drumEngine.bpm = it
+                        }
+                    }
 
-    // Knobs Master + BPM
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-        SynthKnob("Drum Vol", "${(drumVolState * 100).toInt()}%", drumVolState, 0f..1f, gold, 44.dp) {
-            drumVolState = it
-            engine.drumEngine.masterVolume = it
-        }
-        SynthKnob("BPM", "${drumBpmState.toInt()}", drumBpmState, 60f..200f, gold, 44.dp) {
-            drumBpmState = it
-            engine.drumEngine.bpm = it
-        }
-    }
+                    // Track volumes
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                        for (t in 0 until 4) {
+                            val name = engine.drumEngine.trackNames[t].take(4)
+                            SynthKnob(name, "${(trackVolStates[t].value * 100).toInt()}%", trackVolStates[t].value, 0f..1f, gold, 40.dp) {
+                                trackVolStates[t].value = it
+                                engine.drumEngine.trackVolumes[t] = it
+                            }
+                        }
+                    }
 
-    // Track volumes
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-        for (t in 0 until 4) {
-            val name = engine.drumEngine.trackNames[t].take(4)
-            SynthKnob(name, "${(trackVolStates[t].value * 100).toInt()}%", trackVolStates[t].value, 0f..1f, gold, 40.dp) {
-                trackVolStates[t].value = it
-                engine.drumEngine.trackVolumes[t] = it
-            }
-        }
-    }
+                    // 8 Pattern slots + Save
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        for (i in 0 until 8) {
+                            val isSelected = selectedDrumPattern == i
+                            Button(
+                                onClick = {
+                                    engine.drumEngine.loadPattern(i)
+                                    selectedDrumPattern = i
+                                    drumBpmState = engine.drumEngine.bpm
+                                    drumVolState = engine.drumEngine.masterVolume
+                                    for (t in 0 until 4) trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
+                                    gridRefreshTrigger = System.currentTimeMillis()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = if (isSelected) gold else panelBg2),
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier.weight(1f).height(24.dp),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text("${i + 1}", color = if (isSelected) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
 
-    // 8 Pattern slots + Save
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        for (i in 0 until 8) {
-            val isSelected = selectedDrumPattern == i
-            Button(
-                onClick = {
-                    engine.drumEngine.loadPattern(i)
-                    selectedDrumPattern = i
-                    drumBpmState = engine.drumEngine.bpm
-                    drumVolState = engine.drumEngine.masterVolume
-                    for (t in 0 until 4) trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
-                    gridRefreshTrigger = System.currentTimeMillis()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = if (isSelected) gold else panelBg2),
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.weight(1f).height(24.dp),
-                shape = RoundedCornerShape(4.dp)
-            ) {
-                Text("${i + 1}", color = if (isSelected) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        Button(
-            onClick = {
-                engine.drumEngine.saveCurrentToPattern(selectedDrumPattern)
-                saveAllDrumKits(prefs, engine)
-                Toast.makeText(context, "מקצב נשמר בחריץ ${selectedDrumPattern + 1}", Toast.LENGTH_SHORT).show()
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
-            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-            modifier = Modifier.height(24.dp),
-            shape = RoundedCornerShape(4.dp)
-        ) {
-            Text("שמור", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
-        }
-    }
-
-    // Grid
-    Column(
-        modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = 2.dp),
-        verticalArrangement = Arrangement.SpaceEvenly
-    ) {
-        val currentActiveStep = remember(gridRefreshTrigger) { engine.drumEngine.currentStep }
-
-        for (t in 0 until 4) {
-            val trackName = engine.drumEngine.trackNames[t]
-            val isSampleLoaded = engine.drumEngine.drumSamples[t] != null
-
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().height(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = "${t + 1}. $trackName",
-                            color = if (isSampleLoaded) gold else Color.Gray,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        OutlinedButton(
+                        Button(
                             onClick = {
-                                activeLoadingTrack = t
-                                loadDrumSampleLauncher.launch("audio/*")
+                                engine.drumEngine.saveCurrentToPattern(selectedDrumPattern)
+                                saveAllDrumKits(prefs, engine)
+                                Toast.makeText(context, "מקצב נשמר בחריץ ${selectedDrumPattern + 1}", Toast.LENGTH_SHORT).show()
                             },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                            modifier = Modifier.height(18.dp)
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(24.dp),
+                            shape = RoundedCornerShape(4.dp)
                         ) {
-                            Text(if (isSampleLoaded) "החלף" else "טעון סאמפל", fontSize = 7.sp, color = gold)
+                            Text("שמור", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Grid
+                    Column(
+                        modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = 2.dp),
+                        verticalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        val currentActiveStep = remember(gridRefreshTrigger) { engine.drumEngine.currentStep }
+
+                        for (t in 0 until 4) {
+                            val trackName = engine.drumEngine.trackNames[t]
+                            val isSampleLoaded = engine.drumEngine.drumSamples[t] != null
+
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().height(16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = "${t + 1}. $trackName",
+                                            color = if (isSampleLoaded) gold else Color.Gray,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        OutlinedButton(
+                                            onClick = {
+                                                activeLoadingTrack = t
+                                                loadDrumSampleLauncher.launch("audio/*")
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                            modifier = Modifier.height(18.dp)
+                                        ) {
+                                            Text(if (isSampleLoaded) "החלף" else "טעון סאמפל", fontSize = 7.sp, color = gold)
+                                        }
+                                    }
+                                }
+
+                                Spacer(Modifier.height(1.dp))
+
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    for (s in 0 until 16) {
+                                        val isActive = engine.drumEngine.grid[t][s]
+                                        val isCurrentStep = drumPlayingState && s == currentActiveStep
+
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(22.dp)
+                                                .background(
+                                                    color = when {
+                                                        isActive && isCurrentStep -> Color.White
+                                                        isActive -> gold
+                                                        isCurrentStep -> Color(0xFF333333)
+                                                        else -> panelBg2
+                                                    },
+                                                    shape = RoundedCornerShape(3.dp)
+                                                )
+                                                .border(1.dp, if (isCurrentStep) gold else Color(0xFF2A2A2A), RoundedCornerShape(3.dp))
+                                                .clickable {
+                                                    engine.drumEngine.grid[t][s] = !isActive
+                                                    gridRefreshTrigger = System.currentTimeMillis()
+                                                }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-
-                Spacer(Modifier.height(1.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    for (s in 0 until 16) {
-                        val isActive = engine.drumEngine.grid[t][s]
-                        val isCurrentStep = drumPlayingState && s == currentActiveStep
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(22.dp)
-                                .background(
-                                    color = when {
-                                        isActive && isCurrentStep -> Color.White
-                                        isActive -> gold
-                                        isCurrentStep -> Color(0xFF333333)
-                                        else -> panelBg2
-                                    },
-                                    shape = RoundedCornerShape(3.dp)
-                                )
-                                .border(1.dp, if (isCurrentStep) gold else Color(0xFF2A2A2A), RoundedCornerShape(3.dp))
-                                .clickable {
-                                    engine.drumEngine.grid[t][s] = !isActive
-                                    gridRefreshTrigger = System.currentTimeMillis()
-                                }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}                
-
-
+            } // end of when(selectedTab)
+        } // end of Box
 
         Spacer(Modifier.height(4.dp))
-
-
-
 
         // --- MICROTONAL KEYBOARD ---
         Row(
@@ -3046,9 +3043,8 @@ var tempKitName by remember { mutableStateOf("") }
                 }
             }
         }
-    }
-}
-
+    } 
+} 
 
 
 
