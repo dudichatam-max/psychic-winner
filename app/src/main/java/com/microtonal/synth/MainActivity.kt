@@ -24,6 +24,8 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -2025,8 +2027,7 @@ var tempKitName by remember { mutableStateOf("") }
                 Button(onClick = {
                     if (editingKitIndex in 0 until 8) {
                         engine.drumEngine.kits[editingKitIndex].name = tempKitName
-                        prefs.edit().putString("drum_kit_${editingKitIndex}_name", tempKitName).apply()
-                    }
+                        prefs.edit().putString("drum_kit" + editingKitIndex + "_name", tempKitName).apply()                    }
                     editingKitIndex = -1
                     showStyleDialog = true // חזרה לדיאלוג הראשי של הסגנונות
                 }) { 
