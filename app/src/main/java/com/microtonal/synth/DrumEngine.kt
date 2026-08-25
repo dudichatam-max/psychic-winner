@@ -7,6 +7,7 @@ import android.media.MediaFormat
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.microtonal.synth.R
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -14,9 +15,13 @@ import java.nio.ByteOrder
 
 /**
  * Spartan Drum Machine + 8 Style/Kit system
+ * Clean version – no redeclarations
  */
 class DrumEngine(private val sampleRate: Int) {
 
+    // ------------------------------------------------------------------
+    // Core playback state
+    // ------------------------------------------------------------------
     val drumSamples = arrayOfNulls<FloatArray>(4)
     val grid = Array(4) { BooleanArray(16) }
     val trackVolumes = FloatArray(4) { 1.0f }
@@ -63,6 +68,9 @@ class DrumEngine(private val sampleRate: Int) {
     val kits = Array(8) { i -> DrumKit("סגנון ${i + 1}") }
     @Volatile var currentKitIndex: Int = 0
 
+    // ------------------------------------------------------------------
+    // Pattern management
+    // ------------------------------------------------------------------
     fun loadPattern(index: Int) {
         if (index !in 0 until 8) return
         val p = patterns[index]
@@ -86,12 +94,15 @@ class DrumEngine(private val sampleRate: Int) {
         )
         currentPatternIndex = index
 
-        // sync to current kit
+        // keep current kit in sync
         if (currentKitIndex in 0 until 8) {
             kits[currentKitIndex].patterns[index] = patterns[index].deepCopy()
         }
     }
 
+    // ------------------------------------------------------------------
+    // Kit management
+    // ------------------------------------------------------------------
     fun loadKit(index: Int, context: Context) {
         if (index !in 0 until 8) return
         currentKitIndex = index
@@ -104,62 +115,62 @@ class DrumEngine(private val sampleRate: Int) {
         loadKitSamples(context, index)
     }
 
-    // פונקציית שמירה מאוחדת ומסודרת (ללא כפילויות)
     fun saveCurrentKit(index: Int = currentKitIndex, context: Context) {
         if (index !in 0 until 8) return
+        // first flush current working pattern
+        saveCurrentToPattern(currentPatternIndex)
+
         val kit = kits[index]
         for (i in 0 until 8) {
             kit.patterns[i] = patterns[i].deepCopy()
         }
         currentKitIndex = index
-        kit.name = kits[index].name
+        saveKitSamples(context, index)
+    }
 
-        val prefs = context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE)
-        val editor = prefs.edit()
-        editor.putString("drum_kit_${index}_name", kit.name)
-
-        // שמירת סאמפלי PCM לקבצים מקומיים
+    private fun saveKitSamples(context: Context, kitIndex: Int) {
+        val dir = File(context.filesDir, "drum_kits")
+        if (!dir.exists()) dir.mkdirs()
         for (t in 0 until 4) {
             val sample = drumSamples[t]
+            val file = File(dir, "kit\( {kitIndex}_t \){t}.pcm")
             if (sample != null && sample.isNotEmpty()) {
-                val file = File(context.filesDir, "drum_kit_${index}_track_$t.pcm")
                 try {
-                    val byteBuffer = ByteBuffer.allocate(sample.size * 4).order(ByteOrder.LITTLE_ENDIAN)
-                    for (f in sample) {
-                        byteBuffer.putFloat(f)
+                    FileOutputStream(file).use { fos ->
+                        val bb = ByteBuffer.allocate(4 + sample.size * 4)
+                            .order(ByteOrder.LITTLE_ENDIAN)
+                        bb.putInt(sample.size)
+                        for (f in sample) bb.putFloat(f)
+                        fos.write(bb.array())
                     }
-                    file.writeBytes(byteBuffer.array())
-                    editor.putString("drum_kit_${index}_track_${t}_path", file.absolutePath)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
             } else {
-                editor.remove("drum_kit_${index}_track_${t}_path")
+                if (file.exists()) file.delete()
             }
         }
-        editor.apply()
     }
 
-    fun loadKitSamples(context: Context, index: Int) {
-        val prefs = context.getSharedPreferences("synth_presets", Context.MODE_PRIVATE)
+    private fun loadKitSamples(context: Context, kitIndex: Int): Boolean {
+        val dir = File(context.filesDir, "drum_kits")
+        var anyLoaded = false
         for (t in 0 until 4) {
-            val path = prefs.getString("drum_kit_${index}_track_${t}_path", null)
-            if (path != null) {
-                val file = File(path)
-                if (file.exists()) {
-                    try {
-                        val bytes = file.readBytes()
-                        val floatBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
-                        val floatArray = FloatArray(floatBuffer.remaining())
-                        floatBuffer.get(floatArray)
-                        drumSamples[t] = floatArray
-                        playIndices[t] = -1
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        drumSamples[t] = null
-                        playIndices[t] = -1
+            val file = File(dir, "kit\( {kitIndex}_t \){t}.pcm")
+            if (file.exists()) {
+                try {
+                    val bytes = file.readBytes()
+                    if (bytes.size < 4) continue
+                    val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                    val size = bb.int
+                    if (size > 0 && size * 4 + 4 == bytes.size) {
+                        val floats = FloatArray(size)
+                        for (i in 0 until size) floats[i] = bb.float
+                        setSample(t, floats)
+                        anyLoaded = true
                     }
-                } else {
+                } catch (e: Exception) {
+                    e.printStackTrace()
                     drumSamples[t] = null
                     playIndices[t] = -1
                 }
@@ -168,8 +179,12 @@ class DrumEngine(private val sampleRate: Int) {
                 playIndices[t] = -1
             }
         }
+        return anyLoaded
     }
 
+    // ------------------------------------------------------------------
+    // Sample management
+    // ------------------------------------------------------------------
     fun setSample(trackIndex: Int, pcm: FloatArray) {
         if (trackIndex in 0 until 4) {
             drumSamples[trackIndex] = pcm
@@ -177,6 +192,9 @@ class DrumEngine(private val sampleRate: Int) {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Real-time processing
+    // ------------------------------------------------------------------
     fun processNextSample(): Float {
         if (!isPlaying) return 0f
 
@@ -209,6 +227,9 @@ class DrumEngine(private val sampleRate: Int) {
         return (mixed * masterVolume).coerceIn(-1f, 1f)
     }
 
+    // ------------------------------------------------------------------
+    // Load sample from URI
+    // ------------------------------------------------------------------
     suspend fun loadSample(context: Context, trackIndex: Int, uri: Uri): Boolean =
         withContext(Dispatchers.IO) {
             try {
@@ -323,6 +344,9 @@ class DrumEngine(private val sampleRate: Int) {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Default kit (raw resources)
+    // ------------------------------------------------------------------
     suspend fun loadDefaultKit(context: Context): Boolean = withContext(Dispatchers.IO) {
         val resourceIds = intArrayOf(R.raw.kick, R.raw.snare, R.raw.high, R.raw.perc)
         var success = true
