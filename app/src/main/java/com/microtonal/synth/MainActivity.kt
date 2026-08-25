@@ -1896,6 +1896,154 @@ var tempKitName by remember { mutableStateOf("") }
         )
     }
 
+   // --- דיאלוג ניהול 8 סגנונות התופים (ShowStyleDialog) ---
+    if (showStyleDialog) {
+        AlertDialog(
+            onDismissRequest = { showStyleDialog = false },
+            title = { 
+                Text(
+                    "ניהול סגנונות תופים (8 סגנונות)", 
+                    color = gold, 
+                    fontSize = 14.sp, 
+                    fontWeight = FontWeight.Bold
+                ) 
+            },
+            text = {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(320.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(8) { kitIdx ->
+                        val kit = engine.drumEngine.kits[kitIdx]
+                        val isCurrentKit = engine.drumEngine.currentKitIndex == kitIdx
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isCurrentKit) gold.copy(alpha = 0.2f) else panelBg2, 
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .border(
+                                    1.dp, 
+                                    if (isCurrentKit) gold else Color(0xFF2A2A2A), 
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .padding(6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${kitIdx + 1}. ${kit.name}",
+                                color = if (isCurrentKit) gold else Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = if (isCurrentKit) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f)
+                            )
+                            
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                // כפתור טעינת סגנון
+                                Button(
+                                    onClick = {
+                                        engine.drumEngine.loadKit(kitIdx, context)
+                                        selectedDrumPattern = engine.drumEngine.currentPatternIndex
+                                        drumBpmState = engine.drumEngine.bpm
+                                        drumVolState = engine.drumEngine.masterVolume
+                                        for (t in 0 until 4) {
+                                            trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
+                                        }
+                                        gridRefreshTrigger = System.currentTimeMillis()
+                                        Toast.makeText(context, "סגנון ${kit.name} נטען", Toast.LENGTH_SHORT).show()
+                                        showStyleDialog = false
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = gold),
+                                    contentPadding = PaddingValues(4.dp),
+                                    modifier = Modifier.height(24.dp)
+                                ) { 
+                                    Text("טען", fontSize = 9.sp, color = Color.Black, fontWeight = FontWeight.Bold) 
+                                }
+
+                                // כפתור שמירת סגנון (כולל סאמפלי PCM)
+                                Button(
+                                    onClick = {
+                                        engine.drumEngine.saveCurrentKit(kitIdx, context)
+                                        saveAllDrumKits(prefs, engine)
+                                        Toast.makeText(context, "סגנון ${kit.name} נשמר בהצלחה", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF)),
+                                    contentPadding = PaddingValues(4.dp),
+                                    modifier = Modifier.height(24.dp)
+                                ) { 
+                                    Text("שמור", fontSize = 9.sp, color = Color.White) 
+                                }
+
+                                // כפתור עריכת שם הסגנון
+                                Button(
+                                    onClick = {
+                                        editingKitIndex = kitIdx
+                                        tempKitName = kit.name
+                                        showStyleDialog = false
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF555555)),
+                                    contentPadding = PaddingValues(4.dp),
+                                    modifier = Modifier.height(24.dp)
+                                ) { 
+                                    Text("ערוך", fontSize = 9.sp, color = Color.White) 
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showStyleDialog = false }) { 
+                    Text("סגור") 
+                }
+            },
+            containerColor = panelBg2
+        )
+    }
+
+    // --- דיאלוג עריכת שם לסגנון הנבחר ---
+    if (editingKitIndex != -1) {
+        AlertDialog(
+            onDismissRequest = { editingKitIndex = -1 },
+            title = { 
+                Text("ערוך שם סגנון", color = gold, fontSize = 14.sp, fontWeight = FontWeight.Bold) 
+            },
+            text = {
+                OutlinedTextField(
+                    value = tempKitName,
+                    onValueChange = { tempKitName = it },
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 12.sp)
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (editingKitIndex in 0 until 8) {
+                        engine.drumEngine.kits[editingKitIndex].name = tempKitName
+                        prefs.edit().putString("drum_kit_${editingKitIndex}_name", tempKitName).apply()
+                    }
+                    editingKitIndex = -1
+                    showStyleDialog = true // חזרה לדיאלוג הראשי של הסגנונות
+                }) { 
+                    Text("שמור") 
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { 
+                    editingKitIndex = -1
+                    showStyleDialog = true 
+                }) { 
+                    Text("ביטול") 
+                }
+            },
+            containerColor = panelBg2
+        )
+    }
 
 
 
