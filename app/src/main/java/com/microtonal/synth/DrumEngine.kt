@@ -1,6 +1,5 @@
-﻿package com.microtonal.synth
+package com.microtonal.synth
 
- 
 import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaExtractor
@@ -9,52 +8,37 @@ import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.microtonal.synth.R
-
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
- * Spartan Drum Machine – independent from the live synth / DSP.
- * 4 sample tracks × 16-step sequencer + master BPM / volume.
- * Mixed into the main AudioTrack so WAV recording captures the drums.
- *
- * + 8 Pattern slots (grid + bpm + masterVol + trackVolumes)
+ * Spartan Drum Machine + 8 Style/Kit system
+ * Clean version – no redeclarations
  */
 class DrumEngine(private val sampleRate: Int) {
 
-
-    // 4 sample buffers
+    // ------------------------------------------------------------------
+    // Core playback state
+    // ------------------------------------------------------------------
     val drumSamples = arrayOfNulls<FloatArray>(4)
-
-
-    // 4 × 16 step grid (working copy)
     val grid = Array(4) { BooleanArray(16) }
-
-
-    // Per-track volumes
     val trackVolumes = FloatArray(4) { 1.0f }
-
-
-    // Display names
     val trackNames = arrayOf("Kick", "Snare", "Hi-Hat", "Perc")
 
-
-    // Global controls
     @Volatile var masterVolume: Float = 0.8f
     @Volatile var bpm: Float = 120f
-    @Volatile var swing: Float = 0f  // 0 = straight, 1 = max swing on off-beats
     @Volatile var isPlaying: Boolean = false
 
-
-    // Current step (readable by UI for highlighting)
     @Volatile var currentStep: Int = 0
         private set
-
 
     private val playIndices = IntArray(4) { -1 }
     private var stepPhase = 0.0
 
-
     // ------------------------------------------------------------------
-    // 8 Pattern slots
+    // Pattern
     // ------------------------------------------------------------------
     data class DrumPattern(
         val grid: Array<BooleanArray> = Array(4) { BooleanArray(16) },
@@ -70,13 +54,23 @@ class DrumEngine(private val sampleRate: Int) {
         )
     }
 
-
     val patterns = Array(8) { DrumPattern() }
-
-
     @Volatile var currentPatternIndex: Int = 0
 
+    // ------------------------------------------------------------------
+    // 8 Kits / Styles
+    // ------------------------------------------------------------------
+    data class DrumKit(
+        var name: String = "סגנון 1",
+        val patterns: Array<DrumPattern> = Array(8) { DrumPattern() }
+    )
 
+    val kits = Array(8) { i -> DrumKit("סגנון " + (i + 1)) }
+    @Volatile var currentKitIndex: Int = 0
+
+    // ------------------------------------------------------------------
+    // Pattern management
+    // ------------------------------------------------------------------
     fun loadPattern(index: Int) {
         if (index !in 0 until 8) return
         val p = patterns[index]
@@ -87,9 +81,7 @@ class DrumEngine(private val sampleRate: Int) {
         bpm = p.bpm
         masterVolume = p.masterVolume
         currentPatternIndex = index
-        // stepPhase + currentStep ממשיכים לרוץ → מעבר חלק
     }
-
 
     fun saveCurrentToPattern(index: Int = currentPatternIndex) {
         if (index !in 0 until 8) return
@@ -101,125 +93,123 @@ class DrumEngine(private val sampleRate: Int) {
             trackVolumes = trackVolumes.copyOf()
         )
         currentPatternIndex = index
-        // Keep current kit in sync so PresetManager sees the latest patterns
+
+        // keep current kit in sync
         if (currentKitIndex in 0 until 8) {
             kits[currentKitIndex].patterns[index] = patterns[index].deepCopy()
         }
     }
 
-
     // ------------------------------------------------------------------
-    // 8 Drum Kits (styles) – each kit holds 8 patterns + optional sample files
+    // Kit management
     // ------------------------------------------------------------------
-    class DrumKit(
-        var name: String = "סגנון",
-        val patterns: Array<DrumPattern> = Array(8) { DrumPattern() }
-    )
-
-    val kits = Array(8) { i -> DrumKit(name = "סגנון ${i + 1}") }
-
-    @Volatile var currentKitIndex: Int = 0
-
-    /**
-     * Load a kit: switch active kit, copy its patterns into the working
-     * patterns array, load the current pattern, and restore samples from disk.
-     */
     fun loadKit(index: Int, context: Context) {
         if (index !in 0 until 8) return
         currentKitIndex = index
+        val kit = kits[index]
         for (i in 0 until 8) {
-            patterns[i] = kits[index].patterns[i].deepCopy()
+            patterns[i] = kit.patterns[i].deepCopy()
         }
-        val patIdx = currentPatternIndex.coerceIn(0, 7)
-        loadPattern(patIdx)
-        loadKitSamples(index, context)
+        currentPatternIndex = 0
+        loadPattern(0)
+        loadKitSamples(context, index)
     }
 
-    /**
-     * Save the current working state (all 8 patterns + samples) into a kit slot.
-     */
-    fun saveCurrentKit(index: Int, context: Context) {
+    fun saveCurrentKit(index: Int = currentKitIndex, context: Context) {
         if (index !in 0 until 8) return
-        // Flush current grid into the active pattern first
+        // first flush current working pattern
         saveCurrentToPattern(currentPatternIndex)
+
+        val kit = kits[index]
         for (i in 0 until 8) {
-            kits[index].patterns[i] = patterns[i].deepCopy()
+            kit.patterns[i] = patterns[i].deepCopy()
         }
         currentKitIndex = index
-        saveKitSamples(index, context)
+        saveKitSamples(context, index)
     }
 
-    private fun kitSampleFile(context: Context, kitIndex: Int, track: Int): java.io.File {
-        return java.io.File(context.filesDir, "drum_kit${kitIndex}_t${track}.pcm")
-    }
-
-    private fun saveKitSamples(kitIndex: Int, context: Context) {
+    private fun saveKitSamples(context: Context, kitIndex: Int) {
+        val dir = File(context.filesDir, "drum_kits")
+        if (!dir.exists()) dir.mkdirs()
         for (t in 0 until 4) {
-            val sample = drumSamples[t] ?: continue
-            try {
-                val file = kitSampleFile(context, kitIndex, t)
-                java.io.DataOutputStream(java.io.BufferedOutputStream(java.io.FileOutputStream(file))).use { out ->
-                    out.writeInt(sample.size)
-                    for (v in sample) out.writeFloat(v)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
-    private fun loadKitSamples(kitIndex: Int, context: Context) {
-        for (t in 0 until 4) {
-            val file = kitSampleFile(context, kitIndex, t)
-            if (!file.exists()) continue
-            try {
-                java.io.DataInputStream(java.io.BufferedInputStream(java.io.FileInputStream(file))).use { inp ->
-                    val size = inp.readInt()
-                    if (size in 1..sampleRate * 30) { // sanity: max ~30s
-                        val data = FloatArray(size)
-                        for (i in 0 until size) data[i] = inp.readFloat()
-                        setSample(t, data)
+            val sample = drumSamples[t]
+            val file = File(dir, "kit" + kitIndex + "_t" + t + ".pcm")
+            if (sample != null && sample.isNotEmpty()) {
+                try {
+                    FileOutputStream(file).use { fos ->
+                        val bb = ByteBuffer.allocate(4 + sample.size * 4)
+                            .order(ByteOrder.LITTLE_ENDIAN)
+                        bb.putInt(sample.size)
+                        for (f in sample) bb.putFloat(f)
+                        fos.write(bb.array())
                     }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } else {
+                if (file.exists()) file.delete()
             }
         }
     }
 
+    private fun loadKitSamples(context: Context, kitIndex: Int): Boolean {
+        val dir = File(context.filesDir, "drum_kits")
+        var anyLoaded = false
+        for (t in 0 until 4) {
+            val file = File(dir, "kit" + kitIndex + "_t" + t + ".pcm")
+            if (file.exists()) {
+                try {
+                    val bytes = file.readBytes()
+                    if (bytes.size < 4) continue
+                    val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                    val size = bb.int
+                    if (size > 0 && size * 4 + 4 == bytes.size) {
+                        val floats = FloatArray(size)
+                        for (i in 0 until size) floats[i] = bb.float
+                        setSample(t, floats)
+                        anyLoaded = true
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    drumSamples[t] = null
+                    playIndices[t] = -1
+                }
+            } else {
+                drumSamples[t] = null
+                playIndices[t] = -1
+            }
+        }
+        return anyLoaded
+    }
 
     // ------------------------------------------------------------------
-    // Real-time sample generation (called from the audio thread)
+    // Sample management
+    // ------------------------------------------------------------------
+    fun setSample(trackIndex: Int, pcm: FloatArray) {
+        if (trackIndex in 0 until 4) {
+            drumSamples[trackIndex] = pcm
+            playIndices[trackIndex] = -1
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Real-time processing
     // ------------------------------------------------------------------
     fun processNextSample(): Float {
         if (!isPlaying) return 0f
 
-
-        // Smooth BPM changes – no clicks when turning the knob live
-        val stepsPerSecond = (bpm / 60.0) * 4.0 // 16th notes
+        val stepsPerSecond = (bpm / 60.0) * 4.0
         stepPhase += stepsPerSecond / sampleRate
 
-
-        // Swing: delay odd (off-beat) steps; even+odd thresholds average to 2.0 so tempo stays stable
-        val swingAmt = swing.coerceIn(0f, 1f).toDouble()
-        val threshold = if (currentStep % 2 == 0) {
-            1.0 - swingAmt * 0.32
-        } else {
-            1.0 + swingAmt * 0.32
-        }
-
-        if (stepPhase >= threshold) {
-            stepPhase -= threshold
+        if (stepPhase >= 1.0) {
+            stepPhase -= 1.0
             currentStep = (currentStep + 1) % 16
-
-
             for (t in 0 until 4) {
                 if (grid[t][currentStep] && drumSamples[t] != null) {
                     playIndices[t] = 0
                 }
             }
         }
-
 
         var mixed = 0f
         for (t in 0 until 4) {
@@ -234,23 +224,12 @@ class DrumEngine(private val sampleRate: Int) {
                 }
             }
         }
-
-
         return (mixed * masterVolume).coerceIn(-1f, 1f)
     }
 
-
     // ------------------------------------------------------------------
-    // Load a sample from device storage (used by the UI launcher)
+    // Load sample from URI
     // ------------------------------------------------------------------
-    fun setSample(track: Int, data: FloatArray) {
-        if (track in 0 until 4) {
-            drumSamples[track] = data
-            playIndices[track] = -1
-        }
-    }
-
-
     suspend fun loadSample(context: Context, trackIndex: Int, uri: Uri): Boolean =
         withContext(Dispatchers.IO) {
             try {
@@ -265,17 +244,11 @@ class DrumEngine(private val sampleRate: Int) {
             }
         }
 
-
-    // ------------------------------------------------------------------
-    // Decode any supported audio file → mono Float PCM at engine sampleRate
-    // ------------------------------------------------------------------
     private fun decodeAudio(context: Context, uri: Uri): FloatArray? {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         try {
             extractor.setDataSource(context, uri, null)
-
-
             var trackIndex = -1
             var format: MediaFormat? = null
             for (i in 0 until extractor.trackCount) {
@@ -289,194 +262,19 @@ class DrumEngine(private val sampleRate: Int) {
             }
             if (trackIndex < 0 || format == null) return null
             extractor.selectTrack(trackIndex)
-
-
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
-            val channels = try {
-                format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            } catch (_: Exception) {
-                1
-            }
-            val fileSampleRate = try {
-                format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            } catch (_: Exception) {
-                44100
-            }
-
-
-            codec = MediaCodec.createDecoderByType(mime)
-            codec.configure(format, null, null, 0)
-            codec.start()
-
-
-            var raw = FloatArray(1024 * 512)
-            var rawSize = 0
-            val info = MediaCodec.BufferInfo()
-            var isEOS = false
-
-
-            while (!isEOS) {
-                val inIndex = codec.dequeueInputBuffer(10000)
-                if (inIndex >= 0) {
-                    val inputBuffer = codec.getInputBuffer(inIndex)
-                    if (inputBuffer != null) {
-                        val sampleSize = extractor.readSampleData(inputBuffer, 0)
-                        if (sampleSize < 0) {
-                            codec.queueInputBuffer(
-                                inIndex, 0, 0, 0,
-                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                            )
-                            isEOS = true
-                        } else {
-                            codec.queueInputBuffer(
-                                inIndex, 0, sampleSize,
-                                extractor.sampleTime, 0
-                            )
-                            extractor.advance()
-                        }
-                    }
-                }
-
-
-                var outIndex = codec.dequeueOutputBuffer(info, 10000)
-                while (outIndex >= 0) {
-                    val outputBuffer = codec.getOutputBuffer(outIndex)
-                    if (outputBuffer != null && info.size > 0) {
-                        outputBuffer.position(info.offset)
-                        outputBuffer.limit(info.offset + info.size)
-                        val shortBuffer = outputBuffer.asShortBuffer()
-
-
-                        if (channels == 2) {
-                            while (shortBuffer.remaining() >= 2) {
-                                if (rawSize >= raw.size) raw = raw.copyOf(raw.size * 2)
-                                val left = shortBuffer.get() / 32768f
-                                val right = shortBuffer.get() / 32768f
-                                raw[rawSize++] = (left + right) * 0.5f
-                            }
-                        } else {
-                            while (shortBuffer.hasRemaining()) {
-                                if (rawSize >= raw.size) raw = raw.copyOf(raw.size * 2)
-                                raw[rawSize++] = shortBuffer.get() / 32768f
-                            }
-                        }
-                    }
-                    codec.releaseOutputBuffer(outIndex, false)
-                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
-                    outIndex = codec.dequeueOutputBuffer(info, 0)
-                }
-            }
-
-
-            if (rawSize <= 0) return null
-
-
-            // Linear resample to the engine sample rate
-            val ratio = fileSampleRate.toDouble() / sampleRate
-            val targetSize = (rawSize / ratio).toInt().coerceAtLeast(1)
-            val resampled = FloatArray(targetSize)
-
-
-            for (i in 0 until targetSize) {
-                val src = i * ratio
-                val idx = src.toInt()
-                val frac = (src - idx).toFloat()
-                resampled[i] = when {
-                    idx + 1 < rawSize -> raw[idx] + (raw[idx + 1] - raw[idx]) * frac
-                    idx < rawSize -> raw[idx]
-                    else -> 0f
-                }
-            }
-            return resampled
-
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            return null
-        } finally {
-            try {
-                codec?.stop()
-                codec?.release()
-            } catch (_: Exception) {
-            }
-            try {
-                extractor.release()
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-
-    suspend fun loadDefaultKit(context: Context): Boolean = withContext(Dispatchers.IO) {
-        val resourceIds = intArrayOf(
-            R.raw.kick,
-            R.raw.snare,
-            R.raw.high,
-            R.raw.perc
-        )
-        var success = true
-
-
-        for (i in 0 until 4) {
-            try {
-                val afd = context.resources.openRawResourceFd(resourceIds[i])
-                val pcm = decodeAudioFromFd(afd.fileDescriptor, afd.startOffset, afd.length)
-                afd.close()
-                if (pcm != null) {
-                    setSample(i, pcm)
-                } else {
-                    success = false
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                success = false
-            }
-        }
-        success
-    }
-
-
-    private fun decodeAudioFromFd(
-        fd: java.io.FileDescriptor,
-        offset: Long,
-        length: Long
-    ): FloatArray? {
-        val extractor = MediaExtractor()
-        var codec: MediaCodec? = null
-        try {
-            extractor.setDataSource(fd, offset, length)
-
-
-            var trackIndex = -1
-            var format: MediaFormat? = null
-            for (i in 0 until extractor.trackCount) {
-                val f = extractor.getTrackFormat(i)
-                val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("audio/")) {
-                    trackIndex = i
-                    format = f
-                    break
-                }
-            }
-            if (trackIndex < 0 || format == null) return null
-            extractor.selectTrack(trackIndex)
-
 
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
             val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (_: Exception) { 1 }
             val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (_: Exception) { 44100 }
 
-
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
 
-
-            var raw = FloatArray(1024 * 256)
+            var raw = FloatArray(1024 * 512)
             var rawSize = 0
             val info = MediaCodec.BufferInfo()
             var isEOS = false
-
 
             while (!isEOS) {
                 val inIndex = codec.dequeueInputBuffer(10000)
@@ -494,7 +292,6 @@ class DrumEngine(private val sampleRate: Int) {
                     }
                 }
 
-
                 var outIndex = codec.dequeueOutputBuffer(info, 10000)
                 while (outIndex >= 0) {
                     val outputBuffer = codec.getOutputBuffer(outIndex)
@@ -502,8 +299,6 @@ class DrumEngine(private val sampleRate: Int) {
                         outputBuffer.position(info.offset)
                         outputBuffer.limit(info.offset + info.size)
                         val shortBuffer = outputBuffer.asShortBuffer()
-
-
                         if (channels == 2) {
                             while (shortBuffer.remaining() >= 2) {
                                 if (rawSize >= raw.size) raw = raw.copyOf(raw.size * 2)
@@ -524,9 +319,127 @@ class DrumEngine(private val sampleRate: Int) {
                 }
             }
 
-
             if (rawSize <= 0) return null
 
+            val ratio = fileSampleRate.toDouble() / sampleRate
+            val targetSize = (rawSize / ratio).toInt().coerceAtLeast(1)
+            val resampled = FloatArray(targetSize)
+            for (i in 0 until targetSize) {
+                val src = i * ratio
+                val idx = src.toInt()
+                val frac = (src - idx).toFloat()
+                resampled[i] = when {
+                    idx + 1 < rawSize -> raw[idx] + (raw[idx + 1] - raw[idx]) * frac
+                    idx < rawSize -> raw[idx]
+                    else -> 0f
+                }
+            }
+            return resampled
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        } finally {
+            try { codec?.stop(); codec?.release() } catch (_: Exception) {}
+            try { extractor.release() } catch (_: Exception) {}
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Default kit (raw resources)
+    // ------------------------------------------------------------------
+    suspend fun loadDefaultKit(context: Context): Boolean = withContext(Dispatchers.IO) {
+        val resourceIds = intArrayOf(R.raw.kick, R.raw.snare, R.raw.high, R.raw.perc)
+        var success = true
+        for (i in 0 until 4) {
+            try {
+                val afd = context.resources.openRawResourceFd(resourceIds[i])
+                val pcm = decodeAudioFromFd(afd.fileDescriptor, afd.startOffset, afd.length)
+                afd.close()
+                if (pcm != null) setSample(i, pcm) else success = false
+            } catch (e: Exception) {
+                e.printStackTrace()
+                success = false
+            }
+        }
+        success
+    }
+
+    private fun decodeAudioFromFd(fd: java.io.FileDescriptor, offset: Long, length: Long): FloatArray? {
+        val extractor = MediaExtractor()
+        var codec: MediaCodec? = null
+        try {
+            extractor.setDataSource(fd, offset, length)
+            var trackIndex = -1
+            var format: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("audio/")) {
+                    trackIndex = i
+                    format = f
+                    break
+                }
+            }
+            if (trackIndex < 0 || format == null) return null
+            extractor.selectTrack(trackIndex)
+
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+            val channels = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (_: Exception) { 1 }
+            val fileSampleRate = try { format.getInteger(MediaFormat.KEY_SAMPLE_RATE) } catch (_: Exception) { 44100 }
+
+            codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            var raw = FloatArray(1024 * 256)
+            var rawSize = 0
+            val info = MediaCodec.BufferInfo()
+            var isEOS = false
+
+            while (!isEOS) {
+                val inIndex = codec.dequeueInputBuffer(10000)
+                if (inIndex >= 0) {
+                    val inputBuffer = codec.getInputBuffer(inIndex)
+                    if (inputBuffer != null) {
+                        val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                        if (sampleSize < 0) {
+                            codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            isEOS = true
+                        } else {
+                            codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+
+                var outIndex = codec.dequeueOutputBuffer(info, 10000)
+                while (outIndex >= 0) {
+                    val outputBuffer = codec.getOutputBuffer(outIndex)
+                    if (outputBuffer != null && info.size > 0) {
+                        outputBuffer.position(info.offset)
+                        outputBuffer.limit(info.offset + info.size)
+                        val shortBuffer = outputBuffer.asShortBuffer()
+                        if (channels == 2) {
+                            while (shortBuffer.remaining() >= 2) {
+                                if (rawSize >= raw.size) raw = raw.copyOf(raw.size * 2)
+                                val left = shortBuffer.get() / 32768f
+                                val right = shortBuffer.get() / 32768f
+                                raw[rawSize++] = (left + right) * 0.5f
+                            }
+                        } else {
+                            while (shortBuffer.hasRemaining()) {
+                                if (rawSize >= raw.size) raw = raw.copyOf(raw.size * 2)
+                                raw[rawSize++] = shortBuffer.get() / 32768f
+                            }
+                        }
+                    }
+                    codec.releaseOutputBuffer(outIndex, false)
+                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
+                    outIndex = codec.dequeueOutputBuffer(info, 0)
+                }
+            }
+
+            if (rawSize <= 0) return null
 
             val ratio = fileSampleRate.toDouble() / sampleRate
             val targetSize = (rawSize / ratio).toInt().coerceAtLeast(1)
