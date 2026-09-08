@@ -73,6 +73,11 @@ class BenchReport(
     val profileVoiceFreqAvgNs: Long = 0L,
     val profileEnvelopeAvgNs: Long = 0L,
     val profileOscillatorAvgNs: Long = 0L,
+    val profileOscMainAvgNs: Long = 0L,
+    val profileOscPianoAvgNs: Long = 0L,
+    val profileOscSubAvgNs: Long = 0L,
+    val profileOscDetuneAvgNs: Long = 0L,
+    val profileOscDividersAvgNs: Long = 0L,
     val profileModulationAvgNs: Long = 0L,
     val profileVoiceMixAvgNs: Long = 0L
 )
@@ -240,6 +245,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
         voiceFreqNs: Long,
         envelopeNs: Long,
         oscillatorNs: Long,
+        oscMainNs: Long,
+        oscPianoNs: Long,
+        oscSubNs: Long,
+        oscDetuneNs: Long,
+        oscDividersNs: Long,
         modulationNs: Long,
         voiceMixNs: Long
     ) {
@@ -255,6 +265,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
         deepProfileVoiceFreqNs += voiceFreqNs
         deepProfileEnvelopeNs += envelopeNs
         deepProfileOscillatorNs += oscillatorNs
+        deepProfileOscMainNs += oscMainNs
+        deepProfileOscPianoNs += oscPianoNs
+        deepProfileOscSubNs += oscSubNs
+        deepProfileOscDetuneNs += oscDetuneNs
+        deepProfileOscDividersNs += oscDividersNs
         deepProfileModulationNs += modulationNs
         deepProfileVoiceMixNs += voiceMixNs
     }
@@ -1014,6 +1029,11 @@ internal fun reportToJson(r: BenchReport): JSONObject {
     o.put("profileVoiceFreqAvgNs", r.profileVoiceFreqAvgNs)
     o.put("profileEnvelopeAvgNs", r.profileEnvelopeAvgNs)
     o.put("profileOscillatorAvgNs", r.profileOscillatorAvgNs)
+    o.put("profileOscMainAvgNs", r.profileOscMainAvgNs)
+    o.put("profileOscPianoAvgNs", r.profileOscPianoAvgNs)
+    o.put("profileOscSubAvgNs", r.profileOscSubAvgNs)
+    o.put("profileOscDetuneAvgNs", r.profileOscDetuneAvgNs)
+    o.put("profileOscDividersAvgNs", r.profileOscDividersAvgNs)
     o.put("profileModulationAvgNs", r.profileModulationAvgNs)
     o.put("profileVoiceMixAvgNs", r.profileVoiceMixAvgNs)
     return o
@@ -1066,6 +1086,11 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         profileVoiceFreqAvgNs = o.optLong("profileVoiceFreqAvgNs", 0L),
         profileEnvelopeAvgNs = o.optLong("profileEnvelopeAvgNs", 0L),
         profileOscillatorAvgNs = o.optLong("profileOscillatorAvgNs", 0L),
+        profileOscMainAvgNs = o.optLong("profileOscMainAvgNs", 0L),
+        profileOscPianoAvgNs = o.optLong("profileOscPianoAvgNs", 0L),
+        profileOscSubAvgNs = o.optLong("profileOscSubAvgNs", 0L),
+        profileOscDetuneAvgNs = o.optLong("profileOscDetuneAvgNs", 0L),
+        profileOscDividersAvgNs = o.optLong("profileOscDividersAvgNs", 0L),
         profileModulationAvgNs = o.optLong("profileModulationAvgNs", 0L),
         profileVoiceMixAvgNs = o.optLong("profileVoiceMixAvgNs", 0L)
     )
