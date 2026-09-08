@@ -182,6 +182,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
     private var deepProfileVoiceFreqNs = 0L
     private var deepProfileEnvelopeNs = 0L
     private var deepProfileOscillatorNs = 0L
+    private var deepProfileOscMainNs = 0L
+    private var deepProfileOscPianoNs = 0L
+    private var deepProfileOscSubNs = 0L
+    private var deepProfileOscDetuneNs = 0L
+    private var deepProfileOscDividersNs = 0L
     private var deepProfileModulationNs = 0L
     private var deepProfileVoiceMixNs = 0L
 
@@ -319,6 +324,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
             deepProfileVoiceFreqNs = 0L
             deepProfileEnvelopeNs = 0L
             deepProfileOscillatorNs = 0L
+            deepProfileOscMainNs = 0L
+            deepProfileOscPianoNs = 0L
+            deepProfileOscSubNs = 0L
+            deepProfileOscDetuneNs = 0L
+            deepProfileOscDividersNs = 0L
             deepProfileModulationNs = 0L
             deepProfileVoiceMixNs = 0L
             captureMode = 2
