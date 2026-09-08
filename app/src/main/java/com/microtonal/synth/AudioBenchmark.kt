@@ -556,7 +556,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 profileLiveFxAvgNs = profileAveragePerBuffer(deepProfileLiveFxNs, deepProfileSampleCount, stats.count),
                 profileDelayAvgNs = profileAveragePerBuffer(deepProfileDelayNs, deepProfileSampleCount, stats.count),
                 profileReverbAvgNs = profileAveragePerBuffer(deepProfileReverbNs, deepProfileSampleCount, stats.count),
-                profileMasterAvgNs = profileAveragePerBuffer(deepProfileMasterNs, deepProfileSampleCount, stats.count)
+                profileMasterAvgNs = profileAveragePerBuffer(deepProfileMasterNs, deepProfileSampleCount, stats.count),
                 profileVoiceFreqAvgNs = profileAveragePerBuffer(deepProfileVoiceFreqNs, deepProfileSampleCount, stats.count),
                 profileEnvelopeAvgNs = profileAveragePerBuffer(deepProfileEnvelopeNs, deepProfileSampleCount, stats.count),
                 profileOscillatorAvgNs = profileAveragePerBuffer(deepProfileOscillatorNs, deepProfileSampleCount, stats.count),
@@ -1062,7 +1062,7 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         profileLiveFxAvgNs = o.optLong("profileLiveFxAvgNs", 0L),
         profileDelayAvgNs = o.optLong("profileDelayAvgNs", 0L),
         profileReverbAvgNs = o.optLong("profileReverbAvgNs", 0L),
-        profileMasterAvgNs = o.optLong("profileMasterAvgNs", 0L)
+        profileMasterAvgNs = o.optLong("profileMasterAvgNs", 0L),
         profileVoiceFreqAvgNs = o.optLong("profileVoiceFreqAvgNs", 0L),
         profileEnvelopeAvgNs = o.optLong("profileEnvelopeAvgNs", 0L),
         profileOscillatorAvgNs = o.optLong("profileOscillatorAvgNs", 0L),
