@@ -1729,7 +1729,12 @@ class SynthEngine(private val context: Context) {
                         liveFxNs = dspEngine.deepProfileLiveFxNs(),
                         delayNs = dspEngine.deepProfileDelayNs(),
                         reverbNs = dspEngine.deepProfileReverbNs(),
-                        masterNs = dspEngine.deepProfileMasterNs()
+                        masterNs = dspEngine.deepProfileMasterNs(),
+                        voiceFreqNs = dspEngine.deepProfileVoiceFreqNs(),
+                        envelopeNs = dspEngine.deepProfileEnvelopeNs(),
+                        oscillatorNs = dspEngine.deepProfileOscillatorNs(),
+                        modulationNs = dspEngine.deepProfileModulationNs(),
+                        voiceMixNs = dspEngine.deepProfileVoiceMixNs()
                     )
                     dspEngine.resetDeepProfile()
                 }

@@ -259,6 +259,13 @@ private fun ReportBlock(r: BenchReport) {
         Text("Delay: ${nsToMs(r.profileDelayAvgNs)}", color = gray, fontSize = 10.sp)
         Text("Reverb: ${nsToMs(r.profileReverbAvgNs)}", color = gray, fontSize = 10.sp)
         Text("Master: ${nsToMs(r.profileMasterAvgNs)}", color = gray, fontSize = 10.sp)
+        Spacer(Modifier.height(3.dp))
+        Text("Voice breakdown", color = Color(0xFFD4AF37), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text("Freq / Glide / Phase: ${nsToMs(r.profileVoiceFreqAvgNs)}", color = gray, fontSize = 10.sp)
+        Text("Envelope (ADSR): ${nsToMs(r.profileEnvelopeAvgNs)}", color = gray, fontSize = 10.sp)
+        Text("Oscillator + extras: ${nsToMs(r.profileOscillatorAvgNs)}", color = gray, fontSize = 10.sp)
+        Text("Modulation / filter prep: ${nsToMs(r.profileModulationAvgNs)}", color = gray, fontSize = 10.sp)
+        Text("Voice mix: ${nsToMs(r.profileVoiceMixAvgNs)}", color = gray, fontSize = 10.sp)
 
     }
 }

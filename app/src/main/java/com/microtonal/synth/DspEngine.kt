@@ -51,6 +51,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
     private var deepProfileDelayNs = 0L
     private var deepProfileReverbNs = 0L
     private var deepProfileMasterNs = 0L
+    private var deepProfileVoiceFreqNs = 0L
+    private var deepProfileEnvelopeNs = 0L
+    private var deepProfileOscillatorNs = 0L
+    private var deepProfileModulationNs = 0L
+    private var deepProfileVoiceMixNs = 0L
 
     fun resetDeepProfile() {
         deepProfileSampleCount = 0L
@@ -61,6 +66,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
         deepProfileDelayNs = 0L
         deepProfileReverbNs = 0L
         deepProfileMasterNs = 0L
+        deepProfileVoiceFreqNs = 0L
+        deepProfileEnvelopeNs = 0L
+        deepProfileOscillatorNs = 0L
+        deepProfileModulationNs = 0L
+        deepProfileVoiceMixNs = 0L
     }
 
     fun deepProfileSampleCount(): Long = deepProfileSampleCount
@@ -71,6 +81,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
     fun deepProfileDelayNs(): Long = deepProfileDelayNs
     fun deepProfileReverbNs(): Long = deepProfileReverbNs
     fun deepProfileMasterNs(): Long = deepProfileMasterNs
+    fun deepProfileVoiceFreqNs(): Long = deepProfileVoiceFreqNs
+    fun deepProfileEnvelopeNs(): Long = deepProfileEnvelopeNs
+    fun deepProfileOscillatorNs(): Long = deepProfileOscillatorNs
+    fun deepProfileModulationNs(): Long = deepProfileModulationNs
+    fun deepProfileVoiceMixNs(): Long = deepProfileVoiceMixNs
 
 
 
@@ -578,10 +593,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
             glideFactor = cachedGlideFactor
         }
 
-        // Snapshot values that are constant for this sample. These fields are
-        // updated only above in this same audio-thread function, so using locals
-        // removes repeated property reads from the per-voice loop without
-        // changing any DSP value, ordering, state update, or timing.
+        var liveChannelMix = 0.0
+
+        var looperChannelMix = 0.0
+
+        // Task 3: snapshot per-sample values used repeatedly by the voice loop.
         val headroomForVoices = currentHeadroom
         val pianoWetForVoices = pianoWet
         val div2WetForVoices = div2Wet
@@ -593,9 +609,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
         val loopPerfXForVoices = smoothedLoopPerfX
         val loopPerfYForVoices = smoothedLoopPerfY
 
-        var liveChannelMix = 0.0
-
-        var looperChannelMix = 0.0
 
         val profileVoiceT0 = if (profileHotPath) System.nanoTime() else 0L
 
@@ -617,6 +630,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
+
+            val profileVoiceFreqT0 = if (profileHotPath) System.nanoTime() else 0L
 
             if (glideMs > 0 && abs(slot.currentFreq - slot.targetFreq) > 0.05f) {
                 slot.currentFreq += ((slot.targetFreq - slot.currentFreq) * glideFactor).toFloat()
@@ -644,6 +659,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
+
+            if (profileHotPath) {
+                deepProfileVoiceFreqNs += System.nanoTime() - profileVoiceFreqT0
+            }
+
+            val profileEnvelopeT0 = if (profileHotPath) System.nanoTime() else 0L
 
             val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
             val actualDecay = if (slot.isLooperNote) slot.frozenDecay else decayMs
@@ -722,6 +743,9 @@ class DspEngine(private val sampleRate: Int = 44100) {
                     }
                     slot.zdfState1 = 0.0
                     slot.zdfState2 = 0.0
+                    if (profileHotPath) {
+                        deepProfileEnvelopeNs += System.nanoTime() - profileEnvelopeT0
+                    }
                     continue
                 }
             }
@@ -732,6 +756,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
+
+            if (profileHotPath) {
+                deepProfileEnvelopeNs += System.nanoTime() - profileEnvelopeT0
+            }
+
+            val profileOscillatorT0 = if (profileHotPath) System.nanoTime() else 0L
 
             val livePiano = !slot.isLooperNote && pianoWetForVoices > 0.0005
             if (livePiano) {
@@ -802,7 +832,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
-            val profileZdfT0 = if (profileHotPath) System.nanoTime() else 0L
+            if (profileHotPath) {
+                deepProfileOscillatorNs += System.nanoTime() - profileOscillatorT0
+            }
+
+            val profileModulationT0 = if (profileHotPath) System.nanoTime() else 0L
 
             // --- פילטר ZDF: ציר X = Cutoff LFO, ציר Y = Resonance ---
             // Live pad modulates only live notes; recorded loop pad modulates only looper notes.
@@ -852,6 +886,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
+
+            if (profileHotPath) {
+                deepProfileModulationNs += System.nanoTime() - profileModulationT0
+            }
+
+            val profileZdfT0 = if (profileHotPath) System.nanoTime() else 0L
 
             // חישוב פילטר מהיר בעזרת fastTan ובלי Math.tan יקר
             // Rebuild g/k/h at ZDF_COEFF_UPDATE_INTERVAL, or on first sample
@@ -922,6 +962,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
 
 
+            val profileVoiceMixT0 = if (profileHotPath) System.nanoTime() else 0L
+
 
 
 
@@ -933,6 +975,9 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 looperChannelMix += voiceSample
             } else {
                 liveChannelMix += voiceSample
+            }
+            if (profileHotPath) {
+                deepProfileVoiceMixNs += System.nanoTime() - profileVoiceMixT0
             }
         }
 

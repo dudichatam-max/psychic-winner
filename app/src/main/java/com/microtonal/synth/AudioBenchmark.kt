@@ -69,7 +69,12 @@ class BenchReport(
     val profileLiveFxAvgNs: Long = 0L,
     val profileDelayAvgNs: Long = 0L,
     val profileReverbAvgNs: Long = 0L,
-    val profileMasterAvgNs: Long = 0L
+    val profileMasterAvgNs: Long = 0L,
+    val profileVoiceFreqAvgNs: Long = 0L,
+    val profileEnvelopeAvgNs: Long = 0L,
+    val profileOscillatorAvgNs: Long = 0L,
+    val profileModulationAvgNs: Long = 0L,
+    val profileVoiceMixAvgNs: Long = 0L
 )
 
 /**
@@ -169,6 +174,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
     private var deepProfileDelayNs = 0L
     private var deepProfileReverbNs = 0L
     private var deepProfileMasterNs = 0L
+    private var deepProfileVoiceFreqNs = 0L
+    private var deepProfileEnvelopeNs = 0L
+    private var deepProfileOscillatorNs = 0L
+    private var deepProfileModulationNs = 0L
+    private var deepProfileVoiceMixNs = 0L
 
     @Volatile var deadlineNs: Long = 0L
         private set
@@ -226,7 +236,12 @@ class AudioBenchmark(private val engine: SynthEngine) {
         liveFxNs: Long,
         delayNs: Long,
         reverbNs: Long,
-        masterNs: Long
+        masterNs: Long,
+        voiceFreqNs: Long,
+        envelopeNs: Long,
+        oscillatorNs: Long,
+        modulationNs: Long,
+        voiceMixNs: Long
     ) {
         if (captureMode != 2 || sampleCount <= 0L) return
         deepProfileSampleCount += sampleCount
@@ -237,6 +252,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
         deepProfileDelayNs += delayNs
         deepProfileReverbNs += reverbNs
         deepProfileMasterNs += masterNs
+        deepProfileVoiceFreqNs += voiceFreqNs
+        deepProfileEnvelopeNs += envelopeNs
+        deepProfileOscillatorNs += oscillatorNs
+        deepProfileModulationNs += modulationNs
+        deepProfileVoiceMixNs += voiceMixNs
     }
 
     private fun profileAveragePerBuffer(sumNs: Long, sampleCount: Long, buffers: Int): Long {
@@ -281,6 +301,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
             deepProfileDelayNs = 0L
             deepProfileReverbNs = 0L
             deepProfileMasterNs = 0L
+            deepProfileVoiceFreqNs = 0L
+            deepProfileEnvelopeNs = 0L
+            deepProfileOscillatorNs = 0L
+            deepProfileModulationNs = 0L
+            deepProfileVoiceMixNs = 0L
             captureMode = 2
             startMeasureAfterWrite = false
         }
@@ -532,6 +557,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 profileDelayAvgNs = profileAveragePerBuffer(deepProfileDelayNs, deepProfileSampleCount, stats.count),
                 profileReverbAvgNs = profileAveragePerBuffer(deepProfileReverbNs, deepProfileSampleCount, stats.count),
                 profileMasterAvgNs = profileAveragePerBuffer(deepProfileMasterNs, deepProfileSampleCount, stats.count)
+                profileVoiceFreqAvgNs = profileAveragePerBuffer(deepProfileVoiceFreqNs, deepProfileSampleCount, stats.count),
+                profileEnvelopeAvgNs = profileAveragePerBuffer(deepProfileEnvelopeNs, deepProfileSampleCount, stats.count),
+                profileOscillatorAvgNs = profileAveragePerBuffer(deepProfileOscillatorNs, deepProfileSampleCount, stats.count),
+                profileModulationAvgNs = profileAveragePerBuffer(deepProfileModulationNs, deepProfileSampleCount, stats.count),
+                profileVoiceMixAvgNs = profileAveragePerBuffer(deepProfileVoiceMixNs, deepProfileSampleCount, stats.count)
             )
             lastReport = report
             phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
@@ -981,6 +1011,11 @@ internal fun reportToJson(r: BenchReport): JSONObject {
     o.put("profileDelayAvgNs", r.profileDelayAvgNs)
     o.put("profileReverbAvgNs", r.profileReverbAvgNs)
     o.put("profileMasterAvgNs", r.profileMasterAvgNs)
+    o.put("profileVoiceFreqAvgNs", r.profileVoiceFreqAvgNs)
+    o.put("profileEnvelopeAvgNs", r.profileEnvelopeAvgNs)
+    o.put("profileOscillatorAvgNs", r.profileOscillatorAvgNs)
+    o.put("profileModulationAvgNs", r.profileModulationAvgNs)
+    o.put("profileVoiceMixAvgNs", r.profileVoiceMixAvgNs)
     return o
 }
 
@@ -1028,5 +1063,10 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         profileDelayAvgNs = o.optLong("profileDelayAvgNs", 0L),
         profileReverbAvgNs = o.optLong("profileReverbAvgNs", 0L),
         profileMasterAvgNs = o.optLong("profileMasterAvgNs", 0L)
+        profileVoiceFreqAvgNs = o.optLong("profileVoiceFreqAvgNs", 0L),
+        profileEnvelopeAvgNs = o.optLong("profileEnvelopeAvgNs", 0L),
+        profileOscillatorAvgNs = o.optLong("profileOscillatorAvgNs", 0L),
+        profileModulationAvgNs = o.optLong("profileModulationAvgNs", 0L),
+        profileVoiceMixAvgNs = o.optLong("profileVoiceMixAvgNs", 0L)
     )
 }
