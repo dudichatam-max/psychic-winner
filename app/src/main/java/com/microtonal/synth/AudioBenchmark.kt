@@ -669,6 +669,207 @@ class AudioBenchmark(private val engine: SynthEngine) {
     }
 
     /**
+     * Runs the exact recorded reference session while measuring the normal audio path.
+     * No synthetic events, Master WAV recording, or live microphone capture are added.
+     */
+    fun runReferenceBlocking(
+        context: Context,
+        session: BenchmarkReferenceSession,
+        includeLooper: Boolean,
+        includeDrums: Boolean
+    ): BenchReport {
+        cancelRequested = false
+        lastError = null
+        lastReport = null
+        phase = BenchPhase.WARMUP
+        remainingMs = (session.durationUs / 1_000L).coerceAtLeast(1L)
+        writeIdx = 0
+        bufCount = 0
+        missCount = 0
+        liveBuffers = 0
+        liveMisses = 0
+        liveCpuPct = 0.0
+        captureMode = 0
+        startMeasureAfterWrite = false
+        stopAfterWrite = false
+
+        val snap = WorkloadSnapshot.capture(engine)
+        var looperSnaps: Array<LooperTrackRestoreSnapshot>? = null
+        var drumsGrid: Array<BooleanArray>? = null
+        var drumsVol: FloatArray? = null
+        var drumsPan: FloatArray? = null
+        var drumsSamples: Array<FloatArray?>? = null
+        var drumsPlaying = false
+        var drumsPattern = 0
+        val player = engine.benchmarkReferencePlayer
+
+        try {
+            deadlineNs = PROCESS_FRAMES.toLong() * 1_000_000_000L / engine.sampleRate.toLong()
+            if (deadlineNs <= 0L) return fail(context, includeLooper, includeDrums, "Invalid sample rate")
+
+            if (includeLooper) {
+                val count = minOf(6, engine.looperTracks.size)
+                val mem = Array(count) { i -> engine.looperTracks[i].snapshotForRestore() }
+                looperSnaps = mem
+            }
+
+            if (includeDrums) {
+                val de = engine.drumEngine
+                drumsSamples = Array(8) { t -> de.drumSamples[t] }
+                drumsGrid = Array(8) { t -> de.grid[t].copyOf() }
+                drumsVol = de.trackVolumes.copyOf()
+                drumsPan = de.trackPans.copyOf()
+                drumsPlaying = de.isPlaying
+                drumsPattern = de.currentPatternIndex
+            }
+
+            captureMode = 1
+            startMeasureAfterWrite = true
+            stopAfterWrite = false
+
+            val startRt = SystemClock.elapsedRealtime()
+            val durationMs = ((session.durationUs + 999L) / 1_000L).coerceAtLeast(1L)
+            var measureStarted = false
+            var underrun0 = -1
+            var previousCpu = android.os.Process.getElapsedCpuTime()
+            var previousWall = SystemClock.elapsedRealtime()
+            var cpuSum = 0.0
+            var cpuPeak = 0.0
+            var cpuSamples = 0
+            var lastCpuTick = startRt
+
+            player.play(session, includeLooper, includeDrums)
+
+            while (!cancelRequested) {
+                val elapsed = SystemClock.elapsedRealtime() - startRt
+                remainingMs = (durationMs - elapsed).coerceAtLeast(0L)
+
+                if (!measureStarted && captureMode == 2) {
+                    underrun0 = engine.underrunCount()
+                    previousCpu = android.os.Process.getElapsedCpuTime()
+                    previousWall = SystemClock.elapsedRealtime()
+                    lastCpuTick = previousWall
+                    measureStarted = true
+                    phase = BenchPhase.MEASURE
+                }
+
+                val nowRt = SystemClock.elapsedRealtime()
+                if (measureStarted && nowRt - lastCpuTick >= 1000L) {
+                    val cpuNow = android.os.Process.getElapsedCpuTime()
+                    val wallNow = nowRt
+                    val dCpu = (cpuNow - previousCpu).toDouble()
+                    val dWall = (wallNow - previousWall).toDouble().coerceAtLeast(1.0)
+                    val pct = (dCpu / dWall) * 100.0
+                    previousCpu = cpuNow
+                    previousWall = wallNow
+                    liveCpuPct = pct
+                    cpuSum += pct
+                    if (pct > cpuPeak) cpuPeak = pct
+                    cpuSamples++
+                    lastCpuTick = nowRt
+                }
+
+                liveBuffers = bufCount
+                liveMisses = missCount
+
+                if (elapsed >= durationMs) break
+                Thread.sleep(4L)
+            }
+
+            player.cancel()
+            stopAfterWrite = true
+            var spins = 0
+            while (captureMode != 0 && spins < 80) {
+                Thread.sleep(5L)
+                spins++
+            }
+
+            val underrun1 = engine.underrunCount()
+            val n = writeIdx.coerceIn(0, timesNs.size)
+            val copy = LongArray(n)
+            if (n > 0) System.arraycopy(timesNs, 0, copy, 0, n)
+
+            if (cancelRequested) {
+                releaseWorkload(snap, looperSnaps, context, includeLooper, includeDrums, drumsGrid, drumsVol, drumsPan, drumsSamples, drumsPlaying, drumsPattern)
+                return fail(context, includeLooper, includeDrums, "Cancelled")
+            }
+
+            val restoreErr = releaseWorkload(
+                snap, looperSnaps, context, includeLooper, includeDrums,
+                drumsGrid, drumsVol, drumsPan, drumsSamples, drumsPlaying, drumsPattern
+            )
+            if (restoreErr != null) return fail(context, includeLooper, includeDrums, restoreErr)
+
+            val stats = computeStats(copy)
+            val underrunAvail = underrun0 >= 0 && underrun1 >= 0
+            val deltaU = if (underrunAvail) (underrun1 - underrun0).coerceAtLeast(0) else 0
+            val missRate = if (stats.count > 0) stats.misses.toDouble() / stats.count.toDouble() else 0.0
+            val cpuAvg = if (cpuSamples > 0) cpuSum / cpuSamples else liveCpuPct
+            val verdict = when {
+                stats.count <= 0 -> BenchVerdict.ERROR
+                missRate >= 0.005 || (underrunAvail && deltaU > 0) -> BenchVerdict.FAIL
+                missRate > 0.0 -> BenchVerdict.WARNING
+                else -> BenchVerdict.PASS
+            }
+
+            val report = BenchReport(
+                verdict = if (stats.count <= 0) BenchVerdict.ERROR else verdict,
+                errorMessage = if (stats.count <= 0) "No buffers captured" else null,
+                device = Build.MODEL ?: "unknown",
+                androidVersion = Build.VERSION.RELEASE ?: "${Build.VERSION.SDK_INT}",
+                appVersion = appVersion(context),
+                sampleRate = engine.sampleRate,
+                bufferFrames = PROCESS_FRAMES,
+                deadlineNs = deadlineNs,
+                includeLooper = includeLooper,
+                includeDrums = includeDrums,
+                waveformType = engine.waveformType,
+                bpm = engine.drumEngine.bpm,
+                avgNs = stats.avg, p50Ns = stats.p50, p95Ns = stats.p95, p99Ns = stats.p99, maxNs = stats.max,
+                buffers = stats.count, misses = stats.misses, missRate = missRate,
+                underrunsAvailable = underrunAvail, deltaUnderruns = deltaU,
+                cpuAvgPct = cpuAvg, cpuPeakPct = cpuPeak,
+                profileDspAvgNs = profileAveragePerBuffer(profileDspNs, profileSampleCount, stats.count),
+                profileDrumsAvgNs = profileAveragePerBuffer(profileDrumsNs, profileSampleCount, stats.count),
+                profileLooperAvgNs = profileAveragePerBuffer(profileLooperNs, profileSampleCount, stats.count),
+                profileMicAvgNs = profileAveragePerBuffer(profileMicNs, profileSampleCount, stats.count),
+                profilePadMasterAvgNs = profileAveragePerBuffer(profilePadMasterNs, profileSampleCount, stats.count),
+                profileAudioWriteAvgNs = profileAveragePerBuffer(profileAudioWriteNs, profileSampleCount, stats.count),
+                profileVoiceAvgNs = profileAveragePerBuffer(deepProfileVoiceNs, deepProfileSampleCount, stats.count),
+                profileZdfAvgNs = profileAveragePerBuffer(deepProfileZdfNs, deepProfileSampleCount, stats.count),
+                profileExternalAvgNs = profileAveragePerBuffer(deepProfileExternalNs, deepProfileSampleCount, stats.count),
+                profileLiveFxAvgNs = profileAveragePerBuffer(deepProfileLiveFxNs, deepProfileSampleCount, stats.count),
+                profileDelayAvgNs = profileAveragePerBuffer(deepProfileDelayNs, deepProfileSampleCount, stats.count),
+                profileReverbAvgNs = profileAveragePerBuffer(deepProfileReverbNs, deepProfileSampleCount, stats.count),
+                profileMasterAvgNs = profileAveragePerBuffer(deepProfileMasterNs, deepProfileSampleCount, stats.count),
+                profileVoiceFreqAvgNs = profileAveragePerBuffer(deepProfileVoiceFreqNs, deepProfileSampleCount, stats.count),
+                profileEnvelopeAvgNs = profileAveragePerBuffer(deepProfileEnvelopeNs, deepProfileSampleCount, stats.count),
+                profileOscillatorAvgNs = profileAveragePerBuffer(deepProfileOscillatorNs, deepProfileSampleCount, stats.count),
+                profileModulationAvgNs = profileAveragePerBuffer(deepProfileModulationNs, deepProfileSampleCount, stats.count),
+                profileVoiceMixAvgNs = profileAveragePerBuffer(deepProfileVoiceMixNs, deepProfileSampleCount, stats.count),
+                profileOscMainAvgNs = profileAveragePerBuffer(deepProfileOscMainNs, deepProfileSampleCount, stats.count),
+                profileOscPianoAvgNs = profileAveragePerBuffer(deepProfileOscPianoNs, deepProfileSampleCount, stats.count),
+                profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
+                profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
+                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count)
+            )
+            lastReport = report
+            phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
+            if (report.verdict != BenchVerdict.ERROR) saveLast(context, report)
+            return report
+        } catch (t: Throwable) {
+            player.cancel()
+            releaseWorkload(snap, looperSnaps, context, includeLooper, includeDrums, drumsGrid, drumsVol, drumsPan, drumsSamples, drumsPlaying, drumsPattern)
+            return fail(context, includeLooper, includeDrums, t.message ?: t.javaClass.simpleName)
+        } finally {
+            player.cancel()
+            captureMode = 0
+            startMeasureAfterWrite = false
+            stopAfterWrite = false
+        }
+    }
+
+    /**
      * Deterministic realistic playing-session benchmark.
      *
      * Unlike the stress workload, this does not preload six finished loopers.
