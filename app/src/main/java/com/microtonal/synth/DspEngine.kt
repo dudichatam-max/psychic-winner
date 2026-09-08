@@ -38,6 +38,7 @@ class DspFrame(
 // Smoothing and zdfState still run every sample. Change this value only
 // (8 → 4 → 1) to A/B coefficient rate without touching the filter math.
 private const val ZDF_COEFF_UPDATE_INTERVAL = 8
+private const val OSC_PROFILE_TARGETS = 5L
 
 class DspEngine(private val sampleRate: Int = 44100) {
 
@@ -54,13 +55,14 @@ class DspEngine(private val sampleRate: Int = 44100) {
     private var deepProfileVoiceFreqNs = 0L
     private var deepProfileEnvelopeNs = 0L
     private var deepProfileOscillatorNs = 0L
+    private var deepProfileModulationNs = 0L
+    private var deepProfileVoiceMixNs = 0L
     private var deepProfileOscMainNs = 0L
     private var deepProfileOscPianoNs = 0L
     private var deepProfileOscSubNs = 0L
     private var deepProfileOscDetuneNs = 0L
     private var deepProfileOscDividersNs = 0L
-    private var deepProfileModulationNs = 0L
-    private var deepProfileVoiceMixNs = 0L
+    private var deepProfileOscTargetCounter = 0L
 
     fun resetDeepProfile() {
         deepProfileSampleCount = 0L
@@ -74,13 +76,13 @@ class DspEngine(private val sampleRate: Int = 44100) {
         deepProfileVoiceFreqNs = 0L
         deepProfileEnvelopeNs = 0L
         deepProfileOscillatorNs = 0L
+        deepProfileModulationNs = 0L
+        deepProfileVoiceMixNs = 0L
         deepProfileOscMainNs = 0L
         deepProfileOscPianoNs = 0L
         deepProfileOscSubNs = 0L
         deepProfileOscDetuneNs = 0L
         deepProfileOscDividersNs = 0L
-        deepProfileModulationNs = 0L
-        deepProfileVoiceMixNs = 0L
     }
 
     fun deepProfileSampleCount(): Long = deepProfileSampleCount
@@ -94,13 +96,13 @@ class DspEngine(private val sampleRate: Int = 44100) {
     fun deepProfileVoiceFreqNs(): Long = deepProfileVoiceFreqNs
     fun deepProfileEnvelopeNs(): Long = deepProfileEnvelopeNs
     fun deepProfileOscillatorNs(): Long = deepProfileOscillatorNs
+    fun deepProfileModulationNs(): Long = deepProfileModulationNs
+    fun deepProfileVoiceMixNs(): Long = deepProfileVoiceMixNs
     fun deepProfileOscMainNs(): Long = deepProfileOscMainNs
     fun deepProfileOscPianoNs(): Long = deepProfileOscPianoNs
     fun deepProfileOscSubNs(): Long = deepProfileOscSubNs
     fun deepProfileOscDetuneNs(): Long = deepProfileOscDetuneNs
     fun deepProfileOscDividersNs(): Long = deepProfileOscDividersNs
-    fun deepProfileModulationNs(): Long = deepProfileModulationNs
-    fun deepProfileVoiceMixNs(): Long = deepProfileVoiceMixNs
 
 
 
@@ -614,6 +616,14 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
         val profileVoiceT0 = if (profileHotPath) System.nanoTime() else 0L
 
+        // Low-overhead oscillator diagnostic: one sub-region is timed per
+        // sampled processNextSample() call. The target rotates 0..4.
+        val profileOscTarget = if (profileHotPath) {
+            val target = (deepProfileOscTargetCounter % OSC_PROFILE_TARGETS).toInt()
+            deepProfileOscTargetCounter++
+            target
+        } else -1
+
 
 
 
@@ -773,41 +783,53 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 // phaseP3 step can exceed TWO_PI when dt > 1/3 — keep modulo.
                 if (slot.phaseP3 >= twoPi) slot.phaseP3 %= twoPi
             }
+
             var raw = if (pianoWet >= 0.995 && livePiano) {
-                val t0 = if (profileHotPath) System.nanoTime() else 0L
-                val value = generatePianoWave(phaseNorm, slot.phaseP2 / twoPi, slot.phaseP3 / twoPi)
-                if (profileHotPath) deepProfileOscPianoNs += System.nanoTime() - t0
-                value
+                val profilePianoT0 = if (profileOscTarget == 1) System.nanoTime() else 0L
+                val piano = generatePianoWave(phaseNorm, slot.phaseP2 / twoPi, slot.phaseP3 / twoPi)
+                if (profileOscTarget == 1) {
+                    deepProfileOscPianoNs += (System.nanoTime() - profilePianoT0) * OSC_PROFILE_TARGETS
+                }
+                piano
             } else if (livePiano) {
-                val mainT0 = if (profileHotPath) System.nanoTime() else 0L
+                val profileMainT0 = if (profileOscTarget == 0) System.nanoTime() else 0L
                 val waveRaw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt, invDt)
-                if (profileHotPath) deepProfileOscMainNs += System.nanoTime() - mainT0
-                val pianoT0 = if (profileHotPath) System.nanoTime() else 0L
+                if (profileOscTarget == 0) {
+                    deepProfileOscMainNs += (System.nanoTime() - profileMainT0) * OSC_PROFILE_TARGETS
+                }
+
+                val profilePianoT0 = if (profileOscTarget == 1) System.nanoTime() else 0L
                 val pianoRaw = generatePianoWave(phaseNorm, slot.phaseP2 / twoPi, slot.phaseP3 / twoPi)
-                if (profileHotPath) deepProfileOscPianoNs += System.nanoTime() - pianoT0
+                if (profileOscTarget == 1) {
+                    deepProfileOscPianoNs += (System.nanoTime() - profilePianoT0) * OSC_PROFILE_TARGETS
+                }
                 waveRaw * (1.0 - pianoWet) + pianoRaw * pianoWet
             } else {
-                val mainT0 = if (profileHotPath) System.nanoTime() else 0L
-                val value = generateOptimizedWaveform(slot.waveform, phaseNorm, dt, invDt)
-                if (profileHotPath) deepProfileOscMainNs += System.nanoTime() - mainT0
-                value
+                val profileMainT0 = if (profileOscTarget == 0) System.nanoTime() else 0L
+                val main = generateOptimizedWaveform(slot.waveform, phaseNorm, dt, invDt)
+                if (profileOscTarget == 0) {
+                    deepProfileOscMainNs += (System.nanoTime() - profileMainT0) * OSC_PROFILE_TARGETS
+                }
+                main
             }
 
             // Analog SUB: sine one octave down on live voices only.
+            val profileSubT0 = if (profileOscTarget == 2 && subOn && !slot.isLooperNote) System.nanoTime() else 0L
             if (subOn && !slot.isLooperNote) {
-                val subT0 = if (profileHotPath) System.nanoTime() else 0L
                 val dtSub = (slot.currentFreq * 0.5 * invSampleRate).coerceIn(0.0001, 0.45)
                 slot.phaseSub += twoPi * dtSub
                 if (slot.phaseSub >= twoPi) slot.phaseSub -= twoPi
                 val sub = fastSine(slot.phaseSub / twoPi)
                 raw = raw * 0.70 + sub * 0.40
-                if (profileHotPath) deepProfileOscSubNs += System.nanoTime() - subT0
+            }
+            if (profileOscTarget == 2 && subOn && !slot.isLooperNote) {
+                deepProfileOscSubNs += (System.nanoTime() - profileSubT0) * OSC_PROFILE_TARGETS
             }
 
             // Cheap unison / detune: second oscillator slightly sharp, mixed lower.
             // Only runs when detuneOn – almost zero extra cost when off (critical for weak devices).
+            val profileDetuneT0 = if (profileOscTarget == 3 && detuneOn) System.nanoTime() else 0L
             if (detuneOn) {
-                val detuneT0 = if (profileHotPath) System.nanoTime() else 0L
                 val detuneRatio = 1.0035  // ~6 cents
                 val dt2 = (slot.currentFreq * detuneRatio * invSampleRate).coerceIn(0.0001, 0.45)
                 val invDt2 = 1.0 / dt2
@@ -822,11 +844,17 @@ class DspEngine(private val sampleRate: Int = 44100) {
                     val raw2 = generateOptimizedWaveform(slot.waveform, phaseNorm2, dt2, invDt2)
                     raw * 0.68 + raw2 * 0.32
                 }
-                if (profileHotPath) deepProfileOscDetuneNs += System.nanoTime() - detuneT0
+            }
+            if (profileOscTarget == 3 && detuneOn) {
+                deepProfileOscDetuneNs += (System.nanoTime() - profileDetuneT0) * OSC_PROFILE_TARGETS
             }
 
+            val profileDividersT0 = if (
+                profileOscTarget == 4 &&
+                !slot.isLooperNote &&
+                (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)
+            ) System.nanoTime() else 0L
             if (!slot.isLooperNote && (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)) {
-                val divT0 = if (profileHotPath) System.nanoTime() else 0L
                 val fund = fastSine(phaseNorm)
                 if (slot.prevFund <= 0.0 && fund > 0.0) {
                     slot.zcCount++
@@ -840,13 +868,18 @@ class DspEngine(private val sampleRate: Int = 44100) {
                     slot.div3 * (0.055 * div3Wet) +
                     slot.div4 * (0.045 * div4Wet)
                 ) * divPolyScale
-                if (profileHotPath) deepProfileOscDividersNs += System.nanoTime() - divT0
+            }
+            if (
+                profileOscTarget == 4 &&
+                !slot.isLooperNote &&
+                (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)
+            ) {
+                deepProfileOscDividersNs += (System.nanoTime() - profileDividersT0) * OSC_PROFILE_TARGETS
             }
 
             if (profileHotPath) {
                 deepProfileOscillatorNs += System.nanoTime() - profileOscillatorT0
             }
-
             val profileModulationT0 = if (profileHotPath) System.nanoTime() else 0L
 
             // --- פילטר ZDF: ציר X = Cutoff LFO, ציר Y = Resonance ---

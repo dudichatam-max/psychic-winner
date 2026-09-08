@@ -1733,13 +1733,13 @@ class SynthEngine(private val context: Context) {
                         voiceFreqNs = dspEngine.deepProfileVoiceFreqNs(),
                         envelopeNs = dspEngine.deepProfileEnvelopeNs(),
                         oscillatorNs = dspEngine.deepProfileOscillatorNs(),
+                        modulationNs = dspEngine.deepProfileModulationNs(),
+                        voiceMixNs = dspEngine.deepProfileVoiceMixNs(),
                         oscMainNs = dspEngine.deepProfileOscMainNs(),
                         oscPianoNs = dspEngine.deepProfileOscPianoNs(),
                         oscSubNs = dspEngine.deepProfileOscSubNs(),
                         oscDetuneNs = dspEngine.deepProfileOscDetuneNs(),
-                        oscDividersNs = dspEngine.deepProfileOscDividersNs(),
-                        modulationNs = dspEngine.deepProfileModulationNs(),
-                        voiceMixNs = dspEngine.deepProfileVoiceMixNs()
+                        oscDividersNs = dspEngine.deepProfileOscDividersNs()
                     )
                     dspEngine.resetDeepProfile()
                 }

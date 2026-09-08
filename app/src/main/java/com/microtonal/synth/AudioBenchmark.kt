@@ -73,13 +73,13 @@ class BenchReport(
     val profileVoiceFreqAvgNs: Long = 0L,
     val profileEnvelopeAvgNs: Long = 0L,
     val profileOscillatorAvgNs: Long = 0L,
+    val profileModulationAvgNs: Long = 0L,
+    val profileVoiceMixAvgNs: Long = 0L,
     val profileOscMainAvgNs: Long = 0L,
     val profileOscPianoAvgNs: Long = 0L,
     val profileOscSubAvgNs: Long = 0L,
     val profileOscDetuneAvgNs: Long = 0L,
-    val profileOscDividersAvgNs: Long = 0L,
-    val profileModulationAvgNs: Long = 0L,
-    val profileVoiceMixAvgNs: Long = 0L
+    val profileOscDividersAvgNs: Long = 0L
 )
 
 /**
@@ -182,13 +182,13 @@ class AudioBenchmark(private val engine: SynthEngine) {
     private var deepProfileVoiceFreqNs = 0L
     private var deepProfileEnvelopeNs = 0L
     private var deepProfileOscillatorNs = 0L
+    private var deepProfileModulationNs = 0L
+    private var deepProfileVoiceMixNs = 0L
     private var deepProfileOscMainNs = 0L
     private var deepProfileOscPianoNs = 0L
     private var deepProfileOscSubNs = 0L
     private var deepProfileOscDetuneNs = 0L
     private var deepProfileOscDividersNs = 0L
-    private var deepProfileModulationNs = 0L
-    private var deepProfileVoiceMixNs = 0L
 
     @Volatile var deadlineNs: Long = 0L
         private set
@@ -250,13 +250,13 @@ class AudioBenchmark(private val engine: SynthEngine) {
         voiceFreqNs: Long,
         envelopeNs: Long,
         oscillatorNs: Long,
+        modulationNs: Long,
+        voiceMixNs: Long,
         oscMainNs: Long,
         oscPianoNs: Long,
         oscSubNs: Long,
         oscDetuneNs: Long,
-        oscDividersNs: Long,
-        modulationNs: Long,
-        voiceMixNs: Long
+        oscDividersNs: Long
     ) {
         if (captureMode != 2 || sampleCount <= 0L) return
         deepProfileSampleCount += sampleCount
@@ -270,13 +270,13 @@ class AudioBenchmark(private val engine: SynthEngine) {
         deepProfileVoiceFreqNs += voiceFreqNs
         deepProfileEnvelopeNs += envelopeNs
         deepProfileOscillatorNs += oscillatorNs
+        deepProfileModulationNs += modulationNs
+        deepProfileVoiceMixNs += voiceMixNs
         deepProfileOscMainNs += oscMainNs
         deepProfileOscPianoNs += oscPianoNs
         deepProfileOscSubNs += oscSubNs
         deepProfileOscDetuneNs += oscDetuneNs
         deepProfileOscDividersNs += oscDividersNs
-        deepProfileModulationNs += modulationNs
-        deepProfileVoiceMixNs += voiceMixNs
     }
 
     private fun profileAveragePerBuffer(sumNs: Long, sampleCount: Long, buffers: Int): Long {
@@ -324,13 +324,13 @@ class AudioBenchmark(private val engine: SynthEngine) {
             deepProfileVoiceFreqNs = 0L
             deepProfileEnvelopeNs = 0L
             deepProfileOscillatorNs = 0L
+            deepProfileModulationNs = 0L
+            deepProfileVoiceMixNs = 0L
             deepProfileOscMainNs = 0L
             deepProfileOscPianoNs = 0L
             deepProfileOscSubNs = 0L
             deepProfileOscDetuneNs = 0L
             deepProfileOscDividersNs = 0L
-            deepProfileModulationNs = 0L
-            deepProfileVoiceMixNs = 0L
             captureMode = 2
             startMeasureAfterWrite = false
         }
@@ -586,7 +586,12 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 profileEnvelopeAvgNs = profileAveragePerBuffer(deepProfileEnvelopeNs, deepProfileSampleCount, stats.count),
                 profileOscillatorAvgNs = profileAveragePerBuffer(deepProfileOscillatorNs, deepProfileSampleCount, stats.count),
                 profileModulationAvgNs = profileAveragePerBuffer(deepProfileModulationNs, deepProfileSampleCount, stats.count),
-                profileVoiceMixAvgNs = profileAveragePerBuffer(deepProfileVoiceMixNs, deepProfileSampleCount, stats.count)
+                profileVoiceMixAvgNs = profileAveragePerBuffer(deepProfileVoiceMixNs, deepProfileSampleCount, stats.count),
+                profileOscMainAvgNs = profileAveragePerBuffer(deepProfileOscMainNs, deepProfileSampleCount, stats.count),
+                profileOscPianoAvgNs = profileAveragePerBuffer(deepProfileOscPianoNs, deepProfileSampleCount, stats.count),
+                profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
+                profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
+                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count)
             )
             lastReport = report
             phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
@@ -1039,13 +1044,13 @@ internal fun reportToJson(r: BenchReport): JSONObject {
     o.put("profileVoiceFreqAvgNs", r.profileVoiceFreqAvgNs)
     o.put("profileEnvelopeAvgNs", r.profileEnvelopeAvgNs)
     o.put("profileOscillatorAvgNs", r.profileOscillatorAvgNs)
+    o.put("profileModulationAvgNs", r.profileModulationAvgNs)
+    o.put("profileVoiceMixAvgNs", r.profileVoiceMixAvgNs)
     o.put("profileOscMainAvgNs", r.profileOscMainAvgNs)
     o.put("profileOscPianoAvgNs", r.profileOscPianoAvgNs)
     o.put("profileOscSubAvgNs", r.profileOscSubAvgNs)
     o.put("profileOscDetuneAvgNs", r.profileOscDetuneAvgNs)
     o.put("profileOscDividersAvgNs", r.profileOscDividersAvgNs)
-    o.put("profileModulationAvgNs", r.profileModulationAvgNs)
-    o.put("profileVoiceMixAvgNs", r.profileVoiceMixAvgNs)
     return o
 }
 
@@ -1096,12 +1101,12 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         profileVoiceFreqAvgNs = o.optLong("profileVoiceFreqAvgNs", 0L),
         profileEnvelopeAvgNs = o.optLong("profileEnvelopeAvgNs", 0L),
         profileOscillatorAvgNs = o.optLong("profileOscillatorAvgNs", 0L),
+        profileModulationAvgNs = o.optLong("profileModulationAvgNs", 0L),
+        profileVoiceMixAvgNs = o.optLong("profileVoiceMixAvgNs", 0L),
         profileOscMainAvgNs = o.optLong("profileOscMainAvgNs", 0L),
         profileOscPianoAvgNs = o.optLong("profileOscPianoAvgNs", 0L),
         profileOscSubAvgNs = o.optLong("profileOscSubAvgNs", 0L),
         profileOscDetuneAvgNs = o.optLong("profileOscDetuneAvgNs", 0L),
-        profileOscDividersAvgNs = o.optLong("profileOscDividersAvgNs", 0L),
-        profileModulationAvgNs = o.optLong("profileModulationAvgNs", 0L),
-        profileVoiceMixAvgNs = o.optLong("profileVoiceMixAvgNs", 0L)
+        profileOscDividersAvgNs = o.optLong("profileOscDividersAvgNs", 0L)
     )
 }
