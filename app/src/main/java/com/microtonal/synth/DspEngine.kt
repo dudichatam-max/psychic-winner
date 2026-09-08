@@ -1,4 +1,4 @@
-﻿package com.microtonal.synth
+package com.microtonal.synth
  
 
 
@@ -38,6 +38,7 @@ class DspFrame(
 // Smoothing and zdfState still run every sample. Change this value only
 // (8 → 4 → 1) to A/B coefficient rate without touching the filter math.
 private const val ZDF_COEFF_UPDATE_INTERVAL = 8
+private const val DETUNE_RATIO = 1.0035
 
 class DspEngine(private val sampleRate: Int = 44100) {
 
@@ -635,7 +636,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             val vibeScale = if (vibeOn && !slot.isLooperNote) (1.0f + vibeMod) else 1.0f
             val dt = (slot.currentFreq * vibeScale * invSampleRate).coerceIn(0.0001, 0.45)
-            val invDt = 1.0 / dt
             slot.phase += twoPi * dt
             if (slot.phase >= twoPi) slot.phase -= twoPi
             val phaseNorm = slot.phase / twoPi
@@ -761,11 +761,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
             var raw = if (pianoWet >= 0.995 && livePiano) {
                 generatePianoWave(phaseNorm, slot.phaseP2 / twoPi, slot.phaseP3 / twoPi)
             } else if (livePiano) {
-                val waveRaw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt, invDt)
+                val waveRaw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt)
                 val pianoRaw = generatePianoWave(phaseNorm, slot.phaseP2 / twoPi, slot.phaseP3 / twoPi)
                 waveRaw * (1.0 - pianoWet) + pianoRaw * pianoWet
             } else {
-                generateOptimizedWaveform(slot.waveform, phaseNorm, dt, invDt)
+                generateOptimizedWaveform(slot.waveform, phaseNorm, dt)
             }
 
             // Analog SUB: sine one octave down on live voices only.
@@ -780,9 +780,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
             // Cheap unison / detune: second oscillator slightly sharp, mixed lower.
             // Only runs when detuneOn – almost zero extra cost when off (critical for weak devices).
             if (detuneOn) {
-                val detuneRatio = 1.0035  // ~6 cents
-                val dt2 = (slot.currentFreq * detuneRatio * invSampleRate).coerceIn(0.0001, 0.45)
-                val invDt2 = 1.0 / dt2
+                val dt2 = (slot.currentFreq * DETUNE_RATIO * invSampleRate).coerceIn(0.0001, 0.45)
                 slot.phase2 += twoPi * dt2
                 if (slot.phase2 >= twoPi) slot.phase2 -= twoPi
                 val phaseNorm2 = slot.phase2 / twoPi
@@ -791,7 +789,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
                     // A second full partial stack through the filter was the remaining crackle.
                     raw * 0.84 + fastSine(phaseNorm2) * (0.16 * slot.envelopeVolume)
                 } else {
-                    val raw2 = generateOptimizedWaveform(slot.waveform, phaseNorm2, dt2, invDt2)
+                    val raw2 = generateOptimizedWaveform(slot.waveform, phaseNorm2, dt2)
                     raw * 0.68 + raw2 * 0.32
                 }
             }
@@ -1305,10 +1303,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
-    private fun generateOptimizedWaveform(waveType: Int, phase: Double, dt: Double, invDt: Double): Double {
+    private fun generateOptimizedWaveform(waveType: Int, phase: Double, dt: Double): Double {
         return when (waveType) {
             0 -> fastSine(phase)
-            1 -> { 
+            1 -> {
+                val invDt = 1.0 / dt
                 var naive = if (phase < 0.5) 0.3 else -0.3
                 naive += polyBlep(phase, dt, invDt) * 0.3
                 var tHalf = phase + 0.5
@@ -1316,15 +1315,16 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 naive -= polyBlep(tHalf, dt, invDt) * 0.3
                 naive
             }
-            2 -> { 
+            2 -> {
                 (2.0 * abs(2.0 * phase - 1.0) - 1.0) * 0.35
             }
-            3 -> { 
+            3 -> {
+                val invDt = 1.0 / dt
                 var naive = (2.0 * phase - 1.0) * 0.35
                 naive -= polyBlep(phase, dt, invDt) * 0.35
                 naive
             }
-            else -> fastNoise() 
+            else -> fastNoise()
         }
     }
 
