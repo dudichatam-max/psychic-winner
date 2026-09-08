@@ -38,6 +38,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private enum class BenchmarkMode { REAL_SESSION, STRESS_MAX }
+
 @Composable
 fun BenchmarkScreen(
     engine: SynthEngine,
@@ -52,6 +54,7 @@ fun BenchmarkScreen(
 
     var includeLooper by remember { mutableStateOf(true) }
     var includeDrums by remember { mutableStateOf(true) }
+    var benchmarkMode by remember { mutableStateOf(BenchmarkMode.REAL_SESSION) }
     var running by remember { mutableStateOf(false) }
     var phaseLabel by remember { mutableStateOf("READY") }
     var remainSec by remember { mutableStateOf(0L) }
@@ -107,6 +110,42 @@ fun BenchmarkScreen(
 
         Text("Status: $phaseLabel", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 
+        Text("Mode", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Button(
+                onClick = { if (!running) benchmarkMode = BenchmarkMode.REAL_SESSION },
+                enabled = !running,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (benchmarkMode == BenchmarkMode.REAL_SESSION) gold else panelBg2
+                ),
+                modifier = Modifier.weight(1f).height(34.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Text("🟢 REAL SESSION", color = if (benchmarkMode == BenchmarkMode.REAL_SESSION) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            Button(
+                onClick = { if (!running) benchmarkMode = BenchmarkMode.STRESS_MAX },
+                enabled = !running,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (benchmarkMode == BenchmarkMode.STRESS_MAX) gold else panelBg2
+                ),
+                modifier = Modifier.weight(1f).height(34.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Text("🔴 STRESS MAX", color = if (benchmarkMode == BenchmarkMode.STRESS_MAX) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Text(
+            if (benchmarkMode == BenchmarkMode.REAL_SESSION)
+                "Real playing scenario: 4 Loopers + drums + live Pad/FX + Master WAV"
+            else
+                "Stress boundary test: maximum synthetic workload",
+            color = Color.LightGray, fontSize = 9.sp
+        )
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
                 checked = includeLooper,
@@ -135,7 +174,11 @@ fun BenchmarkScreen(
                 report = null
                 scope.launch {
                     val result = withContext(Dispatchers.Default) {
-                        bench.runBlockingWorkload(context, includeLooper, includeDrums)
+                        if (benchmarkMode == BenchmarkMode.REAL_SESSION) {
+                            bench.runBlockingWorkload(context, includeLooper, includeDrums)
+                        } else {
+                            bench.runBlockingStressWorkload(context, includeLooper, includeDrums)
+                        }
                     }
                     report = result
                     phaseLabel = if (result.verdict == BenchVerdict.ERROR) "ERROR" else "COMPLETED"
@@ -218,8 +261,9 @@ private fun ReportBlock(r: BenchReport) {
         Text("Deadline: ${nsToMs(r.deadlineNs)}", color = gray, fontSize = 10.sp)
         Text("Polyphony: Dynamic 1–8", color = gray, fontSize = 10.sp)
         Text("Maximum simultaneous voices: 8", color = gray, fontSize = 10.sp)
-        Text("Detune: ON   Warm: ON   Reverb: 100%   Pad/LFO: ON", color = gray, fontSize = 10.sp)
-        Text("Looper: ${onOff(r.includeLooper)}${if (r.includeLooper) "   Tracks: 6" else ""}", color = gray, fontSize = 10.sp)
+        Text("Workload details are defined by the selected benchmark mode", color = gray, fontSize = 10.sp)
+        Text("Workload: ${r.workloadId}", color = gray, fontSize = 10.sp)
+        Text("Looper: ${onOff(r.includeLooper)}", color = gray, fontSize = 10.sp)
         Text("Drums: ${onOff(r.includeDrums)}   BPM: ${r.bpm}", color = gray, fontSize = 10.sp)
         Text("Warm-up: 3s   Measurement: 30s   Wave: ${r.waveformType}", color = gray, fontSize = 10.sp)
         Spacer(Modifier.height(4.dp))

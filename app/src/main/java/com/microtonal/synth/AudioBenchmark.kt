@@ -42,6 +42,7 @@ class BenchReport(
     val deadlineNs: Long,
     val includeLooper: Boolean,
     val includeDrums: Boolean,
+    val workloadId: String = "real-session-4-loopers-v1",
     val waveformType: Int,
     val bpm: Float,
     val avgNs: Long,
@@ -90,6 +91,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
 
     companion object {
         const val WORKLOAD_ID = "real-session-4-loopers-v1"
+        const val STRESS_WORKLOAD_ID = "stress-max-v1"
         const val WARMUP_MS = 3_000L
         const val MEASURE_MS = 30_000L
         const val TOTAL_MS = WARMUP_MS + MEASURE_MS
@@ -612,6 +614,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 deadlineNs = deadlineNs,
                 includeLooper = includeLooper,
                 includeDrums = includeDrums,
+                workloadId = STRESS_WORKLOAD_ID,
                 waveformType = engine.waveformType,
                 bpm = engine.drumEngine.bpm,
                 avgNs = stats.avg,
@@ -1462,7 +1465,8 @@ class AudioBenchmark(private val engine: SynthEngine) {
             before.sampleRate == after.sampleRate &&
             before.bufferFrames == after.bufferFrames &&
             before.includeLooper == after.includeLooper &&
-            before.includeDrums == after.includeDrums
+            before.includeDrums == after.includeDrums &&
+            before.workloadId == after.workloadId
     }
 }
 
@@ -1554,6 +1558,7 @@ internal fun reportToJson(r: BenchReport): JSONObject {
     o.put("deadlineNs", r.deadlineNs)
     o.put("includeLooper", r.includeLooper)
     o.put("includeDrums", r.includeDrums)
+    o.put("workloadId", r.workloadId)
     o.put("waveformType", r.waveformType)
     o.put("bpm", r.bpm.toDouble())
     o.put("avgNs", r.avgNs)
@@ -1611,6 +1616,7 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         deadlineNs = o.optLong("deadlineNs", 0L),
         includeLooper = o.optBoolean("includeLooper", false),
         includeDrums = o.optBoolean("includeDrums", false),
+        workloadId = o.optString("workloadId", AudioBenchmark.WORKLOAD_ID),
         waveformType = o.optInt("waveformType", 0),
         bpm = o.optDouble("bpm", 120.0).toFloat(),
         avgNs = o.optLong("avgNs", 0L),
