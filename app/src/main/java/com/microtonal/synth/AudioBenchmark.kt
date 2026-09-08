@@ -6,6 +6,8 @@ import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -799,7 +801,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 val elapsed = SystemClock.elapsedRealtime() - startRt
                 remainingMs = (TOTAL_MS - elapsed).coerceAtLeast(0L)
 
-                while (eventI < REAL_VOICE_EVENTS.size && REAL_VOICE_EVENTS[eventI] <= elapsed) {
+                while (eventI < REAL_VOICE_AT_MS.size && REAL_VOICE_AT_MS[eventI] <= elapsed) {
                     fireRealVoice(eventI)
                     eventI++
                 }
@@ -812,7 +814,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
                     masterRecordingStartedAt = true
                 }
                 if (masterRecordingStartedAt && elapsed >= MASTER_RECORD_STOP_MS) {
-                    engine.stopRecording()
+                    stopMasterRecordingBlocking()
                     masterRecordingStarted = false
                 }
 
@@ -898,7 +900,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
 
             if (masterRecordingStarted) {
                 try {
-                    engine.stopRecording()
+                    stopMasterRecordingBlocking()
                 } catch (_: Throwable) {
                 }
                 masterRecordingStarted = false
@@ -1008,7 +1010,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
         } catch (t: Throwable) {
             if (masterRecordingStarted) {
                 try {
-                    engine.stopRecording()
+                    stopMasterRecordingBlocking()
                 } catch (_: Throwable) {
                 }
             }
@@ -1023,6 +1025,16 @@ class AudioBenchmark(private val engine: SynthEngine) {
             stopAfterWrite = false
             engine.busPadTouched = false
             setRealFx(false, false, false, false, false, false, false, false)
+        }
+    }
+
+    private fun stopMasterRecordingBlocking(timeoutMs: Long = 2_000L): Boolean {
+        val done = CountDownLatch(1)
+        return try {
+            engine.stopAndSaveRecordingAsync { done.countDown() }
+            done.await(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (_: Throwable) {
+            false
         }
     }
 
