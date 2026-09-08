@@ -635,6 +635,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
         if (activeCount > 0) for (v in 0 until maxVoices) {
             val slot = noteSlots[v]
             if (!slot.active) continue
+            // Stable for this sample; cache the voice classification locally.
+            val isLooper = slot.isLooperNote
 
 
 
@@ -658,7 +660,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
-            val vibeScale = if (vibeOn && !slot.isLooperNote) (1.0f + vibeMod) else 1.0f
+            val vibeScale = if (vibeOn && !isLooper) (1.0f + vibeMod) else 1.0f
             val dt = (slot.currentFreq * vibeScale * invSampleRate).coerceIn(0.0001, 0.45)
             val invDt = 1.0 / dt
             slot.phase += twoPi * dt
@@ -678,8 +680,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             val profileEnvelopeT0 = if (profileHotPath) System.nanoTime() else 0L
 
-            val actualSustain = if (slot.isLooperNote) slot.frozenSustain else sustainLevel
-            val actualDecay = if (slot.isLooperNote) slot.frozenDecay else decayMs
+            val actualSustain = if (isLooper) slot.frozenSustain else sustainLevel
+            val actualDecay = if (isLooper) slot.frozenDecay else decayMs
 
 
 
@@ -689,7 +691,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
             val attackCoeff = if (slot.attackCoeff > 0.0) slot.attackCoeff else {
-                val actualAttack = if (slot.isLooperNote) slot.frozenAttack else attackMs
+                val actualAttack = if (isLooper) slot.frozenAttack else attackMs
                 1.0 - Math.exp(-invSampleRate / (actualAttack / 1000.0).coerceAtLeast(0.001))
             }
 
@@ -712,7 +714,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
             val releaseCoeff = if (slot.releaseCoeff > 0.0) slot.releaseCoeff else {
-                val actualRelease = if (slot.isLooperNote) slot.frozenRelease else releaseMs
+                val actualRelease = if (isLooper) slot.frozenRelease else releaseMs
                 Math.exp(-invSampleRate / (actualRelease / 1000.0).coerceAtLeast(0.001))
             }
 
@@ -773,9 +775,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 deepProfileEnvelopeNs += System.nanoTime() - profileEnvelopeT0
             }
 
+            // Envelope is not modified again during this sample.
+            val envelope = slot.envelopeVolume
+
             val profileOscillatorT0 = if (profileHotPath) System.nanoTime() else 0L
 
-            val livePiano = !slot.isLooperNote && pianoWet > 0.0005
+            val livePiano = !isLooper && pianoWet > 0.0005
             if (livePiano) {
                 slot.phaseP2 += twoPi * dt * 2.0
                 slot.phaseP3 += twoPi * dt * 3.0
@@ -814,15 +819,15 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
 
             // Analog SUB: sine one octave down on live voices only.
-            val profileSubT0 = if (profileOscTarget == 2 && subOn && !slot.isLooperNote) System.nanoTime() else 0L
-            if (subOn && !slot.isLooperNote) {
+            val profileSubT0 = if (profileOscTarget == 2 && subOn && !isLooper) System.nanoTime() else 0L
+            if (subOn && !isLooper) {
                 val dtSub = (slot.currentFreq * 0.5 * invSampleRate).coerceIn(0.0001, 0.45)
                 slot.phaseSub += twoPi * dtSub
                 if (slot.phaseSub >= twoPi) slot.phaseSub -= twoPi
                 val sub = fastSine(slot.phaseSub / twoPi)
                 raw = raw * 0.70 + sub * 0.40
             }
-            if (profileOscTarget == 2 && subOn && !slot.isLooperNote) {
+            if (profileOscTarget == 2 && subOn && !isLooper) {
                 deepProfileOscSubNs += (System.nanoTime() - profileSubT0) * OSC_PROFILE_TARGETS
             }
 
@@ -839,7 +844,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 raw = if (livePiano) {
                     // One piano body + a quiet detuned fundamental.
                     // A second full partial stack through the filter was the remaining crackle.
-                    raw * 0.84 + fastSine(phaseNorm2) * (0.16 * slot.envelopeVolume)
+                    raw * 0.84 + fastSine(phaseNorm2) * (0.16 * envelope)
                 } else {
                     val raw2 = generateOptimizedWaveform(slot.waveform, phaseNorm2, dt2, invDt2)
                     raw * 0.68 + raw2 * 0.32
@@ -851,10 +856,10 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             val profileDividersT0 = if (
                 profileOscTarget == 4 &&
-                !slot.isLooperNote &&
+                !isLooper &&
                 (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)
             ) System.nanoTime() else 0L
-            if (!slot.isLooperNote && (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)) {
+            if (!isLooper && (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)) {
                 val fund = fastSine(phaseNorm)
                 if (slot.prevFund <= 0.0 && fund > 0.0) {
                     slot.zcCount++
@@ -871,7 +876,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
             if (
                 profileOscTarget == 4 &&
-                !slot.isLooperNote &&
+                !isLooper &&
                 (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)
             ) {
                 deepProfileOscDividersNs += (System.nanoTime() - profileDividersT0) * OSC_PROFILE_TARGETS
@@ -886,12 +891,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
             // Live pad modulates only live notes; recorded loop pad modulates only looper notes.
             // This allows free live pad use while a recorded loop is playing,
             // while still replaying the pad automation that was captured during recording.
-            var targetCutoff = (if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq).coerceIn(20f, 16000f)
-            var targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance)
+            var targetCutoff = (if (isLooper) slot.frozenCutoff else cutoffFreq).coerceIn(20f, 16000f)
+            var targetRes = (if (isLooper) slot.frozenRes else resonance)
 
-            val usePerfX = if (slot.isLooperNote) smoothedLoopPerfX else smoothedPerfX
-            val usePerfY = if (slot.isLooperNote) smoothedLoopPerfY else smoothedPerfY
-            val useLfoMod = if (slot.isLooperNote) loopLfoMod else liveLfoMod
+            val usePerfX = if (isLooper) smoothedLoopPerfX else smoothedPerfX
+            val usePerfY = if (isLooper) smoothedLoopPerfY else smoothedPerfY
+            val useLfoMod = if (isLooper) loopLfoMod else liveLfoMod
 
             if (usePerfX > 0.001f) {
                 val modDepth = usePerfX * 4000f
@@ -928,7 +933,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
             val resGainComp = 1.0 - (slot.smoothedRes * 0.45)
-            var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.5 * resGainComp
+            var voiceSample = raw * envelope * currentHeadroom * 0.5 * resGainComp
 
 
 
@@ -1015,7 +1020,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             val profileVoiceMixT0 = if (profileHotPath) System.nanoTime() else 0L
 
-            if (slot.isLooperNote) {
+            if (isLooper) {
                 looperChannelMix += voiceSample
             } else {
                 liveChannelMix += voiceSample
