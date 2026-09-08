@@ -597,19 +597,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
         var looperChannelMix = 0.0
 
-        // Task 3: snapshot per-sample values used repeatedly by the voice loop.
-        val headroomForVoices = currentHeadroom
-        val pianoWetForVoices = pianoWet
-        val div2WetForVoices = div2Wet
-        val div3WetForVoices = div3Wet
-        val div4WetForVoices = div4Wet
-        val divPolyScaleForVoices = divPolyScale
-        val livePerfXForVoices = smoothedPerfX
-        val livePerfYForVoices = smoothedPerfY
-        val loopPerfXForVoices = smoothedLoopPerfX
-        val loopPerfYForVoices = smoothedLoopPerfY
-
-
         val profileVoiceT0 = if (profileHotPath) System.nanoTime() else 0L
 
 
@@ -763,7 +750,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             val profileOscillatorT0 = if (profileHotPath) System.nanoTime() else 0L
 
-            val livePiano = !slot.isLooperNote && pianoWetForVoices > 0.0005
+            val livePiano = !slot.isLooperNote && pianoWet > 0.0005
             if (livePiano) {
                 slot.phaseP2 += twoPi * dt * 2.0
                 slot.phaseP3 += twoPi * dt * 3.0
@@ -771,12 +758,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 // phaseP3 step can exceed TWO_PI when dt > 1/3 — keep modulo.
                 if (slot.phaseP3 >= twoPi) slot.phaseP3 %= twoPi
             }
-            var raw = if (pianoWetForVoices >= 0.995 && livePiano) {
+            var raw = if (pianoWet >= 0.995 && livePiano) {
                 generatePianoWave(phaseNorm, slot.phaseP2 / twoPi, slot.phaseP3 / twoPi)
             } else if (livePiano) {
                 val waveRaw = generateOptimizedWaveform(slot.waveform, phaseNorm, dt, invDt)
                 val pianoRaw = generatePianoWave(phaseNorm, slot.phaseP2 / twoPi, slot.phaseP3 / twoPi)
-                waveRaw * (1.0 - pianoWetForVoices) + pianoRaw * pianoWetForVoices
+                waveRaw * (1.0 - pianoWet) + pianoRaw * pianoWet
             } else {
                 generateOptimizedWaveform(slot.waveform, phaseNorm, dt, invDt)
             }
@@ -809,7 +796,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 }
             }
 
-            if (!slot.isLooperNote && (div2WetForVoices > 0.0005 || div3WetForVoices > 0.0005 || div4WetForVoices > 0.0005)) {
+            if (!slot.isLooperNote && (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)) {
                 val fund = fastSine(phaseNorm)
                 if (slot.prevFund <= 0.0 && fund > 0.0) {
                     slot.zcCount++
@@ -819,10 +806,10 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 }
                 slot.prevFund = fund
                 raw = raw * 0.92 + (
-                    slot.div2 * (0.07 * div2WetForVoices) +
-                    slot.div3 * (0.055 * div3WetForVoices) +
-                    slot.div4 * (0.045 * div4WetForVoices)
-                ) * divPolyScaleForVoices
+                    slot.div2 * (0.07 * div2Wet) +
+                    slot.div3 * (0.055 * div3Wet) +
+                    slot.div4 * (0.045 * div4Wet)
+                ) * divPolyScale
             }
 
 
@@ -845,8 +832,8 @@ class DspEngine(private val sampleRate: Int = 44100) {
             var targetCutoff = (if (slot.isLooperNote) slot.frozenCutoff else cutoffFreq).coerceIn(20f, 16000f)
             var targetRes = (if (slot.isLooperNote) slot.frozenRes else resonance)
 
-            val usePerfX = if (slot.isLooperNote) loopPerfXForVoices else livePerfXForVoices
-            val usePerfY = if (slot.isLooperNote) loopPerfYForVoices else livePerfYForVoices
+            val usePerfX = if (slot.isLooperNote) smoothedLoopPerfX else smoothedPerfX
+            val usePerfY = if (slot.isLooperNote) smoothedLoopPerfY else smoothedPerfY
             val useLfoMod = if (slot.isLooperNote) loopLfoMod else liveLfoMod
 
             if (usePerfX > 0.001f) {
@@ -867,6 +854,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
+            if (profileHotPath) {
+                deepProfileModulationNs += System.nanoTime() - profileModulationT0
+            }
+
+            val profileZdfT0 = if (profileHotPath) System.nanoTime() else 0L
+
             slot.smoothedCutoff += (targetCutoff - slot.smoothedCutoff) * 0.01f
             slot.smoothedRes += (targetRes - slot.smoothedRes) * 0.01f
 
@@ -878,7 +871,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
             val resGainComp = 1.0 - (slot.smoothedRes * 0.45)
-            var voiceSample = raw * slot.envelopeVolume * headroomForVoices * 0.5 * resGainComp
+            var voiceSample = raw * slot.envelopeVolume * currentHeadroom * 0.5 * resGainComp
 
 
 
@@ -886,12 +879,6 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
-
-            if (profileHotPath) {
-                deepProfileModulationNs += System.nanoTime() - profileModulationT0
-            }
-
-            val profileZdfT0 = if (profileHotPath) System.nanoTime() else 0L
 
             // חישוב פילטר מהיר בעזרת fastTan ובלי Math.tan יקר
             // Rebuild g/k/h at ZDF_COEFF_UPDATE_INTERVAL, or on first sample
@@ -962,20 +949,21 @@ class DspEngine(private val sampleRate: Int = 44100) {
             }
 
 
+
+
+
+
+
+
+
             val profileVoiceMixT0 = if (profileHotPath) System.nanoTime() else 0L
-
-
-
-
-
-
-
 
             if (slot.isLooperNote) {
                 looperChannelMix += voiceSample
             } else {
                 liveChannelMix += voiceSample
             }
+
             if (profileHotPath) {
                 deepProfileVoiceMixNs += System.nanoTime() - profileVoiceMixT0
             }
