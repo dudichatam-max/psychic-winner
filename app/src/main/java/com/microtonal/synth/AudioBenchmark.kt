@@ -44,7 +44,7 @@ class BenchReport(
     val deadlineNs: Long,
     val includeLooper: Boolean,
     val includeDrums: Boolean,
-    val workloadId: String = "real-session-4-loopers-v1",
+    val workloadId: String = "real-play-4-loopers-v2",
     val waveformType: Int,
     val bpm: Float,
     val avgNs: Long,
@@ -92,7 +92,7 @@ class BenchReport(
 class AudioBenchmark(private val engine: SynthEngine) {
 
     companion object {
-        const val WORKLOAD_ID = "real-session-4-loopers-v1"
+        const val WORKLOAD_ID = "real-play-4-loopers-v2"
         const val STRESS_WORKLOAD_ID = "stress-max-v1"
         const val WARMUP_MS = 3_000L
         const val MEASURE_MS = 30_000L
@@ -153,61 +153,17 @@ class AudioBenchmark(private val engine: SynthEngine) {
         val FIXTURE_HZ = doubleArrayOf(110.0, 165.0, 220.0, 277.0, 330.0, 440.0)
         val FIXTURE_PAN = floatArrayOf(-0.80f, -0.48f, -0.16f, 0.16f, 0.48f, 0.80f)
 
-        // Real-session timeline, absolute milliseconds from benchmark start.
-        const val MASTER_RECORD_START_MS = 14_500L
-        const val MASTER_RECORD_STOP_MS = 29_000L
-        val LOOP_RECORD_START_MS = longArrayOf(3_200L, 6_200L, 9_200L, 12_200L)
-        val LOOP_RECORD_STOP_MS = longArrayOf(5_200L, 8_200L, 11_200L, 14_200L)
-
+        // Deterministic musical phrase profile for REAL PLAY. Most phrases use
+        // three voices with bounded note durations; this is intentionally a
+        // playing profile rather than a continuous polyphony stress pattern.
         val REAL_VOICE_AT_MS: LongArray = longArrayOf(
-            3500, 3590, 3680, 3770, 5000, 5070, 5140, 5210, 5700, 5790,
-            5880, 5970, 6060, 7100, 7170, 7240, 7310, 7380, 7600, 7690,
-            7780, 7870, 9300, 9370, 9440, 9510, 9800, 9890, 9980, 10070,
-            10160, 10250, 11400, 11470, 11540, 11610, 11680, 11750, 11800, 11890,
-            11980, 12070, 13600, 13670, 13740, 13800, 13810, 13890, 13980, 14070,
-            14160, 15600, 15670, 15740, 15800, 15810, 15880, 15890, 15980, 16070,
-            16160, 16250, 17500, 17570, 17640, 17710, 17780, 17850, 18000, 18090,
-            18180, 18270, 18360, 19600, 19670, 19740, 19810, 19880, 20100, 20190,
-            20280, 20370, 20460, 20550, 20640, 21900, 21970, 22040, 22110, 22180,
-            22250, 22320, 22400, 22490, 22580, 22670, 22760, 22850, 24100, 24170,
-            24240, 24310, 24380, 24450, 24600, 24690, 24780, 24870, 24960, 25050,
-            26300, 26370, 26440, 26510, 26580, 26650, 26800, 26890, 26980, 27070,
-            27160, 27250, 28500, 28570, 28640, 28710, 28780, 28850, 28900, 28990,
-            29080, 29170, 29260, 30100, 30170, 30240, 30310, 30380
+            3500, 3535, 3570, 4300, 4335, 4370, 5900, 5935, 5970, 6550, 6585, 6620, 8300, 8335, 8370, 8950, 8985, 9020, 10700, 10735, 10770, 11350, 11385, 11420, 13100, 13135, 13170, 13900, 13935, 13970, 15500, 15535, 15570, 16150, 16185, 16220, 17900, 17935, 17970, 18550, 18585, 18620, 20300, 20335, 20370, 20950, 20985, 21020, 22700, 22735, 22770, 23500, 23535, 23570, 25100, 25135, 25170, 25750, 25785, 25820, 27500, 27535, 27570, 28150, 28185, 28220, 29900, 29935, 29970, 30550, 30585, 30620
         )
-
         val REAL_VOICE_ON: BooleanArray = booleanArrayOf(
-            true, true, true, true, false, false, false, false, true, true,
-            true, true, true, false, false, false, false, false, true, true,
-            true, true, false, false, false, false, true, true, true, true,
-            true, true, false, false, false, false, false, false, true, true,
-            true, true, false, false, false, true, false, true, true, true,
-            true, false, false, false, true, false, false, true, true, true,
-            true, true, false, false, false, false, false, false, true, true,
-            true, true, true, false, false, false, false, false, true, true,
-            true, true, true, true, true, false, false, false, false, false,
-            false, false, true, true, true, true, true, true, false, false,
-            false, false, false, false, true, true, true, true, true, true,
-            false, false, false, false, false, false, true, true, true, true,
-            true, true, false, false, false, false, false, false, true, true,
-            true, true, true, false, false, false, false, false
+            true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false
         )
-
         val REAL_VOICE_IDX: IntArray = intArrayOf(
-            0, 2, 4, 1, 0, 2, 4, 1, 3, 5,
-            6, 2, 0, 3, 5, 6, 2, 0, 7, 4,
-            1, 6, 7, 4, 1, 6, 2, 4, 6, 7,
-            3, 1, 2, 4, 6, 7, 3, 1, 0, 3,
-            5, 7, 0, 3, 5, 1, 7, 4, 6, 2,
-            7, 1, 4, 6, 0, 2, 7, 2, 5, 7,
-            3, 6, 0, 2, 5, 7, 3, 6, 1, 3,
-            4, 6, 7, 1, 3, 4, 6, 7, 0, 2,
-            4, 5, 7, 1, 3, 0, 2, 4, 5, 7,
-            1, 3, 2, 4, 6, 1, 5, 7, 2, 4,
-            6, 1, 5, 7, 2, 4, 6, 1, 5, 7,
-            2, 4, 6, 1, 5, 7, 0, 3, 5, 7,
-            2, 6, 0, 3, 5, 7, 2, 6, 1, 4,
-            6, 7, 3, 1, 4, 6, 7, 3
+            0, 2, 4, 0, 2, 4, 1, 3, 5, 1, 3, 5, 2, 4, 6, 2, 4, 6, 3, 5, 7, 3, 5, 7, 0, 2, 4, 0, 2, 4, 1, 3, 5, 1, 3, 5, 2, 4, 6, 2, 4, 6, 3, 5, 7, 3, 5, 7, 0, 2, 4, 0, 2, 4, 1, 3, 5, 1, 3, 5, 2, 4, 6, 2, 4, 6, 3, 5, 7, 3, 5, 7
         )
     }
 
@@ -675,13 +631,12 @@ class AudioBenchmark(private val engine: SynthEngine) {
     /**
      * Deterministic realistic playing-session benchmark.
      *
-     * Unlike the stress workload, this does not preload six finished loopers.
-     * It builds four loopers sequentially through the same live record tap used
-     * by the app, then starts the Master WAV recording and performs a fixed
-     * sequence of notes, pad gestures and FX changes.
+     * This measures a deterministic playback/performance profile rather than a
+     * recording workload. It preloads four prepared loopers, then performs a
+     * sparse musical note sequence with intermittent pad gestures and FX changes.
+     * Recording is intentionally excluded so the result represents playing load.
      *
-     * Existing UI callers keep using this method; the stress workload remains
-     * available through [runBlockingStressWorkload].
+     * The stress workload remains available through [runBlockingStressWorkload].
      */
     fun runBlockingWorkload(
         context: Context,
@@ -711,7 +666,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
         var drumsSamples: Array<FloatArray?>? = null
         var drumsPlaying = false
         var drumsPattern = 0
-        var masterRecordingStarted = false
 
         try {
             deadlineNs = PROCESS_FRAMES.toLong() * 1_000_000_000L / engine.sampleRate.toLong()
@@ -733,6 +687,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
                     return fail(context, includeLooper, includeDrums, "Looper disk backup failed")
                 }
                 looperSnaps = mem
+                loadLooperFixtures(4)
             }
 
             if (includeDrums) {
@@ -790,8 +745,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
             var cpuSamples = 0
             var lastCpuTick = startRt
 
-            var loopStage = 0
-            var masterRecordingStartedAt = false
 
             captureMode = 1
             startMeasureAfterWrite = false
@@ -808,52 +761,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
 
                 updateRealSession(elapsed)
 
-                if (!masterRecordingStartedAt && elapsed >= MASTER_RECORD_START_MS) {
-                    engine.startRecording()
-                    masterRecordingStarted = true
-                    masterRecordingStartedAt = true
-                }
-                if (masterRecordingStartedAt && elapsed >= MASTER_RECORD_STOP_MS) {
-                    stopMasterRecordingBlocking()
-                    masterRecordingStarted = false
-                }
 
-                if (includeLooper) {
-                    when (loopStage) {
-                        0 -> if (elapsed >= LOOP_RECORD_START_MS[0]) {
-                            engine.startTrackRecording(0)
-                            loopStage = 1
-                        }
-                        1 -> if (elapsed >= LOOP_RECORD_STOP_MS[0]) {
-                            engine.setTrackPlaying(0, true)
-                            loopStage = 2
-                        }
-                        2 -> if (elapsed >= LOOP_RECORD_START_MS[1]) {
-                            engine.startTrackRecording(1)
-                            loopStage = 3
-                        }
-                        3 -> if (elapsed >= LOOP_RECORD_STOP_MS[1]) {
-                            engine.setTrackPlaying(1, true)
-                            loopStage = 4
-                        }
-                        4 -> if (elapsed >= LOOP_RECORD_START_MS[2]) {
-                            engine.startTrackRecording(2)
-                            loopStage = 5
-                        }
-                        5 -> if (elapsed >= LOOP_RECORD_STOP_MS[2]) {
-                            engine.setTrackPlaying(2, true)
-                            loopStage = 6
-                        }
-                        6 -> if (elapsed >= LOOP_RECORD_START_MS[3]) {
-                            engine.startTrackRecording(3)
-                            loopStage = 7
-                        }
-                        7 -> if (elapsed >= LOOP_RECORD_STOP_MS[3]) {
-                            engine.setTrackPlaying(3, true)
-                            loopStage = 8
-                        }
-                    }
-                }
 
                 if (!measureStarted && elapsed >= WARMUP_MS) {
                     startMeasureAfterWrite = true
@@ -898,13 +806,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 Thread.sleep(8L)
             }
 
-            if (masterRecordingStarted) {
-                try {
-                    stopMasterRecordingBlocking()
-                } catch (_: Throwable) {
-                }
-                masterRecordingStarted = false
-            }
 
             if (captureMode != 0) {
                 stopAfterWrite = true
@@ -1008,12 +909,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
             if (report.verdict != BenchVerdict.ERROR) saveLast(context, report)
             return report
         } catch (t: Throwable) {
-            if (masterRecordingStarted) {
-                try {
-                    stopMasterRecordingBlocking()
-                } catch (_: Throwable) {
-                }
-            }
             releaseWorkload(
                 snap, looperSnaps, context, includeLooper, includeDrums,
                 drumsGrid, drumsVol, drumsPan, drumsSamples, drumsPlaying, drumsPattern
@@ -1025,16 +920,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
             stopAfterWrite = false
             engine.busPadTouched = false
             setRealFx(false, false, false, false, false, false, false, false)
-        }
-    }
-
-    private fun stopMasterRecordingBlocking(timeoutMs: Long = 2_000L): Boolean {
-        val done = CountDownLatch(1)
-        return try {
-            engine.stopAndSaveRecordingAsync { done.countDown() }
-            done.await(timeoutMs, TimeUnit.MILLISECONDS)
-        } catch (_: Throwable) {
-            false
         }
     }
 
@@ -1158,10 +1043,10 @@ class AudioBenchmark(private val engine: SynthEngine) {
         }
     }
 
-    private fun loadLooperFixtures() {
+    private fun loadLooperFixtures(count: Int = 6) {
         val sr = engine.sampleRate
         var t = 0
-        while (t < 6) {
+        while (t < count.coerceAtMost(6)) {
             val pcm = sineFixture(FIXTURE_HZ[t], sr, FIXTURE_SECONDS)
             engine.looperTracks[t].loadFromSamples(pcm)
             engine.setTrackVolume(t, 1f)
