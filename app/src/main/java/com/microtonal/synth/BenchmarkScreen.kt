@@ -1,6 +1,8 @@
 package com.microtonal.synth
 
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,8 +40,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class BenchmarkMode { REAL_SESSION, STRESS_MAX }
-
 @Composable
 fun BenchmarkScreen(
     engine: SynthEngine,
@@ -54,7 +54,6 @@ fun BenchmarkScreen(
 
     var includeLooper by remember { mutableStateOf(true) }
     var includeDrums by remember { mutableStateOf(true) }
-    var benchmarkMode by remember { mutableStateOf(BenchmarkMode.REAL_SESSION) }
     var running by remember { mutableStateOf(false) }
     var phaseLabel by remember { mutableStateOf("READY") }
     var remainSec by remember { mutableStateOf(0L) }
@@ -64,6 +63,31 @@ fun BenchmarkScreen(
     var report by remember { mutableStateOf(bench.lastReport) }
     var statusMsg by remember { mutableStateOf("") }
     var compareText by remember { mutableStateOf("") }
+    var referenceSession by remember { mutableStateOf(BenchmarkReferenceIO.loadInternal(context)) }
+    var recordingReference by remember { mutableStateOf(false) }
+
+    val exportReferenceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        val session = referenceSession
+        if (uri != null && session != null) {
+            statusMsg = if (BenchmarkReferenceIO.exportToUri(context, uri, session)) "Reference ZIP saved" else "Reference export failed"
+        }
+    }
+    val importReferenceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                val loaded = BenchmarkReferenceIO.importFromUri(context, uri)
+                withContext(Dispatchers.Main) {
+                    referenceSession = loaded
+                    loaded?.let { BenchmarkReferenceIO.saveInternal(context, it) }
+                    statusMsg = if (loaded != null) "Reference loaded: ${loaded.events.size} events" else "Reference import failed"
+                }
+            }
+        }
+    }
 
     LaunchedEffect(running) {
         if (!running) return@LaunchedEffect
@@ -110,41 +134,64 @@ fun BenchmarkScreen(
 
         Text("Status: $phaseLabel", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 
-        Text("Mode", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Button(
-                onClick = { if (!running) benchmarkMode = BenchmarkMode.REAL_SESSION },
-                enabled = !running,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (benchmarkMode == BenchmarkMode.REAL_SESSION) gold else panelBg2
-                ),
-                modifier = Modifier.weight(1f).height(34.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
-            ) {
-                Text("🟢 REAL SESSION", color = if (benchmarkMode == BenchmarkMode.REAL_SESSION) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-            Button(
-                onClick = { if (!running) benchmarkMode = BenchmarkMode.STRESS_MAX },
-                enabled = !running,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (benchmarkMode == BenchmarkMode.STRESS_MAX) gold else panelBg2
-                ),
-                modifier = Modifier.weight(1f).height(34.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
-            ) {
-                Text("🔴 STRESS MAX", color = if (benchmarkMode == BenchmarkMode.STRESS_MAX) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-        }
+        Text("REFERENCE SESSION", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Text(
-            if (benchmarkMode == BenchmarkMode.REAL_SESSION)
-                "Real playing scenario: 4 Loopers + drums + live Pad/FX + Master WAV"
-            else
-                "Stress boundary test: maximum synthetic workload",
-            color = Color.LightGray, fontSize = 9.sp
+            if (recordingReference) "Recording your real performance… play normally, then press STOP RECORDING"
+            else referenceSession?.let { "Loaded: ${it.events.size} events · ${it.durationUs / 1_000_000.0f}s · loops ${it.loops.size}" } ?: "No reference session loaded",
+            color = Color.LightGray, fontSize = 10.sp
         )
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = {
+                    if (!recordingReference) {
+                        bench.requestCancel()
+                        engine.benchmarkReferenceRecorder.start()
+                        recordingReference = true
+                        statusMsg = "Recording started"
+                    } else {
+                        referenceSession = engine.benchmarkReferenceRecorder.stop()
+                        referenceSession?.let { BenchmarkReferenceIO.saveInternal(context, it) }
+                        recordingReference = false
+                        statusMsg = referenceSession?.let { "Reference captured: ${it.events.size} events" } ?: "Reference recording failed"
+                    }
+                },
+                enabled = !running,
+                colors = ButtonDefaults.buttonColors(containerColor = if (recordingReference) Color(0xFFB71C1C) else gold),
+                modifier = Modifier.weight(1f).height(32.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) { Text(if (recordingReference) "STOP RECORDING" else "RECORD SESSION", color = if (recordingReference) Color.White else Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp) }
+            OutlinedButton(
+                onClick = { exportReferenceLauncher.launch("LStudio_Reference_${System.currentTimeMillis()}.zip") },
+                enabled = referenceSession != null && !recordingReference && !running,
+                modifier = Modifier.weight(1f).height(32.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) { Text("EXPORT ZIP", color = gold, fontSize = 9.sp) }
+            OutlinedButton(
+                onClick = { importReferenceLauncher.launch("application/zip") },
+                enabled = !recordingReference && !running,
+                modifier = Modifier.weight(1f).height(32.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) { Text("IMPORT ZIP", color = gold, fontSize = 9.sp) }
+        }
+        Button(
+            onClick = {
+                val session = referenceSession ?: return@Button
+                running = true; statusMsg = ""; compareText = ""; report = null
+                scope.launch {
+                    val result = withContext(Dispatchers.Default) { bench.runReferenceBlocking(context, session, includeLooper, includeDrums) }
+                    report = result; phaseLabel = if (result.verdict == BenchVerdict.ERROR) "ERROR" else "REFERENCE COMPLETED"
+                    statusMsg = result.errorMessage ?: ""; running = false
+                }
+            },
+            enabled = referenceSession != null && !recordingReference && !running,
+            colors = ButtonDefaults.buttonColors(containerColor = gold),
+            modifier = Modifier.fillMaxWidth().height(34.dp)
+        ) { Text(if (running) "RUNNING…" else "RUN REFERENCE", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+
+        Text("Reference Looper replay uses the recorded PCM source through the normal track-recording path, so the replay does not depend on live input.", color = Color.LightGray, fontSize = 9.sp)
+
+        Text("EXTREME STRESS", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("The existing synthetic stress workload is kept separate from the real-session benchmark.", color = Color.LightGray, fontSize = 9.sp)
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
@@ -174,11 +221,7 @@ fun BenchmarkScreen(
                 report = null
                 scope.launch {
                     val result = withContext(Dispatchers.Default) {
-                        if (benchmarkMode == BenchmarkMode.REAL_SESSION) {
-                            bench.runBlockingWorkload(context, includeLooper, includeDrums)
-                        } else {
-                            bench.runBlockingStressWorkload(context, includeLooper, includeDrums)
-                        }
+                        bench.runBlockingWorkload(context, includeLooper, includeDrums)
                     }
                     report = result
                     phaseLabel = if (result.verdict == BenchVerdict.ERROR) "ERROR" else "COMPLETED"
@@ -190,7 +233,7 @@ fun BenchmarkScreen(
             colors = ButtonDefaults.buttonColors(containerColor = gold),
             modifier = Modifier.fillMaxWidth().height(36.dp)
         ) {
-            Text(if (running) "RUNNING…" else "START BENCHMARK", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text(if (running) "RUNNING…" else "START STRESS TEST", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
 
         if (running) {
@@ -261,9 +304,8 @@ private fun ReportBlock(r: BenchReport) {
         Text("Deadline: ${nsToMs(r.deadlineNs)}", color = gray, fontSize = 10.sp)
         Text("Polyphony: Dynamic 1–8", color = gray, fontSize = 10.sp)
         Text("Maximum simultaneous voices: 8", color = gray, fontSize = 10.sp)
-        Text("Workload details are defined by the selected benchmark mode", color = gray, fontSize = 10.sp)
-        Text("Workload: ${r.workloadId}", color = gray, fontSize = 10.sp)
-        Text("Looper: ${onOff(r.includeLooper)}", color = gray, fontSize = 10.sp)
+        Text("Detune: ON   Warm: ON   Reverb: 100%   Pad/LFO: ON", color = gray, fontSize = 10.sp)
+        Text("Looper: ${onOff(r.includeLooper)}${if (r.includeLooper) "   Tracks: 6" else ""}", color = gray, fontSize = 10.sp)
         Text("Drums: ${onOff(r.includeDrums)}   BPM: ${r.bpm}", color = gray, fontSize = 10.sp)
         Text("Warm-up: 3s   Measurement: 30s   Wave: ${r.waveformType}", color = gray, fontSize = 10.sp)
         Spacer(Modifier.height(4.dp))
@@ -286,34 +328,6 @@ private fun ReportBlock(r: BenchReport) {
         Text("CPU (process-level estimate)", color = Color(0xFFD4AF37), fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Text("Average: ${String.format("%.2f", r.cpuAvgPct)}%", color = gray, fontSize = 10.sp)
         Text("Peak: ${String.format("%.2f", r.cpuPeakPct)}%", color = gray, fontSize = 10.sp)
-        Spacer(Modifier.height(4.dp))
-        Text("Sampled audio-path profile (estimated per buffer)", color = Color(0xFFD4AF37), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Text("DSP: ${nsToMs(r.profileDspAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("Drums: ${nsToMs(r.profileDrumsAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("Looper: ${nsToMs(r.profileLooperAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("Mic: ${nsToMs(r.profileMicAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("Pad + Master + Output: ${nsToMs(r.profilePadMasterAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("AudioTrack.write: ${nsToMs(r.profileAudioWriteAvgNs)}", color = gray, fontSize = 10.sp)
-        Spacer(Modifier.height(3.dp))
-        Text("Deep DSP profile (estimated per buffer)", color = Color(0xFFD4AF37), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Text("Voice total: ${nsToMs(r.profileVoiceAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Freq / Glide / Phase: ${nsToMs(r.profileVoiceFreqAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Envelope / ADSR: ${nsToMs(r.profileEnvelopeAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Oscillator + extras: ${nsToMs(r.profileOscillatorAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Modulation / filter prep: ${nsToMs(r.profileModulationAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Voice mix: ${nsToMs(r.profileVoiceMixAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Osc main waveform: ${nsToMs(r.profileOscMainAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Osc piano: ${nsToMs(r.profileOscPianoAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Osc sub: ${nsToMs(r.profileOscSubAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Osc detune: ${nsToMs(r.profileOscDetuneAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("  Osc dividers: ${nsToMs(r.profileOscDividersAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("ZDF filter: ${nsToMs(r.profileZdfAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("External / prepare: ${nsToMs(r.profileExternalAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("Live FX: ${nsToMs(r.profileLiveFxAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("Delay: ${nsToMs(r.profileDelayAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("Reverb: ${nsToMs(r.profileReverbAvgNs)}", color = gray, fontSize = 10.sp)
-        Text("Master: ${nsToMs(r.profileMasterAvgNs)}", color = gray, fontSize = 10.sp)
-
     }
 }
 

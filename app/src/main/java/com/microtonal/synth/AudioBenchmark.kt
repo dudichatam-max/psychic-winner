@@ -6,8 +6,6 @@ import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -44,7 +42,6 @@ class BenchReport(
     val deadlineNs: Long,
     val includeLooper: Boolean,
     val includeDrums: Boolean,
-    val workloadId: String = "real-play-4-loopers-v2",
     val waveformType: Int,
     val bpm: Float,
     val avgNs: Long,
@@ -59,30 +56,7 @@ class BenchReport(
     val deltaUnderruns: Int,
     val cpuAvgPct: Double,
     val cpuPeakPct: Double,
-    // Optional sampled hot-path profiling (average estimated time per audio buffer).
-    val profileDspAvgNs: Long = 0L,
-    val profileDrumsAvgNs: Long = 0L,
-    val profileLooperAvgNs: Long = 0L,
-    val profileMicAvgNs: Long = 0L,
-    val profilePadMasterAvgNs: Long = 0L,
-    val profileAudioWriteAvgNs: Long = 0L,
-    val profileVoiceAvgNs: Long = 0L,
-    val profileZdfAvgNs: Long = 0L,
-    val profileExternalAvgNs: Long = 0L,
-    val profileLiveFxAvgNs: Long = 0L,
-    val profileDelayAvgNs: Long = 0L,
-    val profileReverbAvgNs: Long = 0L,
-    val profileMasterAvgNs: Long = 0L,
-    val profileVoiceFreqAvgNs: Long = 0L,
-    val profileEnvelopeAvgNs: Long = 0L,
-    val profileOscillatorAvgNs: Long = 0L,
-    val profileModulationAvgNs: Long = 0L,
-    val profileVoiceMixAvgNs: Long = 0L,
-    val profileOscMainAvgNs: Long = 0L,
-    val profileOscPianoAvgNs: Long = 0L,
-    val profileOscSubAvgNs: Long = 0L,
-    val profileOscDetuneAvgNs: Long = 0L,
-    val profileOscDividersAvgNs: Long = 0L
+    val workloadId: String = AudioBenchmark.WORKLOAD_ID
 )
 
 /**
@@ -92,8 +66,7 @@ class BenchReport(
 class AudioBenchmark(private val engine: SynthEngine) {
 
     companion object {
-        const val WORKLOAD_ID = "real-play-4-loopers-v2"
-        const val STRESS_WORKLOAD_ID = "stress-max-v1"
+        const val WORKLOAD_ID = "dynamic-1-8-v2"
         const val WARMUP_MS = 3_000L
         const val MEASURE_MS = 30_000L
         const val TOTAL_MS = WARMUP_MS + MEASURE_MS
@@ -152,19 +125,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
 
         val FIXTURE_HZ = doubleArrayOf(110.0, 165.0, 220.0, 277.0, 330.0, 440.0)
         val FIXTURE_PAN = floatArrayOf(-0.80f, -0.48f, -0.16f, 0.16f, 0.48f, 0.80f)
-
-        // Deterministic musical phrase profile for REAL PLAY. Most phrases use
-        // three voices with bounded note durations; this is intentionally a
-        // playing profile rather than a continuous polyphony stress pattern.
-        val REAL_VOICE_AT_MS: LongArray = longArrayOf(
-            3500, 3535, 3570, 4300, 4335, 4370, 5900, 5935, 5970, 6550, 6585, 6620, 8300, 8335, 8370, 8950, 8985, 9020, 10700, 10735, 10770, 11350, 11385, 11420, 13100, 13135, 13170, 13900, 13935, 13970, 15500, 15535, 15570, 16150, 16185, 16220, 17900, 17935, 17970, 18550, 18585, 18620, 20300, 20335, 20370, 20950, 20985, 21020, 22700, 22735, 22770, 23500, 23535, 23570, 25100, 25135, 25170, 25750, 25785, 25820, 27500, 27535, 27570, 28150, 28185, 28220, 29900, 29935, 29970, 30550, 30585, 30620
-        )
-        val REAL_VOICE_ON: BooleanArray = booleanArrayOf(
-            true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, true, false, false, false
-        )
-        val REAL_VOICE_IDX: IntArray = intArrayOf(
-            0, 2, 4, 0, 2, 4, 1, 3, 5, 1, 3, 5, 2, 4, 6, 2, 4, 6, 3, 5, 7, 3, 5, 7, 0, 2, 4, 0, 2, 4, 1, 3, 5, 1, 3, 5, 2, 4, 6, 2, 4, 6, 3, 5, 7, 3, 5, 7, 0, 2, 4, 0, 2, 4, 1, 3, 5, 1, 3, 5, 2, 4, 6, 2, 4, 6, 3, 5, 7, 3, 5, 7
-        )
     }
 
     @Volatile var captureMode: Int = 0
@@ -177,36 +137,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
     private var writeIdx = 0
     @Volatile private var bufCount = 0
     @Volatile private var missCount = 0
-
-    // Sampled hot-path profiling state. Used only during benchmark measurement.
-    private val profileStride = 128
-    private var profileSampleCount = 0L
-    private var profileDspNs = 0L
-    private var profileDrumsNs = 0L
-    private var profileLooperNs = 0L
-    private var profileMicNs = 0L
-    private var profilePadMasterNs = 0L
-    private var profileAudioWriteNs = 0L
-
-    private var deepProfileSampleCount = 0L
-    private var deepProfileVoiceNs = 0L
-    private var deepProfileZdfNs = 0L
-    private var deepProfileExternalNs = 0L
-    private var deepProfileLiveFxNs = 0L
-    private var deepProfileDelayNs = 0L
-    private var deepProfileReverbNs = 0L
-    private var deepProfileMasterNs = 0L
-    private var deepProfileVoiceFreqNs = 0L
-    private var deepProfileEnvelopeNs = 0L
-    private var deepProfileOscillatorNs = 0L
-    private var deepProfileModulationNs = 0L
-    private var deepProfileVoiceMixNs = 0L
-    private var deepProfileOscMainNs = 0L
-    private var deepProfileOscPianoNs = 0L
-    private var deepProfileOscSubNs = 0L
-    private var deepProfileOscDetuneNs = 0L
-    private var deepProfileOscDividersNs = 0L
-
     @Volatile var deadlineNs: Long = 0L
         private set
 
@@ -231,76 +161,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
 
     fun processBufferFrames(): Int = PROCESS_FRAMES
 
-    fun shouldProfileSample(sampleIndex: Int): Boolean {
-        return captureMode == 2 && (sampleIndex and (profileStride - 1)) == 31
-    }
-
-    fun recordProfileSample(
-        dspNs: Long,
-        drumsNs: Long,
-        looperNs: Long,
-        micNs: Long,
-        padMasterNs: Long
-    ) {
-        if (captureMode != 2) return
-        profileDspNs += dspNs
-        profileDrumsNs += drumsNs
-        profileLooperNs += looperNs
-        profileMicNs += micNs
-        profilePadMasterNs += padMasterNs
-        profileSampleCount++
-    }
-
-    fun recordAudioWrite(ns: Long) {
-        if (captureMode == 2) profileAudioWriteNs += ns
-    }
-
-    fun recordDeepDspProfile(
-        sampleCount: Long,
-        voiceNs: Long,
-        zdfNs: Long,
-        externalNs: Long,
-        liveFxNs: Long,
-        delayNs: Long,
-        reverbNs: Long,
-        masterNs: Long,
-        voiceFreqNs: Long,
-        envelopeNs: Long,
-        oscillatorNs: Long,
-        modulationNs: Long,
-        voiceMixNs: Long,
-        oscMainNs: Long,
-        oscPianoNs: Long,
-        oscSubNs: Long,
-        oscDetuneNs: Long,
-        oscDividersNs: Long
-    ) {
-        if (captureMode != 2 || sampleCount <= 0L) return
-        deepProfileSampleCount += sampleCount
-        deepProfileVoiceNs += voiceNs
-        deepProfileZdfNs += zdfNs
-        deepProfileExternalNs += externalNs
-        deepProfileLiveFxNs += liveFxNs
-        deepProfileDelayNs += delayNs
-        deepProfileReverbNs += reverbNs
-        deepProfileMasterNs += masterNs
-        deepProfileVoiceFreqNs += voiceFreqNs
-        deepProfileEnvelopeNs += envelopeNs
-        deepProfileOscillatorNs += oscillatorNs
-        deepProfileModulationNs += modulationNs
-        deepProfileVoiceMixNs += voiceMixNs
-        deepProfileOscMainNs += oscMainNs
-        deepProfileOscPianoNs += oscPianoNs
-        deepProfileOscSubNs += oscSubNs
-        deepProfileOscDetuneNs += oscDetuneNs
-        deepProfileOscDividersNs += oscDividersNs
-    }
-
-    private fun profileAveragePerBuffer(sumNs: Long, sampleCount: Long, buffers: Int): Long {
-        if (sampleCount <= 0L || buffers <= 0) return 0L
-        return ((sumNs.toDouble() / sampleCount.toDouble()) * PROCESS_FRAMES).toLong()
-    }
-
     fun onBufferDone(dtNs: Long) {
         if (captureMode != 2) return
         val i = writeIdx
@@ -323,31 +183,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
             writeIdx = 0
             bufCount = 0
             missCount = 0
-            profileSampleCount = 0L
-            profileDspNs = 0L
-            profileDrumsNs = 0L
-            profileLooperNs = 0L
-            profileMicNs = 0L
-            profilePadMasterNs = 0L
-            profileAudioWriteNs = 0L
-            deepProfileSampleCount = 0L
-            deepProfileVoiceNs = 0L
-            deepProfileZdfNs = 0L
-            deepProfileExternalNs = 0L
-            deepProfileLiveFxNs = 0L
-            deepProfileDelayNs = 0L
-            deepProfileReverbNs = 0L
-            deepProfileMasterNs = 0L
-            deepProfileVoiceFreqNs = 0L
-            deepProfileEnvelopeNs = 0L
-            deepProfileOscillatorNs = 0L
-            deepProfileModulationNs = 0L
-            deepProfileVoiceMixNs = 0L
-            deepProfileOscMainNs = 0L
-            deepProfileOscPianoNs = 0L
-            deepProfileOscSubNs = 0L
-            deepProfileOscDetuneNs = 0L
-            deepProfileOscDividersNs = 0L
             captureMode = 2
             startMeasureAfterWrite = false
         }
@@ -358,7 +193,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
         stopAfterWrite = true
     }
 
-    fun runBlockingStressWorkload(
+    fun runBlockingWorkload(
         context: Context,
         includeLooper: Boolean,
         includeDrums: Boolean
@@ -572,7 +407,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 deadlineNs = deadlineNs,
                 includeLooper = includeLooper,
                 includeDrums = includeDrums,
-                workloadId = STRESS_WORKLOAD_ID,
                 waveformType = engine.waveformType,
                 bpm = engine.drumEngine.bpm,
                 avgNs = stats.avg,
@@ -586,30 +420,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 underrunsAvailable = underrunAvail,
                 deltaUnderruns = deltaU,
                 cpuAvgPct = cpuAvg,
-                cpuPeakPct = cpuPeak,
-                profileDspAvgNs = profileAveragePerBuffer(profileDspNs, profileSampleCount, stats.count),
-                profileDrumsAvgNs = profileAveragePerBuffer(profileDrumsNs, profileSampleCount, stats.count),
-                profileLooperAvgNs = profileAveragePerBuffer(profileLooperNs, profileSampleCount, stats.count),
-                profileMicAvgNs = profileAveragePerBuffer(profileMicNs, profileSampleCount, stats.count),
-                profilePadMasterAvgNs = profileAveragePerBuffer(profilePadMasterNs, profileSampleCount, stats.count),
-                profileAudioWriteAvgNs = profileAveragePerBuffer(profileAudioWriteNs, profileSampleCount, stats.count),
-                profileVoiceAvgNs = profileAveragePerBuffer(deepProfileVoiceNs, deepProfileSampleCount, stats.count),
-                profileZdfAvgNs = profileAveragePerBuffer(deepProfileZdfNs, deepProfileSampleCount, stats.count),
-                profileExternalAvgNs = profileAveragePerBuffer(deepProfileExternalNs, deepProfileSampleCount, stats.count),
-                profileLiveFxAvgNs = profileAveragePerBuffer(deepProfileLiveFxNs, deepProfileSampleCount, stats.count),
-                profileDelayAvgNs = profileAveragePerBuffer(deepProfileDelayNs, deepProfileSampleCount, stats.count),
-                profileReverbAvgNs = profileAveragePerBuffer(deepProfileReverbNs, deepProfileSampleCount, stats.count),
-                profileMasterAvgNs = profileAveragePerBuffer(deepProfileMasterNs, deepProfileSampleCount, stats.count),
-                profileVoiceFreqAvgNs = profileAveragePerBuffer(deepProfileVoiceFreqNs, deepProfileSampleCount, stats.count),
-                profileEnvelopeAvgNs = profileAveragePerBuffer(deepProfileEnvelopeNs, deepProfileSampleCount, stats.count),
-                profileOscillatorAvgNs = profileAveragePerBuffer(deepProfileOscillatorNs, deepProfileSampleCount, stats.count),
-                profileModulationAvgNs = profileAveragePerBuffer(deepProfileModulationNs, deepProfileSampleCount, stats.count),
-                profileVoiceMixAvgNs = profileAveragePerBuffer(deepProfileVoiceMixNs, deepProfileSampleCount, stats.count),
-                profileOscMainAvgNs = profileAveragePerBuffer(deepProfileOscMainNs, deepProfileSampleCount, stats.count),
-                profileOscPianoAvgNs = profileAveragePerBuffer(deepProfileOscPianoNs, deepProfileSampleCount, stats.count),
-                profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
-                profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
-                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count)
+                cpuPeakPct = cpuPeak
             )
             lastReport = report
             phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
@@ -626,404 +437,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
             startMeasureAfterWrite = false
             stopAfterWrite = false
         }
-    }
-
-    /**
-     * Deterministic realistic playing-session benchmark.
-     *
-     * This measures a deterministic playback/performance profile rather than a
-     * recording workload. It preloads four prepared loopers, then performs a
-     * sparse musical note sequence with intermittent pad gestures and FX changes.
-     * Recording is intentionally excluded so the result represents playing load.
-     *
-     * The stress workload remains available through [runBlockingStressWorkload].
-     */
-    fun runBlockingWorkload(
-        context: Context,
-        includeLooper: Boolean,
-        includeDrums: Boolean
-    ): BenchReport {
-        cancelRequested = false
-        lastError = null
-        lastReport = null
-        phase = BenchPhase.WARMUP
-        remainingMs = TOTAL_MS
-        liveBuffers = 0
-        liveMisses = 0
-        liveCpuPct = 0.0
-        writeIdx = 0
-        bufCount = 0
-        missCount = 0
-        captureMode = 0
-        startMeasureAfterWrite = false
-        stopAfterWrite = false
-
-        val snap = WorkloadSnapshot.capture(engine)
-        var looperSnaps: Array<LooperTrackRestoreSnapshot>? = null
-        var drumsGrid: Array<BooleanArray>? = null
-        var drumsVol: FloatArray? = null
-        var drumsPan: FloatArray? = null
-        var drumsSamples: Array<FloatArray?>? = null
-        var drumsPlaying = false
-        var drumsPattern = 0
-
-        try {
-            deadlineNs = PROCESS_FRAMES.toLong() * 1_000_000_000L / engine.sampleRate.toLong()
-            if (deadlineNs <= 0L) {
-                return fail(context, includeLooper, includeDrums, "Invalid sample rate")
-            }
-
-            if (includeLooper) {
-                var t = 0
-                while (t < 4) {
-                    val tr = engine.looperTracks.getOrNull(t)
-                    if (tr != null && tr.isRecording) {
-                        return fail(context, includeLooper, includeDrums, "Looper track ${t + 1} is recording")
-                    }
-                    t++
-                }
-                val mem = Array(4) { i -> engine.looperTracks[i].snapshotForRestore() }
-                if (!writeLooperDiskBackup(context, mem)) {
-                    return fail(context, includeLooper, includeDrums, "Looper disk backup failed")
-                }
-                looperSnaps = mem
-                loadLooperFixtures(4)
-            }
-
-            if (includeDrums) {
-                val de = engine.drumEngine
-                drumsSamples = Array(8) { t -> de.drumSamples[t] }
-                drumsGrid = Array(8) { t -> de.grid[t].copyOf() }
-                drumsVol = de.trackVolumes.copyOf()
-                drumsPan = de.trackPans.copyOf()
-                drumsPlaying = de.isPlaying
-                drumsPattern = de.currentPatternIndex
-
-                var needKit = false
-                var s = 0
-                while (s < 4) {
-                    if (de.drumSamples[s] == null) needKit = true
-                    s++
-                }
-                if (needKit) {
-                    val loaded = try {
-                        kotlinx.coroutines.runBlocking { de.loadDefaultKit(context) }
-                    } catch (_: Throwable) {
-                        false
-                    }
-                    if (!loaded) {
-                        releaseWorkload(
-                            snap, looperSnaps, context, includeLooper, includeDrums,
-                            drumsGrid, drumsVol, drumsPan, drumsSamples, drumsPlaying, drumsPattern
-                        )
-                        return fail(context, includeLooper, includeDrums, "Could not load default drum kit")
-                    }
-                }
-
-                applyRealDrumPattern()
-                de.startFromBeginning()
-            }
-
-            engine.detuneOn = false
-            engine.warmOn = true
-            // Synth/DSP reverb only. DrumEngine has no reverb control.
-            engine.reverbMix = 0.45f
-            engine.padTargetKey = true
-            engine.busPadTouched = false
-            engine.busPadX = 0.5f
-            engine.busPadY = 0.5f
-            setRealFx(false, false, false, false, false, false, false, false)
-
-            val startRt = SystemClock.elapsedRealtime()
-            var eventI = 0
-            var measureStarted = false
-            var underrun0 = -1
-            var previousCpu = android.os.Process.getElapsedCpuTime()
-            var previousWall = SystemClock.elapsedRealtime()
-            var cpuSum = 0.0
-            var cpuPeak = 0.0
-            var cpuSamples = 0
-            var lastCpuTick = startRt
-
-
-            captureMode = 1
-            startMeasureAfterWrite = false
-            stopAfterWrite = false
-
-            while (!cancelRequested) {
-                val elapsed = SystemClock.elapsedRealtime() - startRt
-                remainingMs = (TOTAL_MS - elapsed).coerceAtLeast(0L)
-
-                while (eventI < REAL_VOICE_AT_MS.size && REAL_VOICE_AT_MS[eventI] <= elapsed) {
-                    fireRealVoice(eventI)
-                    eventI++
-                }
-
-                updateRealSession(elapsed)
-
-
-
-                if (!measureStarted && elapsed >= WARMUP_MS) {
-                    startMeasureAfterWrite = true
-                }
-                if (!measureStarted && captureMode == 2) {
-                    underrun0 = engine.underrunCount()
-                    previousCpu = android.os.Process.getElapsedCpuTime()
-                    previousWall = SystemClock.elapsedRealtime()
-                    lastCpuTick = previousWall
-                    measureStarted = true
-                    phase = BenchPhase.MEASURE
-                }
-
-                val nowRt = SystemClock.elapsedRealtime()
-                if (measureStarted && nowRt - lastCpuTick >= 1000L) {
-                    val cpuNow = android.os.Process.getElapsedCpuTime()
-                    val wallNow = nowRt
-                    val dCpu = (cpuNow - previousCpu).toDouble()
-                    val dWall = (wallNow - previousWall).toDouble().coerceAtLeast(1.0)
-                    val pct = (dCpu / dWall) * 100.0
-                    previousCpu = cpuNow
-                    previousWall = wallNow
-                    liveCpuPct = pct
-                    cpuSum += pct
-                    if (pct > cpuPeak) cpuPeak = pct
-                    cpuSamples++
-                    lastCpuTick = nowRt
-                }
-
-                liveBuffers = bufCount
-                liveMisses = missCount
-
-                if (elapsed >= TOTAL_MS) {
-                    stopAfterWrite = true
-                    var spins = 0
-                    while (captureMode != 0 && spins < 80) {
-                        Thread.sleep(8L)
-                        spins++
-                    }
-                    break
-                }
-                Thread.sleep(8L)
-            }
-
-
-            if (captureMode != 0) {
-                stopAfterWrite = true
-                var spins = 0
-                while (captureMode != 0 && spins < 80) {
-                    Thread.sleep(8L)
-                    spins++
-                }
-            }
-
-            val underrun1 = engine.underrunCount()
-            val n = writeIdx.coerceIn(0, timesNs.size)
-            val copy = LongArray(n)
-            if (n > 0) System.arraycopy(timesNs, 0, copy, 0, n)
-
-            if (cancelRequested) {
-                val restoreErr = releaseWorkload(
-                    snap, looperSnaps, context, includeLooper, includeDrums,
-                    drumsGrid, drumsVol, drumsPan, drumsSamples, drumsPlaying, drumsPattern
-                )
-                val msg = if (restoreErr != null) "Cancelled; $restoreErr" else "Cancelled"
-                return fail(context, includeLooper, includeDrums, msg)
-            }
-
-            setRealFx(false, false, false, false, false, false, false, false)
-            engine.busPadTouched = false
-
-            val restoreErr = releaseWorkload(
-                snap, looperSnaps, context, includeLooper, includeDrums,
-                drumsGrid, drumsVol, drumsPan, drumsSamples, drumsPlaying, drumsPattern
-            )
-            if (restoreErr != null) {
-                return fail(context, includeLooper, includeDrums, restoreErr)
-            }
-
-            val stats = computeStats(copy)
-            val underrunAvail = underrun0 >= 0 && underrun1 >= 0
-            val deltaU = if (underrunAvail) (underrun1 - underrun0).coerceAtLeast(0) else 0
-            val missRate = if (stats.count > 0) stats.misses.toDouble() / stats.count.toDouble() else 0.0
-            val cpuAvg = if (cpuSamples > 0) cpuSum / cpuSamples else liveCpuPct
-
-            val verdict = when {
-                stats.count <= 0 -> BenchVerdict.ERROR
-                missRate >= 0.005 || (underrunAvail && deltaU > 0) -> BenchVerdict.FAIL
-                missRate > 0.0 && missRate < 0.005 && (!underrunAvail || deltaU == 0) -> BenchVerdict.WARNING
-                stats.misses == 0 && (!underrunAvail || deltaU == 0) -> BenchVerdict.PASS
-                else -> BenchVerdict.WARNING
-            }
-
-            val report = BenchReport(
-                verdict = if (stats.count <= 0) BenchVerdict.ERROR else verdict,
-                errorMessage = if (stats.count <= 0) "No buffers captured" else null,
-                device = Build.MODEL ?: "unknown",
-                androidVersion = Build.VERSION.RELEASE ?: "${Build.VERSION.SDK_INT}",
-                appVersion = appVersion(context),
-                sampleRate = engine.sampleRate,
-                bufferFrames = PROCESS_FRAMES,
-                deadlineNs = deadlineNs,
-                includeLooper = includeLooper,
-                includeDrums = includeDrums,
-                waveformType = engine.waveformType,
-                bpm = engine.drumEngine.bpm,
-                avgNs = stats.avg,
-                p50Ns = stats.p50,
-                p95Ns = stats.p95,
-                p99Ns = stats.p99,
-                maxNs = stats.max,
-                buffers = stats.count,
-                misses = stats.misses,
-                missRate = missRate,
-                underrunsAvailable = underrunAvail,
-                deltaUnderruns = deltaU,
-                cpuAvgPct = cpuAvg,
-                cpuPeakPct = cpuPeak,
-                profileDspAvgNs = profileAveragePerBuffer(profileDspNs, profileSampleCount, stats.count),
-                profileDrumsAvgNs = profileAveragePerBuffer(profileDrumsNs, profileSampleCount, stats.count),
-                profileLooperAvgNs = profileAveragePerBuffer(profileLooperNs, profileSampleCount, stats.count),
-                profileMicAvgNs = profileAveragePerBuffer(profileMicNs, profileSampleCount, stats.count),
-                profilePadMasterAvgNs = profileAveragePerBuffer(profilePadMasterNs, profileSampleCount, stats.count),
-                profileAudioWriteAvgNs = profileAveragePerBuffer(profileAudioWriteNs, profileSampleCount, stats.count),
-                profileVoiceAvgNs = profileAveragePerBuffer(deepProfileVoiceNs, deepProfileSampleCount, stats.count),
-                profileZdfAvgNs = profileAveragePerBuffer(deepProfileZdfNs, deepProfileSampleCount, stats.count),
-                profileExternalAvgNs = profileAveragePerBuffer(deepProfileExternalNs, deepProfileSampleCount, stats.count),
-                profileLiveFxAvgNs = profileAveragePerBuffer(deepProfileLiveFxNs, deepProfileSampleCount, stats.count),
-                profileDelayAvgNs = profileAveragePerBuffer(deepProfileDelayNs, deepProfileSampleCount, stats.count),
-                profileReverbAvgNs = profileAveragePerBuffer(deepProfileReverbNs, deepProfileSampleCount, stats.count),
-                profileMasterAvgNs = profileAveragePerBuffer(deepProfileMasterNs, deepProfileSampleCount, stats.count),
-                profileVoiceFreqAvgNs = profileAveragePerBuffer(deepProfileVoiceFreqNs, deepProfileSampleCount, stats.count),
-                profileEnvelopeAvgNs = profileAveragePerBuffer(deepProfileEnvelopeNs, deepProfileSampleCount, stats.count),
-                profileOscillatorAvgNs = profileAveragePerBuffer(deepProfileOscillatorNs, deepProfileSampleCount, stats.count),
-                profileModulationAvgNs = profileAveragePerBuffer(deepProfileModulationNs, deepProfileSampleCount, stats.count),
-                profileVoiceMixAvgNs = profileAveragePerBuffer(deepProfileVoiceMixNs, deepProfileSampleCount, stats.count),
-                profileOscMainAvgNs = profileAveragePerBuffer(deepProfileOscMainNs, deepProfileSampleCount, stats.count),
-                profileOscPianoAvgNs = profileAveragePerBuffer(deepProfileOscPianoNs, deepProfileSampleCount, stats.count),
-                profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
-                profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
-                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count)
-            )
-            lastReport = report
-            phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
-            if (report.verdict != BenchVerdict.ERROR) saveLast(context, report)
-            return report
-        } catch (t: Throwable) {
-            releaseWorkload(
-                snap, looperSnaps, context, includeLooper, includeDrums,
-                drumsGrid, drumsVol, drumsPan, drumsSamples, drumsPlaying, drumsPattern
-            )
-            return fail(context, includeLooper, includeDrums, t.message ?: t.javaClass.simpleName)
-        } finally {
-            captureMode = 0
-            startMeasureAfterWrite = false
-            stopAfterWrite = false
-            engine.busPadTouched = false
-            setRealFx(false, false, false, false, false, false, false, false)
-        }
-    }
-
-    private fun updateRealSession(elapsedMs: Long) {
-        // Deterministic Pad gestures: touch/move/release windows, not a free-running LFO.
-        val padActive =
-            (elapsedMs in 4_000L..5_000L) ||
-            (elapsedMs in 9_900L..11_000L) ||
-            (elapsedMs in 16_000L..18_000L) ||
-            (elapsedMs in 21_800L..24_000L) ||
-            (elapsedMs in 26_000L..27_500L)
-
-        if (padActive) {
-            val t = elapsedMs / 1000.0
-            engine.busPadX = (0.50 + 0.36 * sin(2.0 * PI * t / 1.7)).toFloat().coerceIn(0.05f, 0.95f)
-            engine.busPadY = (0.50 + 0.36 * sin(2.0 * PI * t / 1.3 + PI / 3.0)).toFloat().coerceIn(0.05f, 0.95f)
-            engine.busPadTouched = true
-        } else {
-            engine.busPadTouched = false
-            engine.busPadX = 0.5f
-            engine.busPadY = 0.5f
-        }
-
-        // Dynamic but deterministic FX. They overlap only in the same way every run.
-        val vibe = elapsedMs in 8_400L..12_400L
-        val rip = elapsedMs in 12_800L..17_000L
-        val fuzz = elapsedMs in 20_600L..24_200L
-        val phaz = elapsedMs in 24_000L..26_400L
-        val piano = elapsedMs in 17_400L..20_000L
-        val div2 = elapsedMs in 21_600L..24_800L
-        val div3 = elapsedMs in 26_000L..28_200L
-        val div4 = elapsedMs in 28_000L..29_000L
-        setRealFx(vibe, rip, fuzz, phaz, piano, div2, div3, div4)
-
-        // Detune is deliberately introduced during the late performance section,
-        // matching a realistic "play with detune" pass rather than being on for all 30s.
-        engine.detuneOn = elapsedMs in 10_000L..13_400L || elapsedMs in 20_400L..29_000L
-
-    }
-
-    private fun setRealFx(
-        vibe: Boolean,
-        rip: Boolean,
-        fuzz: Boolean,
-        phaz: Boolean,
-        piano: Boolean,
-        div2: Boolean,
-        div3: Boolean,
-        div4: Boolean
-    ) {
-        engine.vibeOn = vibe
-        engine.ripOn = rip
-        engine.fuzzOn = fuzz
-        engine.phazOn = phaz
-        engine.pianoOn = piano
-        engine.div2On = div2
-        engine.div3On = div3
-        engine.div4On = div4
-    }
-
-    private fun fireRealVoice(i: Int) {
-        if (i !in REAL_VOICE_AT_MS.indices) return
-        val idx = REAL_VOICE_IDX[i]
-        if (idx !in 0 until FREQS.size) return
-        val freq = FREQS[idx]
-        if (REAL_VOICE_ON[i]) {
-            if (!heldNotes[idx]) {
-                engine.noteOn(freq)
-                heldNotes[idx] = true
-            }
-        } else {
-            if (heldNotes[idx]) {
-                engine.noteOff(freq)
-                heldNotes[idx] = false
-            }
-        }
-    }
-
-    private fun applyRealDrumPattern() {
-        val de = engine.drumEngine
-        de.bpm = 120f
-        de.swing = 0f
-        de.masterVolume = 0.80f
-
-        var t = 0
-        while (t < 8) {
-            var s = 0
-            while (s < 16) {
-                de.grid[t][s] = false
-                s++
-            }
-            de.trackVolumes[t] = if (t < 4) 0.85f else 0f
-            de.setTrackPan(t, 0f)
-            t++
-        }
-
-        val kick = intArrayOf(0, 4, 8, 12)
-        val snare = intArrayOf(4, 12)
-        val hat = intArrayOf(0, 2, 4, 6, 8, 10, 12, 14)
-        val perc = intArrayOf(2, 6, 10, 14)
-        for (s in kick) de.grid[0][s] = true
-        for (s in snare) de.grid[1][s] = true
-        for (s in hat) de.grid[2][s] = true
-        for (s in perc) de.grid[3][s] = true
     }
 
     private fun fireVoice(i: Int) {
@@ -1043,10 +456,10 @@ class AudioBenchmark(private val engine: SynthEngine) {
         }
     }
 
-    private fun loadLooperFixtures(count: Int = 6) {
+    private fun loadLooperFixtures() {
         val sr = engine.sampleRate
         var t = 0
-        while (t < count.coerceAtMost(6)) {
+        while (t < 6) {
             val pcm = sineFixture(FIXTURE_HZ[t], sr, FIXTURE_SECONDS)
             engine.looperTracks[t].loadFromSamples(pcm)
             engine.setTrackVolume(t, 1f)
@@ -1096,7 +509,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
             val dir = File(context.filesDir, "benchmark/looper_restore")
             if (!dir.exists() && !dir.mkdirs()) return false
             var i = 0
-            while (i < snaps.size) {
+            while (i < 6) {
                 val s = snaps[i]
                 val pcmFile = File(dir, "track$i.pcm")
                 engine.looperTracks[i].writeSessionPcm(pcmFile)
@@ -1165,7 +578,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
         var looperErr: String? = null
         if (includeLooper && looperSnaps != null) {
             var t = 0
-            while (t < looperSnaps.size) {
+            while (t < 6) {
                 if (!restoreLooperTrack(context, t, looperSnaps[t])) {
                     looperErr = "Looper state was not restored for track ${t + 1}"
                 }
@@ -1265,6 +678,128 @@ class AudioBenchmark(private val engine: SynthEngine) {
         return floats
     }
 
+    fun runReferenceBlocking(
+        context: Context,
+        session: BenchmarkReferenceSession,
+        includeLooper: Boolean,
+        includeDrums: Boolean
+    ): BenchReport {
+        cancelRequested = false
+        lastError = null
+        lastReport = null
+        phase = BenchPhase.WARMUP
+        remainingMs = (session.durationUs / 1000L).coerceAtLeast(1L)
+        writeIdx = 0; bufCount = 0; missCount = 0
+        captureMode = 0; startMeasureAfterWrite = false; stopAfterWrite = false
+        deadlineNs = PROCESS_FRAMES.toLong() * 1_000_000_000L / engine.sampleRate.toLong()
+        if (deadlineNs <= 0L) return fail(context, includeLooper, includeDrums, "Invalid sample rate")
+
+        val snap = WorkloadSnapshot.capture(engine)
+        val looperSnaps = Array(6) { i -> engine.looperTracks[i].snapshotForRestore() }
+        val drumsGrid = Array(8) { i -> engine.drumEngine.grid[i].copyOf() }
+        val drumsVol = engine.drumEngine.trackVolumes.copyOf()
+        val drumsPan = engine.drumEngine.trackPans.copyOf()
+        val drumsSamples = Array(8) { i -> engine.drumEngine.drumSamples[i] }
+        val drumsPlaying = engine.drumEngine.isPlaying
+        val drumsPattern = engine.drumEngine.currentPatternIndex
+
+        try {
+            if (!includeLooper) for (i in 0 until 6) engine.setTrackPlaying(i, false)
+            if (!includeDrums) engine.drumEngine.stopAndRewind()
+
+            captureMode = 1
+            startMeasureAfterWrite = true
+            val warmDeadline = SystemClock.elapsedRealtime() + 2_000L
+            while (captureMode != 2 && SystemClock.elapsedRealtime() < warmDeadline) Thread.sleep(2L)
+            if (captureMode != 2) return fail(context, includeLooper, includeDrums, "Audio callback did not enter measurement")
+
+            phase = BenchPhase.MEASURE
+            val underrun0 = engine.underrunCount()
+            var previousCpu = android.os.Process.getElapsedCpuTime()
+            var previousWall = SystemClock.elapsedRealtime()
+            var cpuSum = 0.0
+            var cpuPeak = 0.0
+            var cpuSamples = 0
+            val measureStart = SystemClock.elapsedRealtime()
+            val durationMs = (session.durationUs / 1000L).coerceAtLeast(1L)
+            val replay = Thread {
+                engine.benchmarkReferencePlayer.playBlocking(session, includeLooper, includeDrums)
+            }.apply { name = "BenchmarkReferenceMeasurement" }
+            replay.start()
+
+            while (replay.isAlive || SystemClock.elapsedRealtime() - measureStart < durationMs) {
+                if (cancelRequested) {
+                    engine.benchmarkReferencePlayer.cancel()
+                    break
+                }
+                Thread.sleep(100L)
+                val now = SystemClock.elapsedRealtime()
+                val cpuNow = android.os.Process.getElapsedCpuTime()
+                val dCpu = (cpuNow - previousCpu).toDouble()
+                val dWall = (now - previousWall).toDouble().coerceAtLeast(1.0)
+                val pct = (dCpu / dWall) * 100.0
+                previousCpu = cpuNow; previousWall = now
+                cpuSum += pct; cpuPeak = maxOf(cpuPeak, pct); cpuSamples++
+                val elapsed = (now - measureStart).coerceAtLeast(0L)
+                remainingMs = (durationMs - elapsed).coerceAtLeast(0L)
+                liveCpuPct = pct; liveBuffers = bufCount; liveMisses = missCount
+            }
+            replay.join(500L)
+            stopAfterWrite = true
+            var spins = 0
+            while (captureMode != 0 && spins++ < 200) Thread.sleep(2L)
+
+            val underrun1 = engine.underrunCount()
+            val n = writeIdx.coerceIn(0, timesNs.size)
+            val copy = LongArray(n)
+            if (n > 0) System.arraycopy(timesNs, 0, copy, 0, n)
+            val stats = computeStats(copy)
+            val missRate = if (stats.count > 0) stats.misses.toDouble() / stats.count else 0.0
+            val underrunAvail = underrun0 >= 0 && underrun1 >= 0
+            val deltaU = if (underrunAvail) (underrun1 - underrun0).coerceAtLeast(0) else 0
+            val cpuAvg = if (cpuSamples > 0) cpuSum / cpuSamples else 0.0
+            val verdict = when {
+                stats.count <= 0 -> BenchVerdict.ERROR
+                missRate >= 0.005 || (underrunAvail && deltaU > 0) -> BenchVerdict.FAIL
+                missRate > 0.0 -> BenchVerdict.WARNING
+                else -> BenchVerdict.PASS
+            }
+            val report = BenchReport(
+                verdict, if (stats.count <= 0) "No buffers captured" else null,
+                Build.MODEL ?: "unknown", Build.VERSION.RELEASE ?: "${Build.VERSION.SDK_INT}", appVersion(context),
+                engine.sampleRate, PROCESS_FRAMES, deadlineNs, includeLooper, includeDrums, engine.waveformType,
+                engine.drumEngine.bpm, stats.avg, stats.p50, stats.p95, stats.p99, stats.max,
+                stats.count, stats.misses, missRate, underrunAvail, deltaU, cpuAvg, cpuPeak, "reference-session-v1"
+            )
+            lastReport = report
+            phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
+            if (report.verdict != BenchVerdict.ERROR) saveLast(context, report)
+            return report
+        } catch (t: Throwable) {
+            return fail(context, includeLooper, includeDrums, t.message ?: t.javaClass.simpleName)
+        } finally {
+            engine.benchmarkReferencePlayer.cancel()
+            while (captureMode != 0) { stopAfterWrite = true; Thread.sleep(2L) }
+            try {
+                var i = 0
+                while (i < 8) { if (heldNotes[i]) { engine.noteOff(FREQS[i]); heldNotes[i] = false }; i++ }
+                snap.restore(engine)
+                for (i in 0 until 6) engine.looperTracks[i].restoreFromSnapshot(looperSnaps[i])
+                val de = engine.drumEngine
+                    de.stopAndRewind()
+                    for (i in 0 until 8) {
+                        de.drumSamples[i] = drumsSamples[i]
+                        System.arraycopy(drumsGrid[i], 0, de.grid[i], 0, 16)
+                        de.trackVolumes[i] = drumsVol[i]
+                        de.setTrackPan(i, drumsPan[i])
+                    }
+                    de.currentPatternIndex = drumsPattern
+                if (drumsPlaying) de.startFromBeginning()
+            } catch (_: Throwable) { }
+            remainingMs = 0L
+        }
+    }
+
     private fun fail(context: Context, includeLooper: Boolean, includeDrums: Boolean, msg: String): BenchReport {
         lastError = msg
         phase = BenchPhase.ERROR
@@ -1358,7 +893,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
 
     fun comparisonAllowed(before: BenchReport, after: BenchReport): Boolean {
         return before.device == after.device &&
-            before.appVersion == after.appVersion &&
             before.sampleRate == after.sampleRate &&
             before.bufferFrames == after.bufferFrames &&
             before.includeLooper == after.includeLooper &&
@@ -1376,15 +910,7 @@ private class WorkloadSnapshot(
     val busPadX: Float,
     val busPadY: Float,
     val performanceX: Float,
-    val performanceY: Float,
-    val vibeOn: Boolean,
-    val ripOn: Boolean,
-    val fuzzOn: Boolean,
-    val phazOn: Boolean,
-    val pianoOn: Boolean,
-    val div2On: Boolean,
-    val div3On: Boolean,
-    val div4On: Boolean
+    val performanceY: Float
 ) {
     fun restore(engine: SynthEngine) {
         engine.detuneOn = detuneOn
@@ -1396,14 +922,6 @@ private class WorkloadSnapshot(
         engine.busPadY = busPadY
         engine.performanceX = performanceX
         engine.performanceY = performanceY
-        engine.vibeOn = vibeOn
-        engine.ripOn = ripOn
-        engine.fuzzOn = fuzzOn
-        engine.phazOn = phazOn
-        engine.pianoOn = pianoOn
-        engine.div2On = div2On
-        engine.div3On = div3On
-        engine.div4On = div4On
     }
 
     companion object {
@@ -1416,15 +934,7 @@ private class WorkloadSnapshot(
             busPadX = engine.busPadX,
             busPadY = engine.busPadY,
             performanceX = engine.performanceX,
-            performanceY = engine.performanceY,
-            vibeOn = engine.vibeOn,
-            ripOn = engine.ripOn,
-            fuzzOn = engine.fuzzOn,
-            phazOn = engine.phazOn,
-            pianoOn = engine.pianoOn,
-            div2On = engine.div2On,
-            div3On = engine.div3On,
-            div4On = engine.div4On
+            performanceY = engine.performanceY
         )
     }
 }
@@ -1444,7 +954,7 @@ internal fun appVersion(context: Context): String {
 
 internal fun reportToJson(r: BenchReport): JSONObject {
     val o = JSONObject()
-    o.put("workloadId", AudioBenchmark.WORKLOAD_ID)
+    o.put("workloadId", r.workloadId)
     o.put("verdict", r.verdict.name)
     o.put("errorMessage", r.errorMessage ?: "")
     o.put("device", r.device)
@@ -1455,7 +965,6 @@ internal fun reportToJson(r: BenchReport): JSONObject {
     o.put("deadlineNs", r.deadlineNs)
     o.put("includeLooper", r.includeLooper)
     o.put("includeDrums", r.includeDrums)
-    o.put("workloadId", r.workloadId)
     o.put("waveformType", r.waveformType)
     o.put("bpm", r.bpm.toDouble())
     o.put("avgNs", r.avgNs)
@@ -1470,29 +979,6 @@ internal fun reportToJson(r: BenchReport): JSONObject {
     o.put("deltaUnderruns", r.deltaUnderruns)
     o.put("cpuAvgPct", r.cpuAvgPct)
     o.put("cpuPeakPct", r.cpuPeakPct)
-    o.put("profileDspAvgNs", r.profileDspAvgNs)
-    o.put("profileDrumsAvgNs", r.profileDrumsAvgNs)
-    o.put("profileLooperAvgNs", r.profileLooperAvgNs)
-    o.put("profileMicAvgNs", r.profileMicAvgNs)
-    o.put("profilePadMasterAvgNs", r.profilePadMasterAvgNs)
-    o.put("profileAudioWriteAvgNs", r.profileAudioWriteAvgNs)
-    o.put("profileVoiceAvgNs", r.profileVoiceAvgNs)
-    o.put("profileZdfAvgNs", r.profileZdfAvgNs)
-    o.put("profileExternalAvgNs", r.profileExternalAvgNs)
-    o.put("profileLiveFxAvgNs", r.profileLiveFxAvgNs)
-    o.put("profileDelayAvgNs", r.profileDelayAvgNs)
-    o.put("profileReverbAvgNs", r.profileReverbAvgNs)
-    o.put("profileMasterAvgNs", r.profileMasterAvgNs)
-    o.put("profileVoiceFreqAvgNs", r.profileVoiceFreqAvgNs)
-    o.put("profileEnvelopeAvgNs", r.profileEnvelopeAvgNs)
-    o.put("profileOscillatorAvgNs", r.profileOscillatorAvgNs)
-    o.put("profileModulationAvgNs", r.profileModulationAvgNs)
-    o.put("profileVoiceMixAvgNs", r.profileVoiceMixAvgNs)
-    o.put("profileOscMainAvgNs", r.profileOscMainAvgNs)
-    o.put("profileOscPianoAvgNs", r.profileOscPianoAvgNs)
-    o.put("profileOscSubAvgNs", r.profileOscSubAvgNs)
-    o.put("profileOscDetuneAvgNs", r.profileOscDetuneAvgNs)
-    o.put("profileOscDividersAvgNs", r.profileOscDividersAvgNs)
     return o
 }
 
@@ -1513,7 +999,6 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         deadlineNs = o.optLong("deadlineNs", 0L),
         includeLooper = o.optBoolean("includeLooper", false),
         includeDrums = o.optBoolean("includeDrums", false),
-        workloadId = o.optString("workloadId", AudioBenchmark.WORKLOAD_ID),
         waveformType = o.optInt("waveformType", 0),
         bpm = o.optDouble("bpm", 120.0).toFloat(),
         avgNs = o.optLong("avgNs", 0L),
@@ -1528,28 +1013,6 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         deltaUnderruns = o.optInt("deltaUnderruns", 0),
         cpuAvgPct = o.optDouble("cpuAvgPct", 0.0),
         cpuPeakPct = o.optDouble("cpuPeakPct", 0.0),
-        profileDspAvgNs = o.optLong("profileDspAvgNs", 0L),
-        profileDrumsAvgNs = o.optLong("profileDrumsAvgNs", 0L),
-        profileLooperAvgNs = o.optLong("profileLooperAvgNs", 0L),
-        profileMicAvgNs = o.optLong("profileMicAvgNs", 0L),
-        profilePadMasterAvgNs = o.optLong("profilePadMasterAvgNs", 0L),
-        profileAudioWriteAvgNs = o.optLong("profileAudioWriteAvgNs", 0L),
-        profileVoiceAvgNs = o.optLong("profileVoiceAvgNs", 0L),
-        profileZdfAvgNs = o.optLong("profileZdfAvgNs", 0L),
-        profileExternalAvgNs = o.optLong("profileExternalAvgNs", 0L),
-        profileLiveFxAvgNs = o.optLong("profileLiveFxAvgNs", 0L),
-        profileDelayAvgNs = o.optLong("profileDelayAvgNs", 0L),
-        profileReverbAvgNs = o.optLong("profileReverbAvgNs", 0L),
-        profileMasterAvgNs = o.optLong("profileMasterAvgNs", 0L),
-        profileVoiceFreqAvgNs = o.optLong("profileVoiceFreqAvgNs", 0L),
-        profileEnvelopeAvgNs = o.optLong("profileEnvelopeAvgNs", 0L),
-        profileOscillatorAvgNs = o.optLong("profileOscillatorAvgNs", 0L),
-        profileModulationAvgNs = o.optLong("profileModulationAvgNs", 0L),
-        profileVoiceMixAvgNs = o.optLong("profileVoiceMixAvgNs", 0L),
-        profileOscMainAvgNs = o.optLong("profileOscMainAvgNs", 0L),
-        profileOscPianoAvgNs = o.optLong("profileOscPianoAvgNs", 0L),
-        profileOscSubAvgNs = o.optLong("profileOscSubAvgNs", 0L),
-        profileOscDetuneAvgNs = o.optLong("profileOscDetuneAvgNs", 0L),
-        profileOscDividersAvgNs = o.optLong("profileOscDividersAvgNs", 0L)
+        workloadId = o.optString("workloadId", AudioBenchmark.WORKLOAD_ID)
     )
 }

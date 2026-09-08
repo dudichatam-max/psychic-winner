@@ -2120,6 +2120,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                     engine.busPadX = x
                                     engine.busPadY = y
                                     engine.busPadTouched = true
+                                    engine.benchmarkReferenceRecorder.recordPad(x, y, true)
                                     if (first) {
                                         engine.padOriginX = x
                                         engine.padOriginY = y
@@ -2140,6 +2141,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                 drag(down.id) { change ->
                                     applyAt(change.position.x, change.position.y, first = false)
                                 }
+                                engine.benchmarkReferenceRecorder.recordPad(engine.busPadX, engine.busPadY, false)
                                 engine.busPadTouched = false
                             }
                         }
@@ -2252,8 +2254,8 @@ fun SynthAppUI(engine: SynthEngine) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Button(
                                 onClick = {
-                                    if (drumPlayingState) { engine.drumEngine.stopAndRewind(); drumPlayingState = false }
-                                    else { engine.drumEngine.startFromBeginning(); drumPlayingState = true }
+                                    if (drumPlayingState) { engine.drumEngine.stopAndRewind(); engine.benchmarkReferenceRecorder.recordDrumState(); drumPlayingState = false }
+                                    else { engine.drumEngine.startFromBeginning(); engine.benchmarkReferenceRecorder.recordDrumState(); drumPlayingState = true }
                                     gridRefreshTrigger = System.currentTimeMillis()
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
@@ -2351,6 +2353,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                             onLongPress = { patternRepeatEdit = i },
                                             onTap = {
                                                 engine.drumEngine.loadPattern(i)
+                                                engine.benchmarkReferenceRecorder.recordDrumState()
                                                 selectedDrumPattern = i
                                                 drumBpmState = engine.drumEngine.bpm
                                                 drumVolState = engine.drumEngine.masterVolume
@@ -2388,6 +2391,7 @@ fun SynthAppUI(engine: SynthEngine) {
                         Button(
                             onClick = {
                                 engine.drumEngine.generateRandomLogicalPattern()
+                                engine.benchmarkReferenceRecorder.recordDrumState()
                                 gridRefreshTrigger = System.currentTimeMillis()
                                 Toast.makeText(context, "מקצב אקראי הגיוני נוצר", Toast.LENGTH_SHORT).show()
                             },
@@ -2416,6 +2420,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                         onValueChange = {
                                             trackVolStates[t].value = it
                                             engine.drumEngine.trackVolumes[t] = it
+                                            engine.benchmarkReferenceRecorder.recordDrumState()
                                         },
                                         valueRange = 0f..1f,
                                         modifier = Modifier.weight(1f).height(16.dp),
@@ -2425,6 +2430,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                     LrPanKnob(trackPanStates[t].value, gold, 20.dp) { p ->
                                         trackPanStates[t].value = p
                                         engine.drumEngine.setTrackPan(t, p)
+                                        engine.benchmarkReferenceRecorder.recordDrumState()
                                     }
                                 }
                                 Spacer(Modifier.height(1.dp))
@@ -2446,6 +2452,7 @@ fun SynthAppUI(engine: SynthEngine) {
                                                 .border(1.dp, if (isCurrentStep) gold else Color(0xFF2A2A2A), RoundedCornerShape(3.dp))
                                                 .clickable {
                                                     engine.drumEngine.grid[t][s] = !isActive
+                                                    engine.benchmarkReferenceRecorder.recordDrumState()
                                                     gridRefreshTrigger = System.currentTimeMillis()
                                                 }
                                         )

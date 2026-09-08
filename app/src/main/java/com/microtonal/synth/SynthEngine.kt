@@ -623,6 +623,8 @@ class SynthEngine(private val context: Context) {
     val micEngine: MicCaptureEngine
     @Volatile private var isRunning = true
     val audioBenchmark = AudioBenchmark(this)
+    val benchmarkReferenceRecorder = BenchmarkReferenceRecorder(this)
+    val benchmarkReferencePlayer = BenchmarkReferencePlayer(this)
 
 
 
@@ -1398,17 +1400,11 @@ class SynthEngine(private val context: Context) {
                     reverbMix = reverbMix
                 )
                 for (i in 0 until bufferSize) {
-                    // Diagnostic-only sampled profiling. It is enabled only during
-                    // the benchmark measurement phase and does not alter DSP state.
-                    val profileSample = audioBenchmark.shouldProfileSample(i)
-                    val profileDspT0 = if (profileSample) System.nanoTime() else 0L
                     val frame = dspEngine.processNextSample(
                         noteSlots = noteSlots,
                         maxVoices = maxVoices,
-                        extraReverbSend = lastRevSend,
-                        profileHotPath = profileSample
+                        extraReverbSend = lastRevSend
                     )
-                    val profileDspNs = if (profileSample) System.nanoTime() - profileDspT0 else 0L
 
 
 
@@ -1425,9 +1421,7 @@ class SynthEngine(private val context: Context) {
 
 
 
-                    val profileDrumT0 = if (profileSample) System.nanoTime() else 0L
                     val drumSample = drumEngine.processNextSample()
-                    val profileDrumsNs = if (profileSample) System.nanoTime() - profileDrumT0 else 0L
 
                     // 4-track PCM looper: record the frozen live wet tap and/or
                     // play already-captured audio. Added after master saturate so
@@ -1435,12 +1429,13 @@ class SynthEngine(private val context: Context) {
                     var pcmLoopL = 0f
                     var pcmLoopR = 0f
                     val liveTap = frame.liveRecordTap
-                    val profileLooperT0 = if (profileSample) System.nanoTime() else 0L
                     var h = 0
                     while (h < looperHotN) {
-                        val track = looperTracks[looperHotIdx[h]]
+                        val trackIndex = looperHotIdx[h]
+                        val track = looperTracks[trackIndex]
                         if (track.isRecording) {
-                            track.pushSample(liveTap)
+                            val recordSample = benchmarkReferencePlayer.consumeLooperRecordingSample(trackIndex, liveTap)
+                            track.pushSample(recordSample)
                         }
                         if (track.isPlaying) {
                             val s = track.readSample()
@@ -1449,7 +1444,6 @@ class SynthEngine(private val context: Context) {
                         }
                         h++
                     }
-                    val profileLooperNs = if (profileSample) System.nanoTime() - profileLooperT0 else 0L
                     lastRevSend = 0f
 
                     if (dspEngine.isExternalAudioPlaying) {
@@ -1462,11 +1456,8 @@ class SynthEngine(private val context: Context) {
                         }
                     }
 
-                    val profileMicT0 = if (profileSample) System.nanoTime() else 0L
                     val micPlay = micEngine.playMixSample()
                     val micMon = micEngine.nextMonitorSample()
-                    val profileMicNs = if (profileSample) System.nanoTime() - profileMicT0 else 0L
-                    val profilePadMasterT0 = if (profileSample) System.nanoTime() else 0L
                     val padCoeff = if (busPadTouched) padCoeffAtk else padCoeffRel
                     smoothModX += (busPadX - smoothModX) * padCoeff
                     smoothModY += (busPadY - smoothModY) * padCoeff
@@ -1678,15 +1669,6 @@ class SynthEngine(private val context: Context) {
                         slot[o + 4] = (vR shr 8 and 0xFF).toByte()
                         slot[o + 5] = (vR shr 16 and 0xFF).toByte()
                     }
-                    if (profileSample) {
-                        audioBenchmark.recordProfileSample(
-                            dspNs = profileDspNs,
-                            drumsNs = profileDrumsNs,
-                            looperNs = profileLooperNs,
-                            micNs = profileMicNs,
-                            padMasterNs = System.nanoTime() - profilePadMasterT0
-                        )
-                    }
 
 
 
@@ -1719,30 +1701,6 @@ class SynthEngine(private val context: Context) {
 
 
 
-
-                if (benchMode == 2) {
-                    audioBenchmark.recordDeepDspProfile(
-                        sampleCount = dspEngine.deepProfileSampleCount(),
-                        voiceNs = dspEngine.deepProfileVoiceNs(),
-                        zdfNs = dspEngine.deepProfileZdfNs(),
-                        externalNs = dspEngine.deepProfileExternalNs(),
-                        liveFxNs = dspEngine.deepProfileLiveFxNs(),
-                        delayNs = dspEngine.deepProfileDelayNs(),
-                        reverbNs = dspEngine.deepProfileReverbNs(),
-                        masterNs = dspEngine.deepProfileMasterNs(),
-                        voiceFreqNs = dspEngine.deepProfileVoiceFreqNs(),
-                        envelopeNs = dspEngine.deepProfileEnvelopeNs(),
-                        oscillatorNs = dspEngine.deepProfileOscillatorNs(),
-                        modulationNs = dspEngine.deepProfileModulationNs(),
-                        voiceMixNs = dspEngine.deepProfileVoiceMixNs(),
-                        oscMainNs = dspEngine.deepProfileOscMainNs(),
-                        oscPianoNs = dspEngine.deepProfileOscPianoNs(),
-                        oscSubNs = dspEngine.deepProfileOscSubNs(),
-                        oscDetuneNs = dspEngine.deepProfileOscDetuneNs(),
-                        oscDividersNs = dspEngine.deepProfileOscDividersNs()
-                    )
-                    dspEngine.resetDeepProfile()
-                }
 
                 // Sample Performance Pad position while loop-recording (~every 15 ms)
                 if (isLoopRecording) {
@@ -1788,11 +1746,7 @@ class SynthEngine(private val context: Context) {
 
 
 
-                val profileWriteT0 = if (benchMode == 2) System.nanoTime() else 0L
                 audioTrack.write(buffer, 0, buffer.size)
-                if (benchMode == 2) {
-                    audioBenchmark.recordAudioWrite(System.nanoTime() - profileWriteT0)
-                }
                 if (benchMode != 0) audioBenchmark.onBufferDone(System.nanoTime() - benchT0)
                 audioBenchmark.onBufferBoundary()
             }
@@ -1964,6 +1918,7 @@ class SynthEngine(private val context: Context) {
         release: Float? = null,
         targetOctave: Int? = null
     ) {
+        if (!isLooper) benchmarkReferenceRecorder.recordNote(true, baseFreq)
         val effectiveOctave = if (isLooper) targetOctave else octaveShift
         val freq = getEffectiveFrequency(baseFreq, effectiveOctave)
 
@@ -2252,6 +2207,7 @@ class SynthEngine(private val context: Context) {
 
 
     fun noteOff(baseFreq: Float, isLooper: Boolean = false) {
+        if (!isLooper) benchmarkReferenceRecorder.recordNote(false, baseFreq)
         if (isLoopRecording && !isLooper) {
             val now = System.currentTimeMillis() - loopStartTime
             recordedNotes.add(
@@ -2579,11 +2535,13 @@ class SynthEngine(private val context: Context) {
     fun startTrackRecording(trackIndex: Int) {
         val track = looperTracks.getOrNull(trackIndex) ?: return
         track.beginRecord()
+        benchmarkReferenceRecorder.recordLooper(trackIndex, 1)
     }
 
     fun stopTrackRecording(trackIndex: Int) {
         val track = looperTracks.getOrNull(trackIndex) ?: return
         track.endRecord()
+        benchmarkReferenceRecorder.recordLooper(trackIndex, 2)
     }
 
     fun toggleTrackPlayback(trackIndex: Int): Boolean {
@@ -2606,10 +2564,12 @@ class SynthEngine(private val context: Context) {
         } else {
             track.stopPlayback()
         }
+        benchmarkReferenceRecorder.recordLooper(trackIndex, if (playing) 3 else 4)
     }
 
     fun clearTrack(trackIndex: Int) {
         looperTracks.getOrNull(trackIndex)?.clear()
+        benchmarkReferenceRecorder.recordLooper(trackIndex, 5)
     }
 
     fun setTrackVolume(trackIndex: Int, vol: Float) {
