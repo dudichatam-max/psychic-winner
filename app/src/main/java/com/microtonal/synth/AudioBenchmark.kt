@@ -701,11 +701,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
                 profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
                 profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count),
-                profileOscDiv2AvgNs = profileAveragePerBuffer(deepProfileOscDiv2Ns, deepProfileSampleCount, stats.count),
-                profileOscDiv3AvgNs = profileAveragePerBuffer(deepProfileOscDiv3Ns, deepProfileSampleCount, stats.count),
-                profileOscDiv4AvgNs = profileAveragePerBuffer(deepProfileOscDiv4Ns, deepProfileSampleCount, stats.count),
-                profileVibeAvgNs = profileAveragePerBuffer(deepProfileVibeNs, deepProfileSampleCount, stats.count),
-                profileDriveAvgNs = profileAveragePerBuffer(deepProfileDriveNs, deepProfileSampleCount, stats.count)
+                profileOscDiv2AvgNs = profileAveragePerBuffer(dspProfile?.oscDiv2Ns ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+                profileOscDiv3AvgNs = profileAveragePerBuffer(dspProfile?.oscDiv3Ns ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+                profileOscDiv4AvgNs = profileAveragePerBuffer(dspProfile?.oscDiv4Ns ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+                profileVibeAvgNs = profileAveragePerBuffer(dspProfile?.vibeNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+                profileDriveAvgNs = profileAveragePerBuffer(dspProfile?.driveNs ?: 0L, dspProfile?.samples ?: 0L, stats.count)
             )
             lastReport = report
             phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
@@ -1270,28 +1270,6 @@ profilePadChoAvgNs = profileAveragePerBuffer(padProfile?.getOrNull(3) ?: 0L, pad
                 profileMicAvgNs = profileAveragePerBuffer(profileMicNs, profileSampleCount, stats.count),
                 profilePadMasterAvgNs = profileAveragePerBuffer(profilePadMasterNs, profileSampleCount, stats.count),
                 profileAudioWriteAvgNs = profileAveragePerBuffer(profileAudioWriteNs, profileSampleCount, stats.count),
-                profileVoiceAvgNs = profileAveragePerBuffer(deepProfileVoiceNs, deepProfileSampleCount, stats.count),
-                profileZdfAvgNs = profileAveragePerBuffer(deepProfileZdfNs, deepProfileSampleCount, stats.count),
-                profileExternalAvgNs = profileAveragePerBuffer(deepProfileExternalNs, deepProfileSampleCount, stats.count),
-                profileLiveFxAvgNs = profileAveragePerBuffer(deepProfileLiveFxNs, deepProfileSampleCount, stats.count),
-                profileDelayAvgNs = profileAveragePerBuffer(deepProfileDelayNs, deepProfileSampleCount, stats.count),
-                profileReverbAvgNs = profileAveragePerBuffer(deepProfileReverbNs, deepProfileSampleCount, stats.count),
-                profileMasterAvgNs = profileAveragePerBuffer(deepProfileMasterNs, deepProfileSampleCount, stats.count),
-                profileVoiceFreqAvgNs = profileAveragePerBuffer(deepProfileVoiceFreqNs, deepProfileSampleCount, stats.count),
-                profileEnvelopeAvgNs = profileAveragePerBuffer(deepProfileEnvelopeNs, deepProfileSampleCount, stats.count),
-                profileOscillatorAvgNs = profileAveragePerBuffer(deepProfileOscillatorNs, deepProfileSampleCount, stats.count),
-                profileModulationAvgNs = profileAveragePerBuffer(deepProfileModulationNs, deepProfileSampleCount, stats.count),
-                profileVoiceMixAvgNs = profileAveragePerBuffer(deepProfileVoiceMixNs, deepProfileSampleCount, stats.count),
-                profileOscMainAvgNs = profileAveragePerBuffer(deepProfileOscMainNs, deepProfileSampleCount, stats.count),
-                profileOscPianoAvgNs = profileAveragePerBuffer(deepProfileOscPianoNs, deepProfileSampleCount, stats.count),
-                profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
-                profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
-                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count),
-                profileOscDiv2AvgNs = profileAveragePerBuffer(deepProfileOscDiv2Ns, deepProfileSampleCount, stats.count),
-                profileOscDiv3AvgNs = profileAveragePerBuffer(deepProfileOscDiv3Ns, deepProfileSampleCount, stats.count),
-                profileOscDiv4AvgNs = profileAveragePerBuffer(deepProfileOscDiv4Ns, deepProfileSampleCount, stats.count),
-                profileVibeAvgNs = profileAveragePerBuffer(deepProfileVibeNs, deepProfileSampleCount, stats.count),
-                profileDriveAvgNs = profileAveragePerBuffer(deepProfileDriveNs, deepProfileSampleCount, stats.count)
             )
             lastReport = report
             phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
