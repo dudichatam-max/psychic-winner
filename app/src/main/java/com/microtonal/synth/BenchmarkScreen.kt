@@ -64,7 +64,11 @@ fun BenchmarkScreen(
     var statusMsg by remember { mutableStateOf("") }
     var compareText by remember { mutableStateOf("") }
     var referenceSession by remember { mutableStateOf(BenchmarkReferenceIO.loadInternal(context)) }
-    var recordingReference by remember { mutableStateOf(false) }
+    // Recording belongs to SynthEngine and must survive closing this Dialog.
+    // The local state is only a UI mirror; the engine is the source of truth.
+    var recordingReference by remember {
+        mutableStateOf(engine.benchmarkReferenceRecorder.isRecording())
+    }
 
     val exportReferenceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip")
@@ -106,6 +110,15 @@ fun BenchmarkScreen(
             delay(250)
         }
     }
+    
+    // Keep the dialog state synchronized with the engine while this screen is visible.
+    // Closing the dialog destroys this Composable, but it does not stop the engine recorder.
+    LaunchedEffect(Unit) {
+        while (true) {
+            recordingReference = engine.benchmarkReferenceRecorder.isRecording()
+            delay(100)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -124,6 +137,9 @@ fun BenchmarkScreen(
             Text("BENCHMARK", color = gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             OutlinedButton(
                 onClick = {
+                    // Never stop the reference recorder here. It lives in SynthEngine,
+                    // so the user can close this window, play physically, then reopen it
+                    // and press STOP RECORDING.
                     if (running) bench.requestCancel()
                     onClose()
                 },
@@ -151,8 +167,10 @@ fun BenchmarkScreen(
                     } else {
                         referenceSession = engine.benchmarkReferenceRecorder.stop()
                         referenceSession?.let { BenchmarkReferenceIO.saveInternal(context, it) }
-                        recordingReference = false
-                        statusMsg = referenceSession?.let { "Reference captured: ${it.events.size} events" } ?: "Reference recording failed"
+                        recordingReference = engine.benchmarkReferenceRecorder.isRecording()
+                        statusMsg = referenceSession?.let {
+                            "Reference captured: ${it.events.size} events"
+                        } ?: "Reference recording failed"
                     }
                 },
                 enabled = !running,
@@ -176,22 +194,38 @@ fun BenchmarkScreen(
         Button(
             onClick = {
                 val session = referenceSession ?: return@Button
-                running = true; statusMsg = ""; compareText = ""; report = null
+                running = true
+                statusMsg = ""
+                compareText = ""
+                report = null
                 scope.launch {
-                    val result = withContext(Dispatchers.Default) { bench.runReferenceBlocking(context, session, includeLooper, includeDrums) }
-                    report = result; phaseLabel = if (result.verdict == BenchVerdict.ERROR) "ERROR" else "REFERENCE COMPLETED"
-                    statusMsg = result.errorMessage ?: ""; running = false
+                    val result = withContext(Dispatchers.Default) {
+                        bench.runReferenceBlocking(context, session, includeLooper, includeDrums)
+                    }
+                    report = result
+                    phaseLabel = if (result.verdict == BenchVerdict.ERROR) "ERROR" else "REFERENCE COMPLETED"
+                    statusMsg = result.errorMessage ?: ""
+                    running = false
                 }
             },
             enabled = referenceSession != null && !recordingReference && !running,
-            colors = ButtonDefaults.buttonColors(containerColor = gold),
-            modifier = Modifier.fillMaxWidth().height(34.dp)
-        ) { Text(if (running) "RUNNING…" else "RUN REFERENCE", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
-
-        Text("Reference Looper replay uses the recorded PCM source through the normal track-recording path, so the replay does not depend on live input.", color = Color.LightGray, fontSize = 9.sp)
+            colors = ButtonDefaults.buttonColors(
+                containerColor = gold,
+                contentColor = Color.Black,
+                disabledContainerColor = panelBg2,
+                disabledContentColor = Color.DarkGray
+            ),
+            modifier = Modifier.fillMaxWidth().height(38.dp)
+        ) {
+            Text(
+                if (running) "RUNNING RECORDED BENCHMARK…" else "RUN RECORDED BENCHMARK",
+                color = Color.Black,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp
+            )
+        }
 
         Text("EXTREME STRESS", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        Text("The existing synthetic stress workload is kept separate from the real-session benchmark.", color = Color.LightGray, fontSize = 9.sp)
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
