@@ -69,6 +69,7 @@ fun BenchmarkScreen(
     var recordingReference by remember {
         mutableStateOf(engine.benchmarkReferenceRecorder.isRecording())
     }
+    var finalizingReference by remember { mutableStateOf(false) }
 
     val exportReferenceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip")
@@ -165,19 +166,33 @@ fun BenchmarkScreen(
                         recordingReference = true
                         statusMsg = "Recording started"
                     } else {
-                        referenceSession = engine.benchmarkReferenceRecorder.stop()
-                        referenceSession?.let { BenchmarkReferenceIO.saveInternal(context, it) }
-                        recordingReference = engine.benchmarkReferenceRecorder.isRecording()
-                        statusMsg = referenceSession?.let {
-                            "Reference captured: ${it.events.size} events"
-                        } ?: "Reference recording failed"
+                        // STOP can copy several seconds of PCM from the looper and then
+                        // write a ZIP. Never do that work on the Compose/UI thread:
+                        // a long recording can otherwise make the whole app appear frozen.
+                        finalizingReference = true
+                        statusMsg = "Finishing recording…"
+                        scope.launch(Dispatchers.IO) {
+                            val session = engine.benchmarkReferenceRecorder.stop()
+                            val saved = session?.let { BenchmarkReferenceIO.saveInternal(context, it) } == true
+                            withContext(Dispatchers.Main) {
+                                referenceSession = session
+                                recordingReference = engine.benchmarkReferenceRecorder.isRecording()
+                                finalizingReference = false
+                                statusMsg = when {
+                                    session == null -> "Reference recording failed"
+                                    saved -> "Reference captured: ${session.events.size} events"
+                                    else -> "Reference captured, but saving failed"
+                                }
+                            }
+                        }
                     }
                 },
-                enabled = !running,
+                enabled = !running && !finalizingReference,
                 colors = ButtonDefaults.buttonColors(containerColor = if (recordingReference) Color(0xFFB71C1C) else gold),
                 modifier = Modifier.weight(1f).height(32.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
-            ) { Text(if (recordingReference) "STOP RECORDING" else "RECORD SESSION", color = if (recordingReference) Color.White else Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp) }
+            ) { Text(
+                if (finalizingReference) "FINISHING…" else if (recordingReference) "STOP RECORDING" else "RECORD SESSION", color = if (recordingReference) Color.White else Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp) }
             OutlinedButton(
                 onClick = { exportReferenceLauncher.launch("LStudio_Reference_${System.currentTimeMillis()}.zip") },
                 enabled = referenceSession != null && !recordingReference && !running,
