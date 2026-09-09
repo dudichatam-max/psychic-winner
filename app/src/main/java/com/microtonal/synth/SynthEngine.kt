@@ -560,8 +560,11 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
             if (stillSame) return copy
         }
         if (bulkMutation) return FloatArray(0)
-        val source = if (recordingState.get() == 1) recordingBuffer else playbackBuffer
-            ?: return FloatArray(0)
+        val source: FloatArray = if (recordingState.get() == 1) {
+            recordingBuffer ?: return FloatArray(0)
+        } else {
+            playbackBuffer
+        }
         val n = if (recordingState.get() == 1) {
             writePos.coerceIn(0, source.size)
         } else {
@@ -620,8 +623,11 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
     }
 
     fun writeSessionPcm(file: java.io.File) {
-        val source = if (recordingState.get() == 1) recordingBuffer else playbackBuffer
-            ?: FloatArray(0)
+        val source: FloatArray = if (recordingState.get() == 1) {
+            recordingBuffer ?: FloatArray(0)
+        } else {
+            playbackBuffer
+        }
         val count = if (recordingState.get() == 1) {
             writePos.coerceIn(0, source.size)
         } else {
@@ -633,14 +639,14 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
         }
         java.io.FileOutputStream(file).use { fos ->
             val hdr = java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            hdr.putInt(length)
+            hdr.putInt(count)
             fos.write(hdr.array())
             val tmp = ByteArray(4096)
             val bb = java.nio.ByteBuffer.wrap(tmp).order(java.nio.ByteOrder.LITTLE_ENDIAN)
             var i = 0
             while (i < count) {
                 bb.clear()
-                while (bb.remaining() >= 4 && i < length) {
+                while (bb.remaining() >= 4 && i < count) {
                     bb.putFloat(source[i])
                     i++
                 }
