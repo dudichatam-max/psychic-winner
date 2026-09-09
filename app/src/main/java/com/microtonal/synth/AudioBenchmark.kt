@@ -56,26 +56,6 @@ class BenchReport(
     val deltaUnderruns: Int,
     val cpuAvgPct: Double,
     val cpuPeakPct: Double,
-
-    /**
-     * Comparable 0..100 realtime score for the exact benchmark workload.
-     * Underruns are weighted most heavily because they represent an actual
-     * audio delivery failure. Deadline misses and tail latency describe load
-     * even when audio remains glitch-free.
-     */
-    val score: Int
-        get() {
-            val realtime = if (!underrunsAvailable) 0.0 else if (deltaUnderruns == 0) 40.0 else 0.0
-            val miss = (1.0 - (missRate / 0.10)).coerceIn(0.0, 1.0) * 30.0
-            val p95 = if (deadlineNs > 0L) {
-                (1.0 - ((p95Ns.toDouble() / deadlineNs.toDouble()) - 1.0) / 0.50).coerceIn(0.0, 1.0) * 20.0
-            } else 0.0
-            val p99 = if (deadlineNs > 0L) {
-                (1.0 - ((p99Ns.toDouble() / deadlineNs.toDouble()) - 1.0) / 0.75).coerceIn(0.0, 1.0) * 10.0
-            } else 0.0
-            return kotlin.math.round(realtime + miss + p95 + p99).toInt().coerceIn(0, 100)
-        }
-
     // Optional sampled hot-path profiling (average estimated time per audio buffer).
     val profileDspAvgNs: Long = 0L,
     val profileDrumsAvgNs: Long = 0L,
@@ -101,6 +81,36 @@ class BenchReport(
     val profileOscDetuneAvgNs: Long = 0L,
     val profileOscDividersAvgNs: Long = 0L
 )
+
+    /**
+     * Comparable 0..100 score for the same recorded/master workload.
+     * Actual audio delivery failures (underruns) are weighted separately
+     * from processing pressure (deadline misses and tail latency).
+     */
+    val score: Int
+        get() {
+            val realtime = if (!underrunsAvailable || deltaUnderruns == 0) {
+                40.0
+            } else {
+                (40.0 - deltaUnderruns * 10.0).coerceAtLeast(0.0)
+            }
+
+            val missScore = (1.0 - (missRate / 0.10)).coerceIn(0.0, 1.0) * 30.0
+
+            val p95Score = if (deadlineNs > 0L) {
+                val ratio = p95Ns.toDouble() / deadlineNs.toDouble()
+                (1.0 - (ratio - 1.0) / 0.50).coerceIn(0.0, 1.0) * 20.0
+            } else 0.0
+
+            val p99Score = if (deadlineNs > 0L) {
+                val ratio = p99Ns.toDouble() / deadlineNs.toDouble()
+                (1.0 - (ratio - 1.0) / 0.75).coerceIn(0.0, 1.0) * 10.0
+            } else 0.0
+
+            return kotlin.math.round(realtime + missScore + p95Score + p99Score)
+                .toInt()
+                .coerceIn(0, 100)
+        }
 
 /**
  * Measurement guest. Does not own audio output.
@@ -619,7 +629,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 underrunAvail && deltaU > 0 -> BenchVerdict.FAIL
                 stats.misses > 0 -> BenchVerdict.WARNING
                 else -> BenchVerdict.PASS
-                else -> BenchVerdict.WARNING
             }
 
             val report = BenchReport(
@@ -1168,7 +1177,6 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 underrunAvail && deltaU > 0 -> BenchVerdict.FAIL
                 stats.misses > 0 -> BenchVerdict.WARNING
                 else -> BenchVerdict.PASS
-                else -> BenchVerdict.WARNING
             }
 
             val report = BenchReport(
