@@ -305,6 +305,7 @@ fun BenchmarkScreen(
         if (r != null) {
             Text("BENCHMARK COMPLETE", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Result: ${r.verdict.name}", color = verdictColor(r.verdict), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("SCORE: ${r.score}/100", color = verdictColor(r.verdict), fontSize = 18.sp, fontWeight = FontWeight.Bold)
             ReportBlock(r)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
@@ -366,6 +367,7 @@ private fun ReportBlock(r: BenchReport) {
         Text("Max: ${nsToMs(r.maxNs)}", color = gray, fontSize = 10.sp)
         Text("Deadline misses: ${r.misses}", color = gray, fontSize = 10.sp)
         Text("Miss rate: ${String.format("%.4f", r.missRate * 100.0)}%", color = gray, fontSize = 10.sp)
+        Text("Score: ${r.score}/100", color = gray, fontSize = 10.sp)
         Spacer(Modifier.height(4.dp))
         Text("Realtime", color = Color(0xFFD4AF37), fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Text(

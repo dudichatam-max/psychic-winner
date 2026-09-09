@@ -56,6 +56,26 @@ class BenchReport(
     val deltaUnderruns: Int,
     val cpuAvgPct: Double,
     val cpuPeakPct: Double,
+
+    /**
+     * Comparable 0..100 realtime score for the exact benchmark workload.
+     * Underruns are weighted most heavily because they represent an actual
+     * audio delivery failure. Deadline misses and tail latency describe load
+     * even when audio remains glitch-free.
+     */
+    val score: Int
+        get() {
+            val realtime = if (!underrunsAvailable) 0.0 else if (deltaUnderruns == 0) 40.0 else 0.0
+            val miss = (1.0 - (missRate / 0.10)).coerceIn(0.0, 1.0) * 30.0
+            val p95 = if (deadlineNs > 0L) {
+                (1.0 - ((p95Ns.toDouble() / deadlineNs.toDouble()) - 1.0) / 0.50).coerceIn(0.0, 1.0) * 20.0
+            } else 0.0
+            val p99 = if (deadlineNs > 0L) {
+                (1.0 - ((p99Ns.toDouble() / deadlineNs.toDouble()) - 1.0) / 0.75).coerceIn(0.0, 1.0) * 10.0
+            } else 0.0
+            return kotlin.math.round(realtime + miss + p95 + p99).toInt().coerceIn(0, 100)
+        }
+
     // Optional sampled hot-path profiling (average estimated time per audio buffer).
     val profileDspAvgNs: Long = 0L,
     val profileDrumsAvgNs: Long = 0L,
@@ -596,9 +616,9 @@ class AudioBenchmark(private val engine: SynthEngine) {
 
             val verdict = when {
                 stats.count <= 0 -> BenchVerdict.ERROR
-                missRate >= 0.005 || (underrunAvail && deltaU > 0) -> BenchVerdict.FAIL
-                missRate > 0.0 && missRate < 0.005 && (!underrunAvail || deltaU == 0) -> BenchVerdict.WARNING
-                stats.misses == 0 && (!underrunAvail || deltaU == 0) -> BenchVerdict.PASS
+                underrunAvail && deltaU > 0 -> BenchVerdict.FAIL
+                stats.misses > 0 -> BenchVerdict.WARNING
+                else -> BenchVerdict.PASS
                 else -> BenchVerdict.WARNING
             }
 
@@ -807,8 +827,8 @@ class AudioBenchmark(private val engine: SynthEngine) {
             val cpuAvg = if (cpuSamples > 0) cpuSum / cpuSamples else liveCpuPct
             val verdict = when {
                 stats.count <= 0 -> BenchVerdict.ERROR
-                missRate >= 0.005 || (underrunAvail && deltaU > 0) -> BenchVerdict.FAIL
-                missRate > 0.0 -> BenchVerdict.WARNING
+                underrunAvail && deltaU > 0 -> BenchVerdict.FAIL
+                stats.misses > 0 -> BenchVerdict.WARNING
                 else -> BenchVerdict.PASS
             }
 
@@ -1145,9 +1165,9 @@ class AudioBenchmark(private val engine: SynthEngine) {
 
             val verdict = when {
                 stats.count <= 0 -> BenchVerdict.ERROR
-                missRate >= 0.005 || (underrunAvail && deltaU > 0) -> BenchVerdict.FAIL
-                missRate > 0.0 && missRate < 0.005 && (!underrunAvail || deltaU == 0) -> BenchVerdict.WARNING
-                stats.misses == 0 && (!underrunAvail || deltaU == 0) -> BenchVerdict.PASS
+                underrunAvail && deltaU > 0 -> BenchVerdict.FAIL
+                stats.misses > 0 -> BenchVerdict.WARNING
+                else -> BenchVerdict.PASS
                 else -> BenchVerdict.WARNING
             }
 
