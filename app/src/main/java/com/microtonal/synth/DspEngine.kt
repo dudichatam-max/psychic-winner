@@ -39,6 +39,40 @@ class DspFrame(
 // (8 → 4 → 1) to A/B coefficient rate without touching the filter math.
 private const val ZDF_COEFF_UPDATE_INTERVAL = 8
 private const val OSC_PROFILE_TARGETS = 5L
+private const val LIVE_FX_PROFILE_TARGETS = 7
+
+data class DspProfileSnapshot(
+    val samples: Long,
+    val voiceNs: Long,
+    val zdfNs: Long,
+    val externalNs: Long,
+    val liveFxNs: Long,
+    val delayNs: Long,
+    val reverbNs: Long,
+    val masterNs: Long,
+    val voiceFreqNs: Long,
+    val envelopeNs: Long,
+    val oscillatorNs: Long,
+    val modulationNs: Long,
+    val voiceMixNs: Long,
+    val oscMainNs: Long,
+    val oscPianoNs: Long,
+    val oscSubNs: Long,
+    val oscDetuneNs: Long,
+    val oscDividersNs: Long,
+    val oscDiv2Ns: Long,
+    val oscDiv3Ns: Long,
+    val oscDiv4Ns: Long,
+    val vibeNs: Long,
+    val warmNs: Long,
+    val ripNs: Long,
+    val fuzzNs: Long,
+    val phazNs: Long,
+    val wahNs: Long,
+    val octNs: Long,
+    val choNs: Long,
+    val driveNs: Long
+)
 
 class DspEngine(private val sampleRate: Int = 44100) {
 
@@ -62,7 +96,20 @@ class DspEngine(private val sampleRate: Int = 44100) {
     private var deepProfileOscSubNs = 0L
     private var deepProfileOscDetuneNs = 0L
     private var deepProfileOscDividersNs = 0L
+    private var deepProfileOscDiv2Ns = 0L
+    private var deepProfileOscDiv3Ns = 0L
+    private var deepProfileOscDiv4Ns = 0L
+    private var deepProfileVibeNs = 0L
+    private var deepProfileDriveNs = 0L
     private var deepProfileOscTargetCounter = 0L
+    private var deepProfileLiveFxTargetCounter = 0L
+    private var deepProfileWarmNs = 0L
+    private var deepProfileRipNs = 0L
+    private var deepProfileFuzzNs = 0L
+    private var deepProfilePhazNs = 0L
+    private var deepProfileWahNs = 0L
+    private var deepProfileOctNs = 0L
+    private var deepProfileChoNs = 0L
 
     fun resetDeepProfile() {
         deepProfileSampleCount = 0L
@@ -83,7 +130,32 @@ class DspEngine(private val sampleRate: Int = 44100) {
         deepProfileOscSubNs = 0L
         deepProfileOscDetuneNs = 0L
         deepProfileOscDividersNs = 0L
+        deepProfileOscDiv2Ns = 0L
+        deepProfileOscDiv3Ns = 0L
+        deepProfileOscDiv4Ns = 0L
+        deepProfileVibeNs = 0L
+        deepProfileDriveNs = 0L
+        deepProfileOscTargetCounter = 0L
+        deepProfileLiveFxTargetCounter = 0L
+        deepProfileWarmNs = 0L
+        deepProfileRipNs = 0L
+        deepProfileFuzzNs = 0L
+        deepProfilePhazNs = 0L
+        deepProfileWahNs = 0L
+        deepProfileOctNs = 0L
+        deepProfileChoNs = 0L
     }
+
+    fun deepProfileSnapshot(): DspProfileSnapshot = DspProfileSnapshot(
+        deepProfileSampleCount, deepProfileVoiceNs, deepProfileZdfNs, deepProfileExternalNs,
+        deepProfileLiveFxNs, deepProfileDelayNs, deepProfileReverbNs, deepProfileMasterNs,
+        deepProfileVoiceFreqNs, deepProfileEnvelopeNs, deepProfileOscillatorNs,
+        deepProfileModulationNs, deepProfileVoiceMixNs, deepProfileOscMainNs,
+        deepProfileOscPianoNs, deepProfileOscSubNs, deepProfileOscDetuneNs,
+        deepProfileOscDividersNs, deepProfileOscDiv2Ns, deepProfileOscDiv3Ns,
+        deepProfileOscDiv4Ns, deepProfileVibeNs, deepProfileWarmNs, deepProfileRipNs, deepProfileFuzzNs,
+        deepProfilePhazNs, deepProfileWahNs, deepProfileOctNs, deepProfileChoNs, deepProfileDriveNs
+    )
 
     fun deepProfileSampleCount(): Long = deepProfileSampleCount
     fun deepProfileVoiceNs(): Long = deepProfileVoiceNs
@@ -600,9 +672,13 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
             // Analog vibe: slow pitch sway (~5.4 Hz), live voices only — does not
             // steal the pad's cutoff-LFO axis.
+            val profileVibeGlobalT0 = if (profileHotPath && vibeOn) System.nanoTime() else 0L
             vibeLfoPhase += vibePhaseInc
             if (vibeLfoPhase >= 1.0) vibeLfoPhase -= 1.0
             vibeMod = if (vibeOn) (fastSine(vibeLfoPhase) * 0.0075).toFloat() else 0f
+            if (profileHotPath && vibeOn) {
+                deepProfileVibeNs += System.nanoTime() - profileVibeGlobalT0
+            }
             if (glideMs != cachedGlideMs) {
                 cachedGlideMs = glideMs
                 cachedGlideFactor = if (glideMs > 0) (invSampleRate / (glideMs / 1000.0)).coerceIn(0.001, 1.0) else 1.0
@@ -622,6 +698,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
             val target = (deepProfileOscTargetCounter % OSC_PROFILE_TARGETS).toInt()
             deepProfileOscTargetCounter++
             target
+        } else -1
+        val profileLiveFxTarget = if (profileHotPath) {
+            val target = deepProfileLiveFxTargetCounter % LIVE_FX_PROFILE_TARGETS
+            deepProfileLiveFxTargetCounter++
+            target.toInt()
         } else -1
 
 
@@ -660,7 +741,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
 
+            val profileVibeVoiceT0 = if (profileHotPath && vibeOn && !isLooper) System.nanoTime() else 0L
             val vibeScale = if (vibeOn && !isLooper) (1.0f + vibeMod) else 1.0f
+            if (profileHotPath && vibeOn && !isLooper) {
+                deepProfileVibeNs += System.nanoTime() - profileVibeVoiceT0
+            }
             val dt = (slot.currentFreq * vibeScale * invSampleRate).coerceIn(0.0001, 0.45)
             val invDt = 1.0 / dt
             slot.phase += twoPi * dt
@@ -868,10 +953,26 @@ class DspEngine(private val sampleRate: Int = 44100) {
                     if (slot.zcCount % 4 == 0) slot.div4 = -slot.div4
                 }
                 slot.prevFund = fund
+                // The divider target is reached only when the 1/5 oscillator target is 4,
+                // then one of the 3 divider targets is selected. Each specific divider is
+                // therefore sampled once per 5 * 3 profiling calls.
+                val div2T0 = if (profileOscTarget == 4 && (deepProfileOscTargetCounter % 3L) == 0L) System.nanoTime() else 0L
+                val div2Contribution = slot.div2 * (0.07 * div2Wet)
+                if (profileOscTarget == 4 && (deepProfileOscTargetCounter % 3L) == 0L) {
+                    deepProfileOscDiv2Ns += (System.nanoTime() - div2T0) * (OSC_PROFILE_TARGETS * 3L)
+                }
+                val div3T0 = if (profileOscTarget == 4 && (deepProfileOscTargetCounter % 3L) == 1L) System.nanoTime() else 0L
+                val div3Contribution = slot.div3 * (0.055 * div3Wet)
+                if (profileOscTarget == 4 && (deepProfileOscTargetCounter % 3L) == 1L) {
+                    deepProfileOscDiv3Ns += (System.nanoTime() - div3T0) * (OSC_PROFILE_TARGETS * 3L)
+                }
+                val div4T0 = if (profileOscTarget == 4 && (deepProfileOscTargetCounter % 3L) == 2L) System.nanoTime() else 0L
+                val div4Contribution = slot.div4 * (0.045 * div4Wet)
+                if (profileOscTarget == 4 && (deepProfileOscTargetCounter % 3L) == 2L) {
+                    deepProfileOscDiv4Ns += (System.nanoTime() - div4T0) * (OSC_PROFILE_TARGETS * 3L)
+                }
                 raw = raw * 0.92 + (
-                    slot.div2 * (0.07 * div2Wet) +
-                    slot.div3 * (0.055 * div3Wet) +
-                    slot.div4 * (0.045 * div4Wet)
+                    div2Contribution + div3Contribution + div4Contribution
                 ) * divPolyScale
             }
             if (
@@ -1078,6 +1179,7 @@ class DspEngine(private val sampleRate: Int = 44100) {
         val profileLiveFxT0 = if (profileHotPath) System.nanoTime() else 0L
 
         var liveMix = liveChannelMix
+        val profileWarmT0 = if (profileLiveFxTarget == 0 && warmOn) System.nanoTime() else 0L
         if (warmOn) {
             // Analog warmth on the live bus only: deeper shelf, soft-round the
             // lows, tiny even glow with DC removed. No Math.exp. No x*x on the
@@ -1093,8 +1195,12 @@ class DspEngine(private val sampleRate: Int = 44100) {
             warmLpState *= 0.99
             warmEvenDc *= 0.99
         }
+        if (profileLiveFxTarget == 0 && warmOn) {
+            deepProfileWarmNs += (System.nanoTime() - profileWarmT0) * LIVE_FX_PROFILE_TARGETS
+        }
         // SOUND live FX (not in presets). Wet is smoothed so toggles do not click.
         // Each block is adds/multiplies only — no allocations, no Math.exp.
+        val profileRipT0 = if (profileLiveFxTarget == 1 && ripOn) System.nanoTime() else 0L
         ripWet += ((if (ripOn) 1.0 else 0.0) - ripWet) * 0.003
         if (ripWet > 0.0005) {
             ripLpState += (liveMix - ripLpState) * ripLpCoeff
@@ -1104,6 +1210,10 @@ class DspEngine(private val sampleRate: Int = 44100) {
         } else {
             ripLpState = liveMix
         }
+        if (profileLiveFxTarget == 1 && ripOn) {
+            deepProfileRipNs += (System.nanoTime() - profileRipT0) * LIVE_FX_PROFILE_TARGETS
+        }
+        val profileFuzzT0 = if (profileLiveFxTarget == 2 && fuzzOn) System.nanoTime() else 0L
         fuzzWet += ((if (fuzzOn) 1.0 else 0.0) - fuzzWet) * 0.0008
         if (fuzzWet > 0.0005) {
             val driven = liveMix * 2.15
@@ -1111,6 +1221,10 @@ class DspEngine(private val sampleRate: Int = 44100) {
             val fuzzed = clipped - clipped * clipped * clipped * 0.33
             liveMix = liveMix * (1.0 - fuzzWet) + fuzzed * 0.92 * fuzzWet
         }
+        if (profileLiveFxTarget == 2 && fuzzOn) {
+            deepProfileFuzzNs += (System.nanoTime() - profileFuzzT0) * LIVE_FX_PROFILE_TARGETS
+        }
+        val profilePhazT0 = if (profileLiveFxTarget == 3 && phazOn) System.nanoTime() else 0L
         phazWet += ((if (phazOn) 1.0 else 0.0) - phazWet) * 0.003
         if (phazWet > 0.0005) {
             phazLfoPhase += phazPhaseInc
@@ -1134,6 +1248,10 @@ class DspEngine(private val sampleRate: Int = 44100) {
             phazZ3 *= 0.99
             phazZ4 *= 0.99
         }
+        if (profileLiveFxTarget == 3 && phazOn) {
+            deepProfilePhazNs += (System.nanoTime() - profilePhazT0) * LIVE_FX_PROFILE_TARGETS
+        }
+        val profileWahT0 = if (profileLiveFxTarget == 4 && liveWahAmt > 0.0008f) System.nanoTime() else 0L
         smoothedWah += (liveWahAmt.toDouble().coerceIn(0.0, 1.0) - smoothedWah) * 0.006
         smoothedOct += (liveOctAmt.toDouble().coerceIn(0.0, 1.0) - smoothedOct) * 0.006
         smoothedCho += (liveChoAmt.toDouble().coerceIn(0.0, 1.0) - smoothedCho) * 0.006
@@ -1148,6 +1266,10 @@ class DspEngine(private val sampleRate: Int = 44100) {
             wahEnv *= 0.99
             wahLp *= 0.99
         }
+        if (profileLiveFxTarget == 4 && liveWahAmt > 0.0008f) {
+            deepProfileWahNs += (System.nanoTime() - profileWahT0) * LIVE_FX_PROFILE_TARGETS
+        }
+        val profileOctT0 = if (profileLiveFxTarget == 5 && liveOctAmt > 0.0008f) System.nanoTime() else 0L
         if (smoothedOct > 0.0008) {
             val rec = if (liveMix >= 0.0) liveMix else -liveMix
             octLp += (rec - octLp) * 0.07
@@ -1156,6 +1278,10 @@ class DspEngine(private val sampleRate: Int = 44100) {
         } else if (octLp != 0.0) {
             octLp *= 0.99
         }
+        if (profileLiveFxTarget == 5 && liveOctAmt > 0.0008f) {
+            deepProfileOctNs += (System.nanoTime() - profileOctT0) * LIVE_FX_PROFILE_TARGETS
+        }
+        val profileChoT0 = if (profileLiveFxTarget == 6 && liveChoAmt > 0.0008f) System.nanoTime() else 0L
         if (smoothedCho > 0.0008) {
             choBuf[choWrite] = liveMix.toFloat()
             choPhase += choPhaseInc
@@ -1184,6 +1310,9 @@ class DspEngine(private val sampleRate: Int = 44100) {
             liveMix = liveMix * (1.0 - 0.5 * smoothedCho) + choSig * (0.5 * smoothedCho)
             choWrite++
             if (choWrite >= nCho) choWrite = 0
+        }
+        if (profileLiveFxTarget == 6 && liveChoAmt > 0.0008f) {
+            deepProfileChoNs += (System.nanoTime() - profileChoT0) * LIVE_FX_PROFILE_TARGETS
         }
         if (liveMix > 1.3) liveMix = 1.3 else if (liveMix < -1.3) liveMix = -1.3
         if (profileHotPath) {
@@ -1302,7 +1431,11 @@ class DspEngine(private val sampleRate: Int = 44100) {
 
 
         // Soft Clipper
+        val profileDriveMasterT0 = if (profileHotPath) System.nanoTime() else 0L
         val masterSample = softSaturate(dcY1 * 0.52, driveAmount).toFloat()
+        if (profileHotPath) {
+            deepProfileDriveNs += System.nanoTime() - profileDriveMasterT0
+        }
 
 
 
@@ -1317,10 +1450,14 @@ class DspEngine(private val sampleRate: Int = 44100) {
         reusableFrame.masterSample = masterSample
         // Freeze-in-place tap: live voices + the live echo send + the drive
         // amount that was active while the musician was playing.
+        val profileDriveTapT0 = if (profileHotPath) System.nanoTime() else 0L
         reusableFrame.liveRecordTap = softSaturate(
             (finalLiveSample + (echoSample * smoothedEchoMix) + revOut * smoothedReverb).toDouble(),
             driveAmount
         ).toFloat()
+        if (profileHotPath) {
+            deepProfileDriveNs += System.nanoTime() - profileDriveTapT0
+        }
         reusableFrame.externalSample = extAudioSampleScaled
 
 

@@ -86,10 +86,18 @@ class BenchmarkReferenceRecorder(private val engine:SynthEngine){
             completedRecordings.clear()
             initialLoops = capturedInitialLoops
             startNs=SystemClock.elapsedRealtimeNanos()
+            val initialSettings=snapshotSettings()
             active=true
 
+            // Persist the exact settings that were active at t=0. Without this
+            // event a reference that never changes a control could replay with
+            // whatever settings happened to be active when playback starts.
+            events += BenchmarkReferenceEvent(
+                timeUs = 0L,
+                type = BenchmarkReferenceEventType.STATE,
+                settings = initialSettings
+            )
             add(BenchmarkReferenceEventType.DRUM_STATE,payload=captureDrumStateJson())
-            val initialSettings=snapshotSettings()
             watcher=Thread{
                 var previous=initialSettings
                 while(active){

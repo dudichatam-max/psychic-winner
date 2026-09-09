@@ -783,6 +783,13 @@ class SynthEngine(private val context: Context) {
     private var padCy = 0f
     private val liveLp = floatArrayOf(0f)
     private val liveWet = floatArrayOf(0f)
+    // Diagnostic-only sampled timing for the Pad-window color effects across all active stems.
+    private var padProfileTargetCounter = 0L
+    private var padProfileSampleCount = 0L
+    private var padProfileTargetCalls = LongArray(3)
+    private var padProfileWahNs = 0L
+    private var padProfileOctNs = 0L
+    private var padProfileChoNs = 0L
     private val colorDrumL = StemColor()
     private val colorDrumR = StemColor()
     private val colorLoopL = StemColor()
@@ -801,30 +808,51 @@ class SynthEngine(private val context: Context) {
         private var choWrite = 0
         private var choPhase = 0.0
 
-        fun process(input: Float, wah: Float, oct: Float, cho: Float): Float {
+        fun process(input: Float, wah: Float, oct: Float, cho: Float, profile: Boolean = false): Float {
             var x = input.toDouble()
+            val padProfileTarget = if (profile) {
+                val target = (padProfileTargetCounter++ % 3L).toInt()
+                padProfileTargetCalls[target]++
+                target
+            } else -1
+
+            // Shared smoothing is deliberately not attributed to one effect.
+            // Each timer below covers only the actual effect block selected for
+            // this sampled invocation, so Wah does not include Oct/Cho work.
             smWah += (wah.toDouble().coerceIn(0.0, 1.0) - smWah) * 0.006
             smOct += (oct.toDouble().coerceIn(0.0, 1.0) - smOct) * 0.006
             smCho += (cho.toDouble().coerceIn(0.0, 1.0) - smCho) * 0.006
+
             if (smWah > 0.0008) {
+                val t0 = if (padProfileTarget == 0) System.nanoTime() else 0L
                 val peak = if (x >= 0.0) x else -x
                 wahEnv += (peak - wahEnv) * if (peak > wahEnv) 0.12 else 0.04
                 val wc = (0.05 + wahEnv * smWah * 0.38).coerceIn(0.02, 0.45)
                 wahLp += (x - wahLp) * wc
                 val wahSig = wahLp * 0.25 + (x - wahLp) * 1.15
                 x = x * (1.0 - smWah) + wahSig * smWah
+                if (padProfileTarget == 0) {
+                    padProfileWahNs += System.nanoTime() - t0
+                }
             } else {
                 wahEnv *= 0.99
                 wahLp *= 0.99
             }
+
             if (smOct > 0.0008) {
+                val t0 = if (padProfileTarget == 1) System.nanoTime() else 0L
                 val rec = if (x >= 0.0) x else -x
                 octLp += (rec - octLp) * 0.07
                 x += (rec - octLp) * 1.55 * smOct * 0.8
+                if (padProfileTarget == 1) {
+                    padProfileOctNs += System.nanoTime() - t0
+                }
             } else if (octLp != 0.0) {
                 octLp *= 0.99
             }
+
             if (smCho > 0.0008) {
+                val t0 = if (padProfileTarget == 2) System.nanoTime() else 0L
                 choBuf[choWrite] = x.toFloat()
                 val invSr = 1.0 / sampleRate
                 choPhase += 0.35 * invSr
@@ -854,7 +882,11 @@ class SynthEngine(private val context: Context) {
                 x = x * (1.0 - 0.20 * smCho) + choSig * (0.20 * smCho)
                 choWrite++
                 if (choWrite >= nCho) choWrite = 0
+                if (padProfileTarget == 2) {
+                    padProfileChoNs += System.nanoTime() - t0
+                }
             }
+
             if (x > 1.2) x = 1.2 else if (x < -1.2) x = -1.2
             return x.toFloat()
         }
@@ -1161,10 +1193,18 @@ class SynthEngine(private val context: Context) {
                     reverbMix = reverbMix
                 )
                 for (i in 0 until bufferSize) {
+                    // Diagnostic timing is sampled at 1/128 audio samples.
+                    // Keeping the gate here prevents the profiler itself from
+                    // materially changing the AudioThread workload.
+                    val deepProfile =
+                        audioBenchmark.deepProfileEnabled &&
+                            benchMode == 2 &&
+                            audioBenchmark.shouldProfileSample(i)
                     val frame = dspEngine.processNextSample(
                         noteSlots = noteSlots,
                         maxVoices = maxVoices,
-                        extraReverbSend = lastRevSend
+                        extraReverbSend = lastRevSend,
+                        profileHotPath = deepProfile
                     )
 
                     val drumSample = drumEngine.processNextSample()
@@ -1323,16 +1363,19 @@ class SynthEngine(private val context: Context) {
                     }
                     val fxAmt = padWah + padOct + padCho
                     if (fxAmt > 0.002f && padTargetDrum) {
-                        drumOutL = colorDrumL.process(drumOutL, padWah, padOct, padCho)
-                        drumOutR = colorDrumR.process(drumOutR, padWah, padOct, padCho)
+                        drumOutL = colorDrumL.process(drumOutL, padWah, padOct, padCho, profile = deepProfile)
+                        drumOutR = colorDrumR.process(drumOutR, padWah, padOct, padCho, profile = deepProfile)
                     }
                     if (fxAmt > 0.002f && padTargetLoop) {
-                        loopOutL = colorLoopL.process(loopOutL, padWah, padOct, padCho)
-                        loopOutR = colorLoopR.process(loopOutR, padWah, padOct, padCho)
+                        loopOutL = colorLoopL.process(loopOutL, padWah, padOct, padCho, profile = deepProfile)
+                        loopOutR = colorLoopR.process(loopOutR, padWah, padOct, padCho, profile = deepProfile)
                     }
                     if (fxAmt > 0.002f && padTargetMic) {
-                        micOutL = colorMicL.process(micOutL, padWah, padOct, padCho)
-                        micOutR = colorMicR.process(micOutR, padWah, padOct, padCho)
+                        micOutL = colorMicL.process(micOutL, padWah, padOct, padCho, profile = deepProfile)
+                        micOutR = colorMicR.process(micOutR, padWah, padOct, padCho, profile = deepProfile)
+                    }
+                    if (deepProfile) {
+                        padProfileSampleCount++
                     }
                     val stopTarget = if (busHoldStop) 0f else 1f
                     stopGain += (stopTarget - stopGain) * fadeCoeff
@@ -2668,4 +2711,37 @@ class SynthEngine(private val context: Context) {
             try { extractor.release() } catch (_: Exception) {}
         }
     }
+
+    fun resetDspProfile() {
+        dspEngine.resetDeepProfile()
+    }
+
+    fun dspProfileSnapshot(): DspProfileSnapshot = dspEngine.deepProfileSnapshot()
+
+
+    fun resetPadProfile() {
+        padProfileTargetCounter = 0L
+        padProfileSampleCount = 0L
+        padProfileTargetCalls[0] = 0L
+        padProfileTargetCalls[1] = 0L
+        padProfileTargetCalls[2] = 0L
+        padProfileWahNs = 0L
+        padProfileOctNs = 0L
+        padProfileChoNs = 0L
+    }
+
+    fun padProfileSnapshot(): LongArray {
+        fun estimate(sumNs: Long, targetCalls: Long): Long {
+            if (targetCalls <= 0L || padProfileTargetCounter <= 0L) return 0L
+            return (sumNs.toDouble() * padProfileTargetCounter.toDouble() /
+                targetCalls.toDouble()).toLong()
+        }
+        return longArrayOf(
+            padProfileSampleCount,
+            estimate(padProfileWahNs, padProfileTargetCalls[0]),
+            estimate(padProfileOctNs, padProfileTargetCalls[1]),
+            estimate(padProfileChoNs, padProfileTargetCalls[2])
+        )
+    }
+
 }

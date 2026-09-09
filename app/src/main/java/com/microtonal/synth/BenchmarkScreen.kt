@@ -333,6 +333,43 @@ fun BenchmarkScreen(
             )
         }
 
+        Spacer(Modifier.height(4.dp))
+        Button(
+            onClick = {
+                val session = referenceSession ?: return@Button
+                running = true
+                statusMsg = ""
+                compareText = ""
+                report = null
+                scope.launch {
+                    val result = withContext(Dispatchers.Default) {
+                        bench.runReferenceBlocking(
+                            context, session, includeLooper, includeDrums, deepProfile = true
+                        )
+                    }
+                    report = result
+                    phaseLabel = if (result.verdict == BenchVerdict.ERROR) "ERROR" else "DSP PROFILE COMPLETED"
+                    statusMsg = result.errorMessage ?: ""
+                    running = false
+                }
+            },
+            enabled = referenceSession != null && !recordingReference && !running && !loadingReference,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = panelBg2,
+                contentColor = gold,
+                disabledContainerColor = panelBg2,
+                disabledContentColor = Color.DarkGray
+            ),
+            modifier = Modifier.fillMaxWidth().height(36.dp)
+        ) {
+            Text(
+                if (running) "PROFILING RECORDED DSP…" else "PROFILE RECORDED DSP",
+                color = gold,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp
+            )
+        }
+
         Text("EXTREME STRESS", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -447,10 +484,15 @@ private fun ReportBlock(r: BenchReport) {
         Text("Deadline: ${nsToMs(r.deadlineNs)}", color = gray, fontSize = 10.sp)
         Text("Polyphony: Dynamic 1–8", color = gray, fontSize = 10.sp)
         Text("Maximum simultaneous voices: 8", color = gray, fontSize = 10.sp)
-        Text("Detune: ON   Warm: ON   Reverb: 100%   Pad/LFO: ON", color = gray, fontSize = 10.sp)
-        Text("Looper: ${onOff(r.includeLooper)}${if (r.includeLooper) "   Tracks: 6" else ""}", color = gray, fontSize = 10.sp)
-        Text("Drums: ${onOff(r.includeDrums)}   BPM: ${r.bpm}", color = gray, fontSize = 10.sp)
-        Text("Warm-up: 3s   Measurement: 30s   Wave: ${r.waveformType}", color = gray, fontSize = 10.sp)
+        if (r.referenceDurationMs > 0L) {
+            Text("Reference replay: recorded settings/events", color = gray, fontSize = 10.sp)
+            Text("Looper replay: ${onOff(r.includeLooper)}   Drums replay: ${onOff(r.includeDrums)}", color = gray, fontSize = 10.sp)
+            Text("Reference BPM: ${String.format("%.2f", r.bpm)}   Wave: ${r.waveformType}", color = gray, fontSize = 10.sp)
+            Text("Warm-up: none   Measurement: ${String.format("%.2fs", r.referenceDurationMs / 1000.0)}", color = gray, fontSize = 10.sp)
+        } else {
+            Text("Stress workload: generated benchmark", color = gray, fontSize = 10.sp)
+            Text("Warm-up: 3s   Measurement: ${AudioBenchmark.MEASURE_MS / 1000}s", color = gray, fontSize = 10.sp)
+        }
         Spacer(Modifier.height(4.dp))
         Text("Processing Time", color = Color(0xFFD4AF37), fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Text("Average: ${nsToMs(r.avgNs)}", color = gray, fontSize = 10.sp)
@@ -472,6 +514,22 @@ private fun ReportBlock(r: BenchReport) {
         Text("CPU (process-level estimate)", color = Color(0xFFD4AF37), fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Text("Average: ${String.format("%.2f", r.cpuAvgPct)}%", color = gray, fontSize = 10.sp)
         Text("Peak: ${String.format("%.2f", r.cpuPeakPct)}%", color = gray, fontSize = 10.sp)
+        if (r.deepProfiled) {
+            Spacer(Modifier.height(4.dp))
+            Text("DSP DIAGNOSTIC — sampled execution estimate", color = Color(0xFFD4AF37), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("Sampled DSP points: ${r.profileSamples} (1/128 audio samples)", color = gray, fontSize = 9.sp)
+            Text("Voice: ${nsToMs(r.profileVoiceAvgNs)}   Osc: ${nsToMs(r.profileOscillatorAvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Main Osc: ${nsToMs(r.profileOscMainAvgNs)}   Piano: ${nsToMs(r.profileOscPianoAvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Sub: ${nsToMs(r.profileOscSubAvgNs)}   Detune: ${nsToMs(r.profileOscDetuneAvgNs)}   Vibe: ${nsToMs(r.profileVibeAvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Div core: ${nsToMs(r.profileOscDividersAvgNs)}   Div2 contrib: ${nsToMs(r.profileOscDiv2AvgNs)}   Div3 contrib: ${nsToMs(r.profileOscDiv3AvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Div4 contrib: ${nsToMs(r.profileOscDiv4AvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Warm: ${nsToMs(r.profileWarmAvgNs)}   Rip: ${nsToMs(r.profileRipAvgNs)}   Fuzz: ${nsToMs(r.profileFuzzAvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Phaz: ${nsToMs(r.profilePhazAvgNs)}   Key-bus Wah: ${nsToMs(r.profileWahAvgNs)}   Key-bus Oct: ${nsToMs(r.profileOctAvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Key-bus Cho: ${nsToMs(r.profileChoAvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Pad Wah: ${nsToMs(r.profilePadWahAvgNs)}   Pad Oct: ${nsToMs(r.profilePadOctAvgNs)}   Pad Cho: ${nsToMs(r.profilePadChoAvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Reverb: ${nsToMs(r.profileReverbAvgNs)}   Delay: ${nsToMs(r.profileDelayAvgNs)}   Drive: ${nsToMs(r.profileDriveAvgNs)}", color = gray, fontSize = 10.sp)
+            Text("Method: sampled execution timing, 1/128 audio samples; Pad effects are extrapolated from observed active stems; not CPU-cycle measurement", color = Color.DarkGray, fontSize = 9.sp)
+        }
     }
 }
 

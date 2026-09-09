@@ -79,7 +79,25 @@ class BenchReport(
     val profileOscPianoAvgNs: Long = 0L,
     val profileOscSubAvgNs: Long = 0L,
     val profileOscDetuneAvgNs: Long = 0L,
-    val profileOscDividersAvgNs: Long = 0L
+    val profileOscDividersAvgNs: Long = 0L,
+    val profileOscDiv2AvgNs: Long = 0L,
+    val profileOscDiv3AvgNs: Long = 0L,
+    val profileOscDiv4AvgNs: Long = 0L,
+    val profileVibeAvgNs: Long = 0L,
+    val profileWarmAvgNs: Long = 0L,
+    val profileRipAvgNs: Long = 0L,
+    val profileFuzzAvgNs: Long = 0L,
+    val profilePhazAvgNs: Long = 0L,
+    val profileWahAvgNs: Long = 0L,
+    val profileOctAvgNs: Long = 0L,
+    val profileChoAvgNs: Long = 0L,
+    val profilePadWahAvgNs: Long = 0L,
+    val profilePadOctAvgNs: Long = 0L,
+    val profilePadChoAvgNs: Long = 0L,
+    val profileDriveAvgNs: Long = 0L,
+    val referenceDurationMs: Long = 0L,
+    val deepProfiled: Boolean = false,
+    val profileSamples: Long = 0L
 ) {
     /**
      * Comparable 0..100 score for the same recorded/master workload.
@@ -294,6 +312,9 @@ class AudioBenchmark(private val engine: SynthEngine) {
         private set
     @Volatile var liveCpuPct: Double = 0.0
         private set
+
+    /** Explicit diagnostic mode only; normal benchmarks leave the DSP profiler off. */
+    @Volatile var deepProfileEnabled: Boolean = false
 
     var lastReport: BenchReport? = null
         private set
@@ -679,7 +700,12 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 profileOscPianoAvgNs = profileAveragePerBuffer(deepProfileOscPianoNs, deepProfileSampleCount, stats.count),
                 profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
                 profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
-                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count)
+                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count),
+                profileOscDiv2AvgNs = profileAveragePerBuffer(deepProfileOscDiv2Ns, deepProfileSampleCount, stats.count),
+                profileOscDiv3AvgNs = profileAveragePerBuffer(deepProfileOscDiv3Ns, deepProfileSampleCount, stats.count),
+                profileOscDiv4AvgNs = profileAveragePerBuffer(deepProfileOscDiv4Ns, deepProfileSampleCount, stats.count),
+                profileVibeAvgNs = profileAveragePerBuffer(deepProfileVibeNs, deepProfileSampleCount, stats.count),
+                profileDriveAvgNs = profileAveragePerBuffer(deepProfileDriveNs, deepProfileSampleCount, stats.count)
             )
             lastReport = report
             phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
@@ -706,7 +732,8 @@ class AudioBenchmark(private val engine: SynthEngine) {
         context: Context,
         session: BenchmarkReferenceSession,
         includeLooper: Boolean,
-        includeDrums: Boolean
+        includeDrums: Boolean,
+        deepProfile: Boolean = false
     ): BenchReport {
         cancelRequested = false
         lastError = null
@@ -722,6 +749,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
         captureMode = 0
         startMeasureAfterWrite = false
         stopAfterWrite = false
+        deepProfileEnabled = deepProfile
+        if (deepProfile) {
+            engine.resetDspProfile()
+            engine.resetPadProfile()
+        }
 
         val snap = WorkloadSnapshot.capture(engine)
         var looperSnaps: Array<LooperTrackRestoreSnapshot>? = null
@@ -830,6 +862,14 @@ class AudioBenchmark(private val engine: SynthEngine) {
             )
             if (restoreErr != null) return fail(context, includeLooper, includeDrums, restoreErr)
 
+            val dspProfile = if (deepProfile) engine.dspProfileSnapshot() else null
+            val padProfile = if (deepProfile) engine.padProfileSnapshot() else null
+            val referenceInitialSettings = session.events.firstOrNull { it.type == BenchmarkReferenceEventType.STATE }?.settings
+            val referenceWaveform = referenceInitialSettings?.waveform ?: engine.waveformType
+            val referenceBpm = session.events.firstOrNull { it.type == BenchmarkReferenceEventType.DRUM_STATE }?.payload?.let { payload ->
+                try { JSONObject(payload).optDouble("bpm", engine.drumEngine.bpm.toDouble()).toFloat() }
+                catch (_: Throwable) { engine.drumEngine.bpm }
+            } ?: engine.drumEngine.bpm
             val stats = computeStats(copy)
             val underrunAvail = underrun0 >= 0 && underrun1 >= 0
             val deltaU = if (underrunAvail) (underrun1 - underrun0).coerceAtLeast(0) else 0
@@ -853,8 +893,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 deadlineNs = deadlineNs,
                 includeLooper = includeLooper,
                 includeDrums = includeDrums,
-                waveformType = engine.waveformType,
-                bpm = engine.drumEngine.bpm,
+                waveformType = referenceWaveform,
+                bpm = referenceBpm,
+                referenceDurationMs = ((session.durationUs + 999L) / 1_000L).coerceAtLeast(1L),
+                deepProfiled = deepProfile,
+                profileSamples = dspProfile?.samples ?: 0L,
                 avgNs = stats.avg, p50Ns = stats.p50, p95Ns = stats.p95, p99Ns = stats.p99, maxNs = stats.max,
                 buffers = stats.count, misses = stats.misses, missRate = missRate,
                 underrunsAvailable = underrunAvail, deltaUnderruns = deltaU,
@@ -865,23 +908,38 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 profileMicAvgNs = profileAveragePerBuffer(profileMicNs, profileSampleCount, stats.count),
                 profilePadMasterAvgNs = profileAveragePerBuffer(profilePadMasterNs, profileSampleCount, stats.count),
                 profileAudioWriteAvgNs = profileAveragePerBuffer(profileAudioWriteNs, profileSampleCount, stats.count),
-                profileVoiceAvgNs = profileAveragePerBuffer(deepProfileVoiceNs, deepProfileSampleCount, stats.count),
-                profileZdfAvgNs = profileAveragePerBuffer(deepProfileZdfNs, deepProfileSampleCount, stats.count),
-                profileExternalAvgNs = profileAveragePerBuffer(deepProfileExternalNs, deepProfileSampleCount, stats.count),
-                profileLiveFxAvgNs = profileAveragePerBuffer(deepProfileLiveFxNs, deepProfileSampleCount, stats.count),
-                profileDelayAvgNs = profileAveragePerBuffer(deepProfileDelayNs, deepProfileSampleCount, stats.count),
-                profileReverbAvgNs = profileAveragePerBuffer(deepProfileReverbNs, deepProfileSampleCount, stats.count),
-                profileMasterAvgNs = profileAveragePerBuffer(deepProfileMasterNs, deepProfileSampleCount, stats.count),
-                profileVoiceFreqAvgNs = profileAveragePerBuffer(deepProfileVoiceFreqNs, deepProfileSampleCount, stats.count),
-                profileEnvelopeAvgNs = profileAveragePerBuffer(deepProfileEnvelopeNs, deepProfileSampleCount, stats.count),
-                profileOscillatorAvgNs = profileAveragePerBuffer(deepProfileOscillatorNs, deepProfileSampleCount, stats.count),
-                profileModulationAvgNs = profileAveragePerBuffer(deepProfileModulationNs, deepProfileSampleCount, stats.count),
-                profileVoiceMixAvgNs = profileAveragePerBuffer(deepProfileVoiceMixNs, deepProfileSampleCount, stats.count),
-                profileOscMainAvgNs = profileAveragePerBuffer(deepProfileOscMainNs, deepProfileSampleCount, stats.count),
-                profileOscPianoAvgNs = profileAveragePerBuffer(deepProfileOscPianoNs, deepProfileSampleCount, stats.count),
-                profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
-                profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
-                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count)
+                profileVoiceAvgNs = profileAveragePerBuffer(dspProfile?.voiceNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileZdfAvgNs = profileAveragePerBuffer(dspProfile?.zdfNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileExternalAvgNs = profileAveragePerBuffer(dspProfile?.externalNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileLiveFxAvgNs = profileAveragePerBuffer(dspProfile?.liveFxNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileDelayAvgNs = profileAveragePerBuffer(dspProfile?.delayNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileReverbAvgNs = profileAveragePerBuffer(dspProfile?.reverbNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileMasterAvgNs = profileAveragePerBuffer(dspProfile?.masterNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileVoiceFreqAvgNs = profileAveragePerBuffer(dspProfile?.voiceFreqNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileEnvelopeAvgNs = profileAveragePerBuffer(dspProfile?.envelopeNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOscillatorAvgNs = profileAveragePerBuffer(dspProfile?.oscillatorNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileModulationAvgNs = profileAveragePerBuffer(dspProfile?.modulationNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileVoiceMixAvgNs = profileAveragePerBuffer(dspProfile?.voiceMixNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOscMainAvgNs = profileAveragePerBuffer(dspProfile?.oscMainNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOscPianoAvgNs = profileAveragePerBuffer(dspProfile?.oscPianoNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOscSubAvgNs = profileAveragePerBuffer(dspProfile?.oscSubNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOscDetuneAvgNs = profileAveragePerBuffer(dspProfile?.oscDetuneNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOscDividersAvgNs = profileAveragePerBuffer(dspProfile?.oscDividersNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOscDiv2AvgNs = profileAveragePerBuffer(dspProfile?.oscDiv2Ns ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOscDiv3AvgNs = profileAveragePerBuffer(dspProfile?.oscDiv3Ns ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOscDiv4AvgNs = profileAveragePerBuffer(dspProfile?.oscDiv4Ns ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileVibeAvgNs = profileAveragePerBuffer(dspProfile?.vibeNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileDriveAvgNs = profileAveragePerBuffer(dspProfile?.driveNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileWarmAvgNs = profileAveragePerBuffer(dspProfile?.warmNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileRipAvgNs = profileAveragePerBuffer(dspProfile?.ripNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileFuzzAvgNs = profileAveragePerBuffer(dspProfile?.fuzzNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profilePhazAvgNs = profileAveragePerBuffer(dspProfile?.phazNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileWahAvgNs = profileAveragePerBuffer(dspProfile?.wahNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileOctAvgNs = profileAveragePerBuffer(dspProfile?.octNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profileChoAvgNs = profileAveragePerBuffer(dspProfile?.choNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
+profilePadWahAvgNs = profileAveragePerBuffer(padProfile?.getOrNull(1) ?: 0L, padProfile?.getOrNull(0) ?: 0L, stats.count),
+profilePadOctAvgNs = profileAveragePerBuffer(padProfile?.getOrNull(2) ?: 0L, padProfile?.getOrNull(0) ?: 0L, stats.count),
+profilePadChoAvgNs = profileAveragePerBuffer(padProfile?.getOrNull(3) ?: 0L, padProfile?.getOrNull(0) ?: 0L, stats.count)
             )
             lastReport = report
             phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
@@ -893,6 +951,7 @@ class AudioBenchmark(private val engine: SynthEngine) {
             return fail(context, includeLooper, includeDrums, t.message ?: t.javaClass.simpleName)
         } finally {
             player.cancel()
+            deepProfileEnabled = false
             captureMode = 0
             startMeasureAfterWrite = false
             stopAfterWrite = false
@@ -1227,7 +1286,12 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 profileOscPianoAvgNs = profileAveragePerBuffer(deepProfileOscPianoNs, deepProfileSampleCount, stats.count),
                 profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
                 profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
-                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count)
+                profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count),
+                profileOscDiv2AvgNs = profileAveragePerBuffer(deepProfileOscDiv2Ns, deepProfileSampleCount, stats.count),
+                profileOscDiv3AvgNs = profileAveragePerBuffer(deepProfileOscDiv3Ns, deepProfileSampleCount, stats.count),
+                profileOscDiv4AvgNs = profileAveragePerBuffer(deepProfileOscDiv4Ns, deepProfileSampleCount, stats.count),
+                profileVibeAvgNs = profileAveragePerBuffer(deepProfileVibeNs, deepProfileSampleCount, stats.count),
+                profileDriveAvgNs = profileAveragePerBuffer(deepProfileDriveNs, deepProfileSampleCount, stats.count)
             )
             lastReport = report
             phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
@@ -1787,6 +1851,9 @@ internal fun reportToJson(r: BenchReport): JSONObject {
     o.put("includeDrums", r.includeDrums)
     o.put("waveformType", r.waveformType)
     o.put("bpm", r.bpm.toDouble())
+    o.put("referenceDurationMs", r.referenceDurationMs)
+    o.put("deepProfiled", r.deepProfiled)
+    o.put("profileSamples", r.profileSamples)
     o.put("avgNs", r.avgNs)
     o.put("p50Ns", r.p50Ns)
     o.put("p95Ns", r.p95Ns)
@@ -1800,6 +1867,17 @@ internal fun reportToJson(r: BenchReport): JSONObject {
     o.put("cpuAvgPct", r.cpuAvgPct)
     o.put("cpuPeakPct", r.cpuPeakPct)
     o.put("profileDspAvgNs", r.profileDspAvgNs)
+    o.put("profileWarmAvgNs", r.profileWarmAvgNs)
+    o.put("profileRipAvgNs", r.profileRipAvgNs)
+    o.put("profileFuzzAvgNs", r.profileFuzzAvgNs)
+    o.put("profilePhazAvgNs", r.profilePhazAvgNs)
+    o.put("profileWahAvgNs", r.profileWahAvgNs)
+    o.put("profileOctAvgNs", r.profileOctAvgNs)
+    o.put("profileChoAvgNs", r.profileChoAvgNs)
+    o.put("profilePadWahAvgNs", r.profilePadWahAvgNs)
+    o.put("profilePadOctAvgNs", r.profilePadOctAvgNs)
+    o.put("profilePadChoAvgNs", r.profilePadChoAvgNs)
+    o.put("profileDriveAvgNs", r.profileDriveAvgNs)
     o.put("profileDrumsAvgNs", r.profileDrumsAvgNs)
     o.put("profileLooperAvgNs", r.profileLooperAvgNs)
     o.put("profileMicAvgNs", r.profileMicAvgNs)
@@ -1822,6 +1900,10 @@ internal fun reportToJson(r: BenchReport): JSONObject {
     o.put("profileOscSubAvgNs", r.profileOscSubAvgNs)
     o.put("profileOscDetuneAvgNs", r.profileOscDetuneAvgNs)
     o.put("profileOscDividersAvgNs", r.profileOscDividersAvgNs)
+    o.put("profileOscDiv2AvgNs", r.profileOscDiv2AvgNs)
+    o.put("profileOscDiv3AvgNs", r.profileOscDiv3AvgNs)
+    o.put("profileOscDiv4AvgNs", r.profileOscDiv4AvgNs)
+    o.put("profileVibeAvgNs", r.profileVibeAvgNs)
     return o
 }
 
@@ -1844,6 +1926,9 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         includeDrums = o.optBoolean("includeDrums", false),
         waveformType = o.optInt("waveformType", 0),
         bpm = o.optDouble("bpm", 120.0).toFloat(),
+        referenceDurationMs = o.optLong("referenceDurationMs", 0L),
+        deepProfiled = o.optBoolean("deepProfiled", false),
+        profileSamples = o.optLong("profileSamples", 0L),
         avgNs = o.optLong("avgNs", 0L),
         p50Ns = o.optLong("p50Ns", 0L),
         p95Ns = o.optLong("p95Ns", 0L),
@@ -1857,6 +1942,17 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         cpuAvgPct = o.optDouble("cpuAvgPct", 0.0),
         cpuPeakPct = o.optDouble("cpuPeakPct", 0.0),
         profileDspAvgNs = o.optLong("profileDspAvgNs", 0L),
+        profileWarmAvgNs = o.optLong("profileWarmAvgNs", 0L),
+        profileRipAvgNs = o.optLong("profileRipAvgNs", 0L),
+        profileFuzzAvgNs = o.optLong("profileFuzzAvgNs", 0L),
+        profilePhazAvgNs = o.optLong("profilePhazAvgNs", 0L),
+        profileWahAvgNs = o.optLong("profileWahAvgNs", 0L),
+        profileOctAvgNs = o.optLong("profileOctAvgNs", 0L),
+        profileChoAvgNs = o.optLong("profileChoAvgNs", 0L),
+        profilePadWahAvgNs = o.optLong("profilePadWahAvgNs", 0L),
+        profilePadOctAvgNs = o.optLong("profilePadOctAvgNs", 0L),
+        profilePadChoAvgNs = o.optLong("profilePadChoAvgNs", 0L),
+        profileDriveAvgNs = o.optLong("profileDriveAvgNs", 0L),
         profileDrumsAvgNs = o.optLong("profileDrumsAvgNs", 0L),
         profileLooperAvgNs = o.optLong("profileLooperAvgNs", 0L),
         profileMicAvgNs = o.optLong("profileMicAvgNs", 0L),
@@ -1878,6 +1974,10 @@ internal fun jsonToReport(o: JSONObject): BenchReport {
         profileOscPianoAvgNs = o.optLong("profileOscPianoAvgNs", 0L),
         profileOscSubAvgNs = o.optLong("profileOscSubAvgNs", 0L),
         profileOscDetuneAvgNs = o.optLong("profileOscDetuneAvgNs", 0L),
-        profileOscDividersAvgNs = o.optLong("profileOscDividersAvgNs", 0L)
+        profileOscDividersAvgNs = o.optLong("profileOscDividersAvgNs", 0L),
+        profileOscDiv2AvgNs = o.optLong("profileOscDiv2AvgNs", 0L),
+        profileOscDiv3AvgNs = o.optLong("profileOscDiv3AvgNs", 0L),
+        profileOscDiv4AvgNs = o.optLong("profileOscDiv4AvgNs", 0L),
+        profileVibeAvgNs = o.optLong("profileVibeAvgNs", 0L),
     )
 }
