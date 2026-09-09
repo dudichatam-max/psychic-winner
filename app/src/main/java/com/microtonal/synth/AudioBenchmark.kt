@@ -701,11 +701,11 @@ class AudioBenchmark(private val engine: SynthEngine) {
                 profileOscSubAvgNs = profileAveragePerBuffer(deepProfileOscSubNs, deepProfileSampleCount, stats.count),
                 profileOscDetuneAvgNs = profileAveragePerBuffer(deepProfileOscDetuneNs, deepProfileSampleCount, stats.count),
                 profileOscDividersAvgNs = profileAveragePerBuffer(deepProfileOscDividersNs, deepProfileSampleCount, stats.count),
-                profileOscDiv2AvgNs = profileAveragePerBuffer(dspProfile?.oscDiv2Ns ?: 0L, dspProfile?.samples ?: 0L, stats.count),
-                profileOscDiv3AvgNs = profileAveragePerBuffer(dspProfile?.oscDiv3Ns ?: 0L, dspProfile?.samples ?: 0L, stats.count),
-                profileOscDiv4AvgNs = profileAveragePerBuffer(dspProfile?.oscDiv4Ns ?: 0L, dspProfile?.samples ?: 0L, stats.count),
-                profileVibeAvgNs = profileAveragePerBuffer(dspProfile?.vibeNs ?: 0L, dspProfile?.samples ?: 0L, stats.count),
-                profileDriveAvgNs = profileAveragePerBuffer(dspProfile?.driveNs ?: 0L, dspProfile?.samples ?: 0L, stats.count)
+                profileOscDiv2AvgNs = 0L,
+                profileOscDiv3AvgNs = 0L,
+                profileOscDiv4AvgNs = 0L,
+                profileVibeAvgNs = 0L,
+                profileDriveAvgNs = 0L
             )
             lastReport = report
             phase = if (report.verdict == BenchVerdict.ERROR) BenchPhase.ERROR else BenchPhase.COMPLETED
