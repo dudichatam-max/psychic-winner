@@ -1,6 +1,5 @@
 ﻿package com.microtonal.synth
- 
-   
+
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -29,9 +28,9 @@ import java.util.zip.ZipOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
-
 
 class NoteSlot {
     @Volatile var active: Boolean = false
@@ -57,21 +56,6 @@ class NoteSlot {
     @Volatile var isReleasing: Boolean = false
     @Volatile var waveform: Int = 0
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     var isLooperNote: Boolean = false
     var frozenCutoff: Float = 5000f
     var frozenRes: Float = 0.3f
@@ -80,37 +64,7 @@ class NoteSlot {
     var frozenSustain: Float = 0.8f
     var frozenRelease: Float = 200f
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     var envState: Int = 0 // 0: Attack, 1: Decay, 2: Sustain
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     var zdfState1: Double = 0.0
     var zdfState2: Double = 0.0
@@ -123,56 +77,11 @@ class NoteSlot {
     var zdfH: Double = 0.0
     var zdfCoeffHold: Int = 0
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     var attackCoeff: Double = 0.0
     var decayCoeff: Double = 0.0
     var releaseCoeff: Double = 0.0
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     private val lock = Any()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun updateAndActivate(
         newBaseFreq: Float,
@@ -228,28 +137,12 @@ class NoteSlot {
         zdfCachedRes = Float.NaN
         zdfCoeffHold = 0
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (attack / 1000.0).coerceAtLeast(0.001)))
         decayCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (decay / 1000.0).coerceAtLeast(0.001)))
         releaseCoeff = Math.exp(-1.0 / (sampleRate * (release / 1000.0).coerceAtLeast(0.001)))
         active = true
     }
 }
-
 
 data class LooperNoteEvent(
     val timestampMs: Long,
@@ -265,21 +158,6 @@ data class LooperNoteEvent(
     val octave: Int
 )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 data class PadEvent(
     val timestampMs: Long,
     val x: Float,
@@ -292,9 +170,36 @@ data class PadEvent(
  * are frozen at record time and later live edits cannot rewrite the take.
  * Original event-based looper types above are kept intact.
  */
+data class LooperRecordingSnapshot(val samples: FloatArray, val length: Int)
+
 class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
     val maxSamples: Int = (sampleRate * maxSeconds).coerceAtLeast(sampleRate)
-    @Volatile private var buffer: FloatArray = FloatArray(0)
+
+    /*
+     * Recording and playback/snapshot storage are deliberately separate.
+     *
+     * A completed recording can be referenced by BenchmarkReferenceSession for
+     * an arbitrary amount of time.  Therefore the array used by a completed
+     * recording must never become a writable recording buffer again.
+     *
+     * The audio thread writes only to recordingBuffer.  endRecord() publishes
+     * that array as playbackBuffer and clears recordingBuffer.  The next take
+     * gets a new array.  No PCM copy is required at STOP and no completed
+     * Benchmark take can be overwritten by a later recording/load operation.
+     */
+    @Volatile private var playbackBuffer: FloatArray = FloatArray(0)
+    @Volatile private var recordingBuffer: FloatArray? = null
+    @Volatile private var bulkMutation = false
+
+    /*
+     * 0 = idle, 1 = recording, 2 = stopping, 3 = auto-completed at max length.
+     * Atomic state closes the race between the audio callback and endRecord().
+     */
+    private val recordingState = AtomicInteger(0)
+    private val activeWriters = AtomicInteger(0)
+    // Serializes control-plane buffer ownership changes without ever blocking the audio callback.
+    private val recordingControlLock = Any()
+
     val visualizerBuffer = FloatArray(128)
 
     @Volatile var length: Int = 0
@@ -323,13 +228,17 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
     private val playFadeCoeff = (1.0 / (sampleRate * 0.010)).toFloat()
 
     private fun refreshXfade() {
-        xfadeN = if (length > 8) (sampleRate / 100).coerceAtMost(length / 4).coerceAtLeast(1) else 0
+        xfadeN = if (length > 8) {
+            (sampleRate / 100).coerceAtMost(length / 4).coerceAtLeast(1)
+        } else 0
     }
 
-    private fun ensureBuffer() {
-        if (buffer.size < maxSamples) {
-            buffer = FloatArray(maxSamples)
-        }
+    private fun ensureRecordingBuffer(): FloatArray {
+        val current = recordingBuffer
+        if (current != null && current.size >= maxSamples) return current
+        val fresh = FloatArray(maxSamples)
+        recordingBuffer = fresh
+        return fresh
     }
 
     private val padMs = LongArray(2048)
@@ -368,41 +277,128 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
         return padYs[padI]
     }
 
-    fun beginRecord() {
-        isPlaying = false
-        isRecording = true
-        ensureBuffer()
-        writePos = 0
-        length = 0
-        playPos = 0
-        padN = 0
-        padI = 0
-        lastStampMs = -15L
+    fun beginRecord(freshBuffer: Boolean = false) {
+        synchronized(recordingControlLock) {
+            isPlaying = false
+            /*
+             * Every new take gets a fresh writable array.  beginRecord() and
+             * endRecord()/clear()/loadFromSamples() are serialized so a new
+             * recording can never replace the buffer while a previous take is
+             * being detached.
+             */
+            stopActiveWritersLocked()
+            recordingBuffer = FloatArray(maxSamples)
+            isRecording = true
+            writePos = 0
+            length = 0
+            playPos = 0
+            padN = 0
+            padI = 0
+            lastStampMs = -15L
+            recordingState.set(1)
+        }
     }
 
-    fun endRecord() {
-        if (!isRecording) return
+    fun endRecord(): LooperRecordingSnapshot? {
+        synchronized(recordingControlLock) {
+        /*
+         * Claim either a normal recording or a take that hit the hard limit.
+         * Both states transition through 2 before the backing array is detached,
+         * so a concurrent beginRecord() cannot replace recordingBuffer midway.
+         */
+        val claimed = recordingState.compareAndSet(3, 2) ||
+            recordingState.compareAndSet(1, 2)
+        if (!claimed) return null
         isRecording = false
-        length = writePos
+
+        /*
+         * A writer that already entered pushSample() is allowed to finish its
+         * sample before the backing array is published as immutable.
+         */
+        while (activeWriters.get() != 0) {
+            Thread.yield()
+        }
+
+        val completed = recordingBuffer
+        recordingBuffer = null
+        val completedLength = writePos.coerceIn(0, completed?.size ?: 0).coerceAtMost(maxSamples)
+
         playPos = 0
-        refreshXfade()
+        if (completedLength > 0 && completed != null) {
+            /*
+             * Publish the new backing array before publishing its length.
+             * A reader can therefore observe old length + new buffer (safe),
+             * but never new length + an old, shorter buffer.
+             */
+            playbackBuffer = completed
+            length = completedLength
+            recordingState.set(0)
+            refreshXfade()
+            return LooperRecordingSnapshot(completed, completedLength)
+        }
+
+        playbackBuffer = FloatArray(0)
+        length = 0
+        recordingState.set(0)
+        xfadeN = 0
+        return null
+            }
     }
+
+    private fun stopActiveWritersLocked() {
+        recordingState.set(0)
+        isRecording = false
+        while (activeWriters.get() != 0) {
+            Thread.yield()
+        }
+    }
+
+    fun hasPendingCompletedRecording(): Boolean = recordingState.get() == 3
 
     fun pushSample(sample: Float) {
-        if (!isRecording) return
-        if (buffer.isEmpty()) ensureBuffer()
-        if (writePos < buffer.size && writePos < maxSamples) {
-            buffer[writePos] = sample
-            writePos++
-            length = writePos
-            writeVis(sample)
-        } else {
-            isRecording = false
+        while (true) {
+            if (recordingState.get() != 1) return
+            activeWriters.incrementAndGet()
+            if (recordingState.get() != 1) {
+                activeWriters.decrementAndGet()
+                return
+            }
+
+            try {
+                val target = recordingBuffer ?: return
+                val pos = writePos
+                if (pos < target.size && pos < maxSamples) {
+                    target[pos] = sample
+                    writePos = pos + 1
+                    length = pos + 1
+                    writeVis(sample)
+                } else {
+                    /*
+                     * Preserve the historical hard limit.  This is an
+                     * emergency guard only; the normal UI stop path uses
+                     * endRecord() and records the completed Benchmark segment.
+                     */
+                    isRecording = false
+                    /*
+                     * Keep the completed array until the normal stop/finalize
+                     * path consumes it. This is important for a Benchmark take
+                     * that reaches the 30-second hard limit by itself.
+                     */
+                    recordingState.set(3)
+                    length = pos.coerceAtMost(maxSamples)
+                    playbackBuffer = target
+                    refreshXfade()
+                }
+            } finally {
+                activeWriters.decrementAndGet()
+            }
+            return
         }
     }
 
     fun readSample(): Float {
-        if (length <= 0 || buffer.isEmpty()) return 0f
+        val source = playbackBuffer
+        if (length <= 0 || source.isEmpty()) return 0f
         if (playGainTarget > playGain) {
             playGain += playFadeCoeff
             if (playGain > playGainTarget) playGain = playGainTarget
@@ -418,7 +414,7 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
             return 0f
         }
         if (!isPlaying && playGain <= 0.0008f) return 0f
-        var s = buffer[playPos]
+        var s = source[playPos]
         val fadeN = xfadeN
         if (fadeN > 0) {
             val remain = length - playPos
@@ -426,7 +422,7 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
                 val f = remain.toFloat() / fadeN.toFloat()
                 val headIdx = fadeN - remain
                 if (headIdx in 0 until length) {
-                    s = s * f + buffer[headIdx] * (1f - f)
+                    s = s * f + source[headIdx] * (1f - f)
                 }
             }
         }
@@ -440,7 +436,7 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
     }
 
     fun startPlayback() {
-        if (length <= 0) {
+        if (length <= 0 || playbackBuffer.isEmpty()) {
             isPlaying = false
             playGainTarget = 0f
             return
@@ -460,52 +456,118 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
     }
 
     fun clear() {
-        isRecording = false
-        isPlaying = false
-        stopping = false
-        playGain = 0f
-        playGainTarget = 0f
-        length = 0
-        writePos = 0
-        playPos = 0
-        padN = 0
-        padI = 0
-        lastStampMs = -15L
-        xfadeN = 0
-        buffer = FloatArray(0)
-        for (i in visualizerBuffer.indices) visualizerBuffer[i] = 0f
+        synchronized(recordingControlLock) {
+        bulkMutation = true
+        try {
+            stopActiveWritersLocked()
+            recordingBuffer = null
+            isPlaying = false
+            stopping = false
+            playGain = 0f
+            playGainTarget = 0f
+            length = 0
+            writePos = 0
+            playPos = 0
+            padN = 0
+            padI = 0
+            lastStampMs = -15L
+            xfadeN = 0
+            playbackBuffer = FloatArray(0)
+            for (i in visualizerBuffer.indices) visualizerBuffer[i] = 0f
+        } finally {
+            bulkMutation = false
+        }
+            }
     }
 
     fun hasContent(): Boolean = length > 1
 
     fun loadFromSamples(samples: FloatArray) {
-        isRecording = false
-        isPlaying = false
-        playPos = 0
-        val n = samples.size.coerceAtMost(maxSamples)
-        if (n <= 0) {
-            length = 0
-            writePos = 0
-            buffer = FloatArray(0)
-            for (i in visualizerBuffer.indices) visualizerBuffer[i] = 0f
-            return
+        synchronized(recordingControlLock) {
+        bulkMutation = true
+        try {
+            stopActiveWritersLocked()
+            recordingBuffer = null
+            isPlaying = false
+            playPos = 0
+            val n = samples.size.coerceAtMost(maxSamples)
+            if (n <= 0) {
+                length = 0
+                writePos = 0
+                playbackBuffer = FloatArray(0)
+                for (i in visualizerBuffer.indices) visualizerBuffer[i] = 0f
+                return
+            }
+
+            /*
+             * Never write into the previous playbackBuffer. It may be owned by
+             * a BenchmarkReferenceSession that is being saved or played back.
+             */
+            val fresh = FloatArray(maxSamples)
+            System.arraycopy(samples, 0, fresh, 0, n)
+            playbackBuffer = fresh
+            length = n
+            writePos = n
+            refreshXfade()
+            val step = (n / visualizerBuffer.size).coerceAtLeast(1)
+            for (i in visualizerBuffer.indices) {
+                val idx = (i * step).coerceAtMost(n - 1)
+                visualizerBuffer[i] = fresh[idx]
+            }
+            visWrite = 0
+        } finally {
+            bulkMutation = false
         }
-        ensureBuffer()
-        System.arraycopy(samples, 0, buffer, 0, n)
-        length = n
-        writePos = n
-        refreshXfade()
-        val step = (n / visualizerBuffer.size).coerceAtLeast(1)
-        for (i in visualizerBuffer.indices) {
-            val idx = (i * step).coerceAtMost(n - 1)
-            visualizerBuffer[i] = buffer[idx]
-        }
-        visWrite = 0
+            }
+    }
+
+    fun copyRecordingSamples(): FloatArray {
+        val source = recordingBuffer ?: return FloatArray(0)
+        val n = writePos.coerceIn(0, source.size).coerceAtMost(maxSamples)
+        return if (n > 0) source.copyOfRange(0, n) else FloatArray(0)
     }
 
     fun copySamples(): FloatArray {
-        if (length <= 0) return FloatArray(0)
-        return buffer.copyOfRange(0, length)
+        /*
+         * Preserve the public meaning of this method: while a take is being
+         * recorded, return the current take; otherwise return the completed
+         * playback content.  Recording is append-only, so a copy of the prefix
+         * that existed when writePos was read cannot be overwritten later.
+         */
+        repeat(3) {
+            if (bulkMutation) {
+                Thread.yield()
+                return@repeat
+            }
+            val source = if (recordingState.get() == 1) {
+                recordingBuffer
+            } else {
+                playbackBuffer
+            } ?: return FloatArray(0)
+            val n = if (recordingState.get() == 1) {
+                writePos.coerceIn(0, source.size)
+            } else {
+                length.coerceIn(0, source.size)
+            }
+            if (n <= 0) return FloatArray(0)
+            val copy = source.copyOfRange(0, n)
+            val stillSame = !bulkMutation &&
+                if (recordingState.get() == 1) {
+                    source === recordingBuffer && writePos >= n
+                } else {
+                    source === playbackBuffer && length == n
+                }
+            if (stillSame) return copy
+        }
+        if (bulkMutation) return FloatArray(0)
+        val source = if (recordingState.get() == 1) recordingBuffer else playbackBuffer
+            ?: return FloatArray(0)
+        val n = if (recordingState.get() == 1) {
+            writePos.coerceIn(0, source.size)
+        } else {
+            length.coerceIn(0, source.size)
+        }
+        return if (n > 0) source.copyOfRange(0, n) else FloatArray(0)
     }
 
     fun snapshotForRestore(): LooperTrackRestoreSnapshot {
@@ -527,6 +589,8 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
 
     fun restoreFromSnapshot(s: LooperTrackRestoreSnapshot) {
         isRecording = false
+        recordingState.set(0)
+        recordingBuffer = null
         stopping = false
         playGainTarget = 0f
         playGain = 0f
@@ -556,7 +620,14 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
     }
 
     fun writeSessionPcm(file: java.io.File) {
-        if (length <= 0 || buffer.isEmpty()) {
+        val source = if (recordingState.get() == 1) recordingBuffer else playbackBuffer
+            ?: FloatArray(0)
+        val count = if (recordingState.get() == 1) {
+            writePos.coerceIn(0, source.size)
+        } else {
+            length.coerceIn(0, source.size)
+        }
+        if (count <= 0 || source.isEmpty()) {
             if (file.exists()) file.delete()
             return
         }
@@ -567,10 +638,10 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
             val tmp = ByteArray(4096)
             val bb = java.nio.ByteBuffer.wrap(tmp).order(java.nio.ByteOrder.LITTLE_ENDIAN)
             var i = 0
-            while (i < length) {
+            while (i < count) {
                 bb.clear()
                 while (bb.remaining() >= 4 && i < length) {
-                    bb.putFloat(buffer[i])
+                    bb.putFloat(source[i])
                     i++
                 }
                 fos.write(tmp, 0, bb.position())
@@ -591,21 +662,6 @@ class LooperPcmTrack(private val sampleRate: Int, maxSeconds: Int = 30) {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 data class MidiNoteEvent(
     val timestampMs: Long,
     val isNoteOn: Boolean,
@@ -613,7 +669,6 @@ data class MidiNoteEvent(
     val wave: Int,
     val octave: Int
 )
-
 
 class SynthEngine(private val context: Context) {
     var sampleRate: Int = 44100
@@ -626,21 +681,6 @@ class SynthEngine(private val context: Context) {
     val benchmarkReferenceRecorder = BenchmarkReferenceRecorder(this)
     val benchmarkReferencePlayer = BenchmarkReferencePlayer(this)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     private val maxVoices = 8
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
@@ -650,38 +690,8 @@ class SynthEngine(private val context: Context) {
         if (value) dspEngine.onVoiceActivated() else dspEngine.onVoiceDeactivated()
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     private val recordingQueue = LinkedBlockingQueue<ByteArray>()
     private var recordingWriterThread: Thread? = null
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     // Live Keyboard Parameters
     @Volatile var waveformType = 3
@@ -723,21 +733,6 @@ class SynthEngine(private val context: Context) {
     @Volatile var looperResonance = 0.3f
     @Volatile var looperEcho = 0.25f
     @Volatile var looperGlide = 30f
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     @Volatile var performanceX: Float = 0f
     @Volatile var performanceY: Float = 0f
@@ -969,57 +964,12 @@ class SynthEngine(private val context: Context) {
         return out
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     private var lastPlayedFreq: Float = 440f
     private var lastLooperPlayedFreq: Float = 440f
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     val liveVisualizerBuffer = FloatArray(512)
     val looperVisualizerBuffer = FloatArray(512)
     val drumVisualizerBuffer = FloatArray(512)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     val recordedNotes = java.util.concurrent.CopyOnWriteArrayList<LooperNoteEvent>()
     val recordedPadEvents = java.util.concurrent.CopyOnWriteArrayList<PadEvent>()
@@ -1041,21 +991,6 @@ class SynthEngine(private val context: Context) {
     private var externalVisStride = 0
     @Volatile var isExternalPlayingUi = false
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     @Volatile private var isRecording = false
     @Volatile private var recFadeTarget = 0f
     private var recordedAudioStream: FileOutputStream? = null
@@ -1065,75 +1000,15 @@ class SynthEngine(private val context: Context) {
     @Volatile var isMidiRecording = false
     private var midiStartTime = 0L
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     private val audioTrack: AudioTrack
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     init {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val nativeSampleRateStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
         val nativeBufferSizeStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         sampleRate = nativeSampleRateStr?.toIntOrNull() ?: 44100
         bufferSizeFrames = nativeBufferSizeStr?.toIntOrNull() ?: 256
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         dspEngine = DspEngine(sampleRate)
         drumEngine = DrumEngine(sampleRate)
@@ -1141,58 +1016,13 @@ class SynthEngine(private val context: Context) {
         looperTracks = Array(looperTrackCount) { LooperPcmTrack(sampleRate, 30) }
         loadLooperSession()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         val minBufferSize = AudioTrack.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_OUT_STEREO,
             AudioFormat.ENCODING_PCM_16BIT
         )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         val safeBufferSize = maxOf(minBufferSize, bufferSizeFrames * 8)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
@@ -1214,57 +1044,12 @@ class SynthEngine(private val context: Context) {
             .build()
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun start() {
         isRunning = true
         audioTrack.play()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
             val bufferSize = 512
             val buffer = ShortArray(bufferSize * 2)
@@ -1284,21 +1069,6 @@ class SynthEngine(private val context: Context) {
             val recBytesPerBuf = bufferSize * 6
             val recPool24 = Array(8) { ByteArray(recBytesPerBuf) }
             var recDither = 0x13579bdf
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
             var warm = 0
             while (warm < 24) {
@@ -1345,21 +1115,6 @@ class SynthEngine(private val context: Context) {
                     ht++
                 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                 if (!busPadTouched) {
                     busPadX += (0.5f - busPadX) * 0.12f
                     busPadY += (0.5f - busPadY) * 0.12f
@@ -1405,21 +1160,6 @@ class SynthEngine(private val context: Context) {
                         maxVoices = maxVoices,
                         extraReverbSend = lastRevSend
                     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
                     val drumSample = drumEngine.processNextSample()
 
@@ -1621,21 +1361,6 @@ class SynthEngine(private val context: Context) {
                     val shortL = (rawL * Short.MAX_VALUE * 0.92f).toInt().coerceIn(-32768, 32767).toShort()
                     val shortR = (rawR * Short.MAX_VALUE * 0.92f).toInt().coerceIn(-32768, 32767).toShort()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                     buffer[i * 2] = shortL
                     buffer[i * 2 + 1] = shortR
                     if ((i and 7) == 0) {
@@ -1670,37 +1395,7 @@ class SynthEngine(private val context: Context) {
                         slot[o + 5] = (vR shr 16 and 0xFF).toByte()
                     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
                 // Sample Performance Pad position while loop-recording (~every 15 ms)
                 if (isLoopRecording) {
@@ -1711,40 +1406,10 @@ class SynthEngine(private val context: Context) {
                     }
                 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                 if (recOn || recFade > 0.0001f) {
                     recordingQueue.offer(recPool24[recPoolIdx])
                     recPoolIdx = (recPoolIdx + 1) % recPool24.size
                 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
                 audioTrack.write(buffer, 0, buffer.size)
                 if (benchMode != 0) audioBenchmark.onBufferDone(System.nanoTime() - benchT0)
@@ -1752,21 +1417,6 @@ class SynthEngine(private val context: Context) {
             }
         }.start()
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun underrunCount(): Int {
         return try {
@@ -1801,40 +1451,10 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun getEffectiveFrequency(baseFreq: Float, overrideOctave: Int? = null): Float {
         val octave = overrideOctave ?: octaveShift
         return baseFreq * Math.pow(2.0, octave.toDouble()).toFloat()
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun setLiveWaveform(wave: Int) {
         waveformType = wave
@@ -1846,25 +1466,9 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
     fun activeVoiceCount(): Int {
         return dspEngine.currentActiveVoiceCount()
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun startMidiRecording() {
         recordedMidiNotes.clear()
@@ -1872,39 +1476,9 @@ class SynthEngine(private val context: Context) {
         midiStartTime = System.currentTimeMillis()
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun stopMidiRecording() {
         isMidiRecording = false
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun noteOn(
         baseFreq: Float,
@@ -1921,21 +1495,6 @@ class SynthEngine(private val context: Context) {
         if (!isLooper) benchmarkReferenceRecorder.recordNote(true, baseFreq)
         val effectiveOctave = if (isLooper) targetOctave else octaveShift
         val freq = getEffectiveFrequency(baseFreq, effectiveOctave)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         if (isLoopRecording && !isLooper) {
             val now = System.currentTimeMillis() - loopStartTime
@@ -1968,37 +1527,7 @@ class SynthEngine(private val context: Context) {
             )
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         var slot: NoteSlot? = null
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         for (i in 0 until maxVoices) {
             val s = noteSlots[i]
@@ -2007,21 +1536,6 @@ class SynthEngine(private val context: Context) {
                 break
             }
         }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         if (slot != null) {
             slot.isReleasing = false
@@ -2032,21 +1546,6 @@ class SynthEngine(private val context: Context) {
             return
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         for (i in 0 until maxVoices) {
             val s = noteSlots[i]
             if (!s.active) {
@@ -2054,21 +1553,6 @@ class SynthEngine(private val context: Context) {
                 break
             }
         }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         if (slot == null) {
             var minVol = Double.MAX_VALUE
@@ -2081,21 +1565,6 @@ class SynthEngine(private val context: Context) {
             }
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         if (slot == null) {
             var minVol = Double.MAX_VALUE
             for (i in 0 until maxVoices) {
@@ -2106,21 +1575,6 @@ class SynthEngine(private val context: Context) {
                 }
             }
         }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         if (slot == null) {
             var minVol = Double.MAX_VALUE
@@ -2133,21 +1587,6 @@ class SynthEngine(private val context: Context) {
             }
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         if (slot != null) {
             val startFreq = if (isLooper) {
                 if (looperGlide > 0f) lastLooperPlayedFreq else freq
@@ -2156,21 +1595,6 @@ class SynthEngine(private val context: Context) {
             }
             
             if (isLooper) lastLooperPlayedFreq = freq else lastPlayedFreq = freq
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
             val wasActive = slot.active
             slot.updateAndActivate(
@@ -2190,21 +1614,6 @@ class SynthEngine(private val context: Context) {
             if (!wasActive) dspEngine.onVoiceActivated()
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun noteOff(baseFreq: Float, isLooper: Boolean = false) {
         if (!isLooper) benchmarkReferenceRecorder.recordNote(false, baseFreq)
@@ -2239,21 +1648,6 @@ class SynthEngine(private val context: Context) {
             )
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         for (i in 0 until maxVoices) {
             val slot = noteSlots[i]
             if (slot.active && slot.baseFreq == baseFreq && slot.isLooperNote == isLooper && !slot.isReleasing) {
@@ -2263,21 +1657,6 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun startLoopRecording() {
         recordedNotes.clear()
         recordedPadEvents.clear()
@@ -2285,21 +1664,6 @@ class SynthEngine(private val context: Context) {
         isLoopRecording = true
         loopStartTime = System.currentTimeMillis()
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun stopLoopRecording() {
         if (!isLoopRecording) return
@@ -2312,41 +1676,11 @@ class SynthEngine(private val context: Context) {
         performanceY = 0f
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun startLoopPlayback() {
         dspEngine.startExternalPlayback()
         if ((recordedNotes.isEmpty() && recordedPadEvents.isEmpty()) || loopDurationMs <= 0) return
         stopLoopPlayback()
         isLoopPlaying = true
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         loopThread = Thread {
             while (isLoopPlaying) {
@@ -2354,39 +1688,9 @@ class SynthEngine(private val context: Context) {
                 var eventIndex = 0
                 var padIndex = 0
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                 while (isLoopPlaying) {
                     val elapsed = System.currentTimeMillis() - start
                     if (elapsed >= loopDurationMs) break
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
                     // Replay note events
                     while (eventIndex < recordedNotes.size && recordedNotes[eventIndex].timestampMs <= elapsed) {
@@ -2410,21 +1714,6 @@ class SynthEngine(private val context: Context) {
                         eventIndex++
                     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                     // Replay Performance Pad (LFO / Res) automation onto the LOOP pad only
                     // so the live pad remains free for the user while the loop is playing
                     while (padIndex < recordedPadEvents.size && recordedPadEvents[padIndex].timestampMs <= elapsed) {
@@ -2434,38 +1723,8 @@ class SynthEngine(private val context: Context) {
                         padIndex++
                     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                     try { Thread.sleep(1) } catch (_: Exception) {}
                 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
                 for (i in 0 until maxVoices) {
                     if (noteSlots[i].isLooperNote) {
@@ -2478,21 +1737,6 @@ class SynthEngine(private val context: Context) {
             }
         }.also { it.start() }
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun stopLoopPlayback() {
         isLoopPlaying = false
@@ -2509,21 +1753,6 @@ class SynthEngine(private val context: Context) {
         loopPerformanceY = 0f
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun clearLoop() {
         stopLoopPlayback()
         recordedNotes.clear()
@@ -2533,43 +1762,27 @@ class SynthEngine(private val context: Context) {
     }
 
     fun startTrackRecording(trackIndex: Int) {
-        val track = looperTracks.getOrNull(trackIndex) ?: return
-        track.beginRecord()
-        benchmarkReferenceRecorder.recordLooper(trackIndex, 1)
+        benchmarkReferenceRecorder.beginLooperRecording(trackIndex)
+    }
+
+    private fun finishTrackRecording(trackIndex: Int): LooperRecordingSnapshot? {
+        return benchmarkReferenceRecorder.finishLooperRecording(trackIndex)
     }
 
     fun stopTrackRecording(trackIndex: Int) {
-        val track = looperTracks.getOrNull(trackIndex) ?: return
-        track.endRecord()
-        benchmarkReferenceRecorder.recordLooper(trackIndex, 2)
+        finishTrackRecording(trackIndex)
     }
 
     fun toggleTrackPlayback(trackIndex: Int): Boolean {
-        val track = looperTracks.getOrNull(trackIndex) ?: return false
-        return if (track.isPlaying) {
-            track.stopPlayback()
-            false
-        } else {
-            if (track.isRecording) track.endRecord()
-            track.startPlayback()
-            track.isPlaying
-        }
+        return benchmarkReferenceRecorder.toggleLooperPlaying(trackIndex)
     }
 
     fun setTrackPlaying(trackIndex: Int, playing: Boolean) {
-        val track = looperTracks.getOrNull(trackIndex) ?: return
-        if (playing) {
-            if (track.isRecording) track.endRecord()
-            track.startPlayback()
-        } else {
-            track.stopPlayback()
-        }
-        benchmarkReferenceRecorder.recordLooper(trackIndex, if (playing) 3 else 4)
+        benchmarkReferenceRecorder.setLooperPlaying(trackIndex, playing)
     }
 
     fun clearTrack(trackIndex: Int) {
-        looperTracks.getOrNull(trackIndex)?.clear()
-        benchmarkReferenceRecorder.recordLooper(trackIndex, 5)
+        benchmarkReferenceRecorder.clearLooperTrack(trackIndex)
     }
 
     fun setTrackVolume(trackIndex: Int, vol: Float) {
@@ -3127,21 +2340,6 @@ class SynthEngine(private val context: Context) {
 
     fun isExternalPlaying(): Boolean = dspEngine.isExternalAudioPlaying && dspEngine.hasExternalAudio()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun startRecording() {
         try {
             val file = File(context.cacheDir, "temp_synth_recording.wav")
@@ -3152,21 +2350,6 @@ class SynthEngine(private val context: Context) {
             recordingQueue.clear()
             recFadeTarget = 1f
             isRecording = true
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
             recordingWriterThread = Thread {
                 while (isRecording || recordingQueue.isNotEmpty()) {
@@ -3186,42 +2369,12 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun stopAndSaveRecordingAsync(onSaved: (File?) -> Unit) {
         if (!isRecording) {
             onSaved(wavFile)
             return
         }
         recFadeTarget = 0f
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -3232,21 +2385,6 @@ class SynthEngine(private val context: Context) {
                     Thread.sleep(10)
                     waitTries++
                 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
                 recordingWriterThread?.join(1500)
                 recordingWriterThread = null
@@ -3265,39 +2403,9 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun exportRecordingToUri(context: Context, destinationUri: Uri): Boolean {
         val sourceFile = wavFile ?: File(context.cacheDir, "temp_synth_recording.wav")
         if (!sourceFile.exists()) return false
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         return try {
             context.contentResolver.openOutputStream(destinationUri)?.use { outputStream ->
@@ -3312,21 +2420,6 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     private fun writeWavHeader(out: FileOutputStream, totalAudioLen: Long) {
         val totalDataLen = totalAudioLen + 36
         val longSampleRate = sampleRate.toLong()
@@ -3334,21 +2427,6 @@ class SynthEngine(private val context: Context) {
         val bits = 24
         val blockAlign = channels * (bits / 8)
         val byteRate = longSampleRate * blockAlign
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         val header = ByteArray(44)
         header[0] = 'R'.code.toByte()
@@ -3396,95 +2474,20 @@ class SynthEngine(private val context: Context) {
         header[42] = (totalAudioLen shr 16 and 0xff).toByte()
         header[43] = (totalAudioLen shr 24 and 0xff).toByte()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         out.write(header, 0, 44)
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     private fun updateWavHeader(file: File) {
         val totalAudioLen = file.length() - 44
         val totalDataLen = totalAudioLen + 36
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         RandomAccessFile(file, "rw").use { raf ->
             val buffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
             raf.seek(4)
             buffer.clear()
             buffer.putInt(totalDataLen.toInt())
             raf.write(buffer.array())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
             raf.seek(40)
             buffer.clear()
@@ -3493,39 +2496,9 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun setLooperVol(vol: Float) {
         looperVolume = vol
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun loadAndPlayBackgroundAudio(context: Context, uri: Uri) {
         CoroutineScope(Dispatchers.IO).launch {
@@ -3542,40 +2515,10 @@ class SynthEngine(private val context: Context) {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun pauseBackgroundAudio() {
         dspEngine.isExternalAudioPlaying = false
         isExternalPlayingUi = false
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun resumeBackgroundAudio() {
         if (dspEngine.hasExternalAudio()) {
@@ -3583,21 +2526,6 @@ class SynthEngine(private val context: Context) {
             isExternalPlayingUi = true
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun stopBackgroundAudio() {
         dspEngine.stopExternalPlayback()
@@ -3616,21 +2544,6 @@ class SynthEngine(private val context: Context) {
             true
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fun decodeAudioToPCM(context: Context, uri: Uri): FloatArray? {    
         val extractor = MediaExtractor()
@@ -3719,21 +2632,6 @@ class SynthEngine(private val context: Context) {
             
             val decodedSamplesCount = rawSize
             if (decodedSamplesCount <= 0) return null
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
             val ratio = fileSampleRate.toDouble() / sampleRate.toDouble()
             val targetSize = (decodedSamplesCount / ratio).toInt()

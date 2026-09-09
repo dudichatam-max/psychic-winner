@@ -63,7 +63,10 @@ fun BenchmarkScreen(
     var report by remember { mutableStateOf(bench.lastReport) }
     var statusMsg by remember { mutableStateOf("") }
     var compareText by remember { mutableStateOf("") }
-    var referenceSession by remember { mutableStateOf(BenchmarkReferenceIO.loadInternal(context)) }
+    var referenceSession by remember { mutableStateOf<BenchmarkReferenceSession?>(null) }
+    var loadingReference by remember { mutableStateOf(true) }
+    var preparingReference by remember { mutableStateOf(false) }
+    var referenceGeneration by remember { mutableStateOf(0) }
     // Recording belongs to SynthEngine and must survive closing this Dialog.
     // The local state is only a UI mirror; the engine is the source of truth.
     var recordingReference by remember {
@@ -71,24 +74,53 @@ fun BenchmarkScreen(
     }
     var finalizingReference by remember { mutableStateOf(false) }
 
+    LaunchedEffect(context) {
+        loadingReference = true
+        val generationAtStart = ++referenceGeneration
+        val loaded = withContext(Dispatchers.IO) {
+            BenchmarkReferenceIO.loadInternal(context)
+        }
+        // Only the newest load operation may publish a disk result. If a newer
+        // record/import operation started meanwhile, its own completion handler
+        // owns the UI state.
+        if (referenceGeneration == generationAtStart) {
+            referenceSession = loaded
+            loadingReference = false
+        }
+    }
+
     val exportReferenceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip")
     ) { uri ->
         val session = referenceSession
         if (uri != null && session != null) {
-            statusMsg = if (BenchmarkReferenceIO.exportToUri(context, uri, session)) "Reference ZIP saved" else "Reference export failed"
+            scope.launch(Dispatchers.IO) {
+                val saved = BenchmarkReferenceIO.exportToUri(context, uri, session)
+                withContext(Dispatchers.Main) {
+                    statusMsg = if (saved) "Reference ZIP saved" else "Reference export failed"
+                }
+            }
         }
     }
     val importReferenceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
+            val importGeneration = ++referenceGeneration
+            loadingReference = true
             scope.launch(Dispatchers.IO) {
                 val loaded = BenchmarkReferenceIO.importFromUri(context, uri)
+                val saved = loaded?.let { BenchmarkReferenceIO.saveInternal(context, it) } == true
                 withContext(Dispatchers.Main) {
-                    referenceSession = loaded
-                    loaded?.let { BenchmarkReferenceIO.saveInternal(context, it) }
-                    statusMsg = if (loaded != null) "Reference loaded: ${loaded.events.size} events" else "Reference import failed"
+                    if (referenceGeneration == importGeneration) {
+                        referenceSession = loaded
+                        loadingReference = false
+                        statusMsg = when {
+                            loaded == null -> "Reference import failed"
+                            saved -> "Reference loaded: ${loaded.events.size} events"
+                            else -> "Reference loaded, but saving failed"
+                        }
+                    }
                 }
             }
         }
@@ -154,6 +186,7 @@ fun BenchmarkScreen(
         Text("REFERENCE SESSION", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Text(
             if (recordingReference) "Recording your real performance… play normally, then press STOP RECORDING"
+            else if (loadingReference) "Loading saved reference…"
             else referenceSession?.let { "Loaded: ${it.events.size} events · ${it.durationUs / 1_000_000.0f}s · loops ${it.loops.size}" } ?: "No reference session loaded",
             color = Color.LightGray, fontSize = 10.sp
         )
@@ -162,14 +195,35 @@ fun BenchmarkScreen(
                 onClick = {
                     if (!recordingReference) {
                         bench.requestCancel()
-                        engine.benchmarkReferenceRecorder.start()
-                        recordingReference = true
-                        statusMsg = "Recording started"
+                        referenceGeneration++
+                        loadingReference = false
+                        preparingReference = true
+                        statusMsg = "Preparing reference…"
+                        scope.launch(Dispatchers.IO) {
+                            try {
+                                // start() performs the initial PCM snapshot before it marks
+                                // the recorder active. Running it here keeps the UI responsive
+                                // while making the beginning of the reference deterministic.
+                                engine.benchmarkReferenceRecorder.start()
+                                withContext(Dispatchers.Main) {
+                                    preparingReference = false
+                                    recordingReference = engine.benchmarkReferenceRecorder.isRecording()
+                                    statusMsg = if (recordingReference) "Recording started" else "Reference recording failed"
+                                }
+                            } catch (_: Throwable) {
+                                withContext(Dispatchers.Main) {
+                                    preparingReference = false
+                                    recordingReference = engine.benchmarkReferenceRecorder.isRecording()
+                                    statusMsg = "Reference recording failed"
+                                }
+                            }
+                        }
                     } else {
                         // STOP can copy several seconds of PCM from the looper and then
                         // write a ZIP. Never do that work on the Compose/UI thread:
                         // a long recording can otherwise make the whole app appear frozen.
                         finalizingReference = true
+                        referenceGeneration++
                         statusMsg = "Finishing recording…"
                         scope.launch(Dispatchers.IO) {
                             val session = engine.benchmarkReferenceRecorder.stop()
@@ -187,21 +241,21 @@ fun BenchmarkScreen(
                         }
                     }
                 },
-                enabled = !running && !finalizingReference,
+                enabled = !running && !finalizingReference && !preparingReference && !loadingReference,
                 colors = ButtonDefaults.buttonColors(containerColor = if (recordingReference) Color(0xFFB71C1C) else gold),
                 modifier = Modifier.weight(1f).height(32.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) { Text(
-                if (finalizingReference) "FINISHING…" else if (recordingReference) "STOP RECORDING" else "RECORD SESSION", color = if (recordingReference) Color.White else Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp) }
+                if (finalizingReference) "FINISHING…" else if (preparingReference) "PREPARING…" else if (recordingReference) "STOP RECORDING" else "RECORD SESSION", color = if (recordingReference) Color.White else Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp) }
             OutlinedButton(
                 onClick = { exportReferenceLauncher.launch("LStudio_Reference_${System.currentTimeMillis()}.zip") },
-                enabled = referenceSession != null && !recordingReference && !running,
+                enabled = referenceSession != null && !recordingReference && !running && !loadingReference,
                 modifier = Modifier.weight(1f).height(32.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) { Text("EXPORT ZIP", color = gold, fontSize = 9.sp) }
             OutlinedButton(
                 onClick = { importReferenceLauncher.launch("application/zip") },
-                enabled = !recordingReference && !running,
+                enabled = !recordingReference && !running && !loadingReference,
                 modifier = Modifier.weight(1f).height(32.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) { Text("IMPORT ZIP", color = gold, fontSize = 9.sp) }
@@ -223,7 +277,7 @@ fun BenchmarkScreen(
                     running = false
                 }
             },
-            enabled = referenceSession != null && !recordingReference && !running,
+            enabled = referenceSession != null && !recordingReference && !running && !loadingReference,
             colors = ButtonDefaults.buttonColors(
                 containerColor = gold,
                 contentColor = Color.Black,
