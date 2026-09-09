@@ -377,6 +377,20 @@ object BenchmarkReferenceIO{
         }catch(_:Throwable){null}
         return load(target) ?: load(backup)
     }
+    fun deleteInternal(context:Context):Boolean {
+        return try {
+            val dir=File(context.filesDir,"benchmark")
+            val target=File(dir,"reference.zip")
+            val backup=File(dir,"reference.zip.bak")
+            val tmp=File(dir,"reference.zip.tmp")
+            if(target.exists() && !target.delete()) return false
+            var ok=true
+            if(backup.exists() && !backup.delete()) ok=false
+            if(tmp.exists() && !tmp.delete()) ok=false
+            if(ok && dir.exists() && dir.listFiles()?.isEmpty()==true) dir.delete()
+            ok
+        }catch(_:Throwable){false}
+    }
     private fun writeZip(output:OutputStream,s:BenchmarkReferenceSession){ZipOutputStream(BufferedOutputStream(output)).use{zip->val manifest=JSONObject().apply{put("format",FORMAT);put("referenceId",s.referenceId);put("sampleRate",s.sampleRate);put("durationUs",s.durationUs);put("eventCount",s.events.size);put("initialLoopCount",s.initialLoops.size);put("loopCount",s.loops.size);put("recordingCount",s.recordings.size);put("hasDrums",s.drums!=null)};putText(zip,"manifest.json",manifest.toString());val events=JSONArray();s.events.forEach{events.put(it.toJson())};putText(zip,"events.json",events.toString());s.initialLoops.forEach{putFloatArray(zip,"initial-loops/track${it.track}.f32",it.samples)};putText(zip,"initial-loops.json",JSONArray().apply{s.initialLoops.forEach{put(JSONObject().apply{put("track",it.track);put("volume",it.volume.toDouble());put("pan",it.pan.toDouble());put("wasPlaying",it.wasPlaying);put("playPos",it.playPos);put("samples",it.samples.size)})}}.toString());s.loops.forEach{putFloatArray(zip,"loops/track${it.track}.f32",it.samples)};putText(zip,"loops.json",JSONArray().apply{s.loops.forEach{put(JSONObject().apply{put("track",it.track);put("volume",it.volume.toDouble());put("pan",it.pan.toDouble());put("wasPlaying",it.wasPlaying);put("playPos",it.playPos);put("samples",it.samples.size)})}}.toString());val rm=JSONArray();s.recordings.forEachIndexed{index,r->rm.put(JSONObject().apply{put("index",index);put("track",r.track);put("startUs",r.startUs);put("samples",r.sampleCount)});putFloatArray(zip,"recordings/$index.f32",r.samples,r.sampleCount)};putText(zip,"recordings.json",rm.toString());s.drums?.let{putDrums(zip,it)}}}
     private fun putDrums(zip:ZipOutputStream,d:BenchmarkDrumState){val meta=JSONObject().apply{put("isPlaying",d.isPlaying);put("pattern",d.pattern);put("bpm",d.bpm.toDouble());put("masterVolume",d.masterVolume.toDouble());put("swing",d.swing.toDouble());val g=JSONArray();for(t in 0 until 8){val row=JSONArray();for(v in d.grid[t])row.put(v);g.put(row)};put("grid",g);val v=JSONArray();d.volumes.forEach{v.put(it.toDouble())};put("volumes",v);val p=JSONArray();d.pans.forEach{p.put(it.toDouble())};put("pans",p)};putText(zip,"drums.json",meta.toString());for(i in d.samples.indices)d.samples[i]?.let{putFloatArray(zip,"drums/track$i.f32",it)}}
     private fun putText(zip:ZipOutputStream,name:String,text:String){zip.putNextEntry(ZipEntry(name));zip.write(text.toByteArray(Charsets.UTF_8));zip.closeEntry()}

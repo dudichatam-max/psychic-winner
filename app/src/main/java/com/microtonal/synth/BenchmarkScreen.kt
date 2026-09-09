@@ -73,6 +73,7 @@ fun BenchmarkScreen(
         mutableStateOf(engine.benchmarkReferenceRecorder.isRecording())
     }
     var finalizingReference by remember { mutableStateOf(false) }
+    var deletingReference by remember { mutableStateOf(false) }
 
     LaunchedEffect(context) {
         loadingReference = true
@@ -241,7 +242,7 @@ fun BenchmarkScreen(
                         }
                     }
                 },
-                enabled = !running && !finalizingReference && !preparingReference && !loadingReference,
+                enabled = !running && !finalizingReference && !preparingReference && !loadingReference && !deletingReference,
                 colors = ButtonDefaults.buttonColors(containerColor = if (recordingReference) Color(0xFFB71C1C) else gold),
                 modifier = Modifier.weight(1f).height(32.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
@@ -249,16 +250,54 @@ fun BenchmarkScreen(
                 if (finalizingReference) "FINISHING…" else if (preparingReference) "PREPARING…" else if (recordingReference) "STOP RECORDING" else "RECORD SESSION", color = if (recordingReference) Color.White else Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp) }
             OutlinedButton(
                 onClick = { exportReferenceLauncher.launch("LStudio_Reference_${System.currentTimeMillis()}.zip") },
-                enabled = referenceSession != null && !recordingReference && !running && !loadingReference,
+                enabled = referenceSession != null && !recordingReference && !running && !loadingReference && !deletingReference,
                 modifier = Modifier.weight(1f).height(32.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) { Text("EXPORT ZIP", color = gold, fontSize = 9.sp) }
             OutlinedButton(
                 onClick = { importReferenceLauncher.launch("application/zip") },
-                enabled = !recordingReference && !running && !loadingReference,
+                enabled = !recordingReference && !running && !loadingReference && !deletingReference,
                 modifier = Modifier.weight(1f).height(32.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) { Text("IMPORT ZIP", color = gold, fontSize = 9.sp) }
+        }
+        OutlinedButton(
+            onClick = {
+                if (deletingReference) return@OutlinedButton
+                deletingReference = true
+                referenceGeneration++
+                statusMsg = "Deleting reference…"
+                scope.launch(Dispatchers.IO) {
+                    val deleted = BenchmarkReferenceIO.deleteInternal(context)
+                    withContext(Dispatchers.Main) {
+                        deletingReference = false
+                        loadingReference = false
+                        if (deleted) {
+                            referenceSession = null
+                            report = null
+                            compareText = ""
+                            statusMsg = "Reference deleted. You can record a new session."
+                        } else {
+                            statusMsg = "Reference delete failed"
+                        }
+                    }
+                }
+            },
+            enabled = referenceSession != null &&
+                !recordingReference &&
+                !running &&
+                !loadingReference &&
+                !finalizingReference &&
+                !preparingReference &&
+                !deletingReference,
+            modifier = Modifier.fillMaxWidth().height(30.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+        ) {
+            Text(
+                if (deletingReference) "DELETING…" else "DELETE REFERENCE / RECORD NEW",
+                color = gold,
+                fontSize = 9.sp
+            )
         }
         Button(
             onClick = {
