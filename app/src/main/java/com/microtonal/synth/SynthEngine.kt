@@ -1124,6 +1124,7 @@ class SynthEngine(private val context: Context) {
             while (isRunning) {
                 val benchMode = audioBenchmark.captureMode
                 val benchT0 = if (benchMode != 0) System.nanoTime() else 0L
+                val bufferProfilePrepT0 = if (audioBenchmark.deepProfileEnabled && benchMode == 2) System.nanoTime() else 0L
                 val recOn = isRecording
                 if (recOn) byteBuffer.clear()
                 val padY01 = smoothModY.coerceIn(0f, 1f)
@@ -1192,22 +1193,38 @@ class SynthEngine(private val context: Context) {
                     div4On = div4On,
                     reverbMix = reverbMix
                 )
+                val bufferProfile = audioBenchmark.deepProfileEnabled && benchMode == 2
+                var profileDspNs = 0L
+                var profileDrumsNs = 0L
+                var profileLooperNs = 0L
+                var profileMicNs = 0L
+                var profilePadMasterNs = 0L
+                var profilePcmConversionNs = 0L
+                var profileRecordingNs = 0L
+                var profileBufferPrepNs = 0L
+                if (bufferProfile) profileBufferPrepNs = System.nanoTime() - bufferProfilePrepT0
+
                 for (i in 0 until bufferSize) {
-                    // Diagnostic timing is sampled at 1/128 audio samples.
+                    // Deep DSP profiling is sampled; buffer decomposition below is
+                    // exclusive and measured once per buffer section.
                     // Keeping the gate here prevents the profiler itself from
                     // materially changing the AudioThread workload.
                     val deepProfile =
                         audioBenchmark.deepProfileEnabled &&
                             benchMode == 2 &&
                             audioBenchmark.shouldProfileSample(i)
+                    val dspT0 = if (bufferProfile) System.nanoTime() else 0L
                     val frame = dspEngine.processNextSample(
                         noteSlots = noteSlots,
                         maxVoices = maxVoices,
                         extraReverbSend = lastRevSend,
                         profileHotPath = deepProfile
                     )
+                    if (bufferProfile) profileDspNs += System.nanoTime() - dspT0
 
+                    val drumsT0 = if (bufferProfile) System.nanoTime() else 0L
                     val drumSample = drumEngine.processNextSample()
+                    if (bufferProfile) profileDrumsNs += System.nanoTime() - drumsT0
 
                     // 4-track PCM looper: record the frozen live wet tap and/or
                     // play already-captured audio. Added after master saturate so
@@ -1215,6 +1232,7 @@ class SynthEngine(private val context: Context) {
                     var pcmLoopL = 0f
                     var pcmLoopR = 0f
                     val liveTap = frame.liveRecordTap
+                    val looperT0 = if (bufferProfile) System.nanoTime() else 0L
                     var h = 0
                     while (h < looperHotN) {
                         val trackIndex = looperHotIdx[h]
@@ -1230,6 +1248,7 @@ class SynthEngine(private val context: Context) {
                         }
                         h++
                     }
+                    if (bufferProfile) profileLooperNs += System.nanoTime() - looperT0
                     lastRevSend = 0f
 
                     if (dspEngine.isExternalAudioPlaying) {
@@ -1242,8 +1261,11 @@ class SynthEngine(private val context: Context) {
                         }
                     }
 
+                    val micT0 = if (bufferProfile) System.nanoTime() else 0L
                     val micPlay = micEngine.playMixSample()
                     val micMon = micEngine.nextMonitorSample()
+                    if (bufferProfile) profileMicNs += System.nanoTime() - micT0
+                    val padMasterT0 = if (bufferProfile) System.nanoTime() else 0L
                     val padCoeff = if (busPadTouched) padCoeffAtk else padCoeffRel
                     smoothModX += (busPadX - smoothModX) * padCoeff
                     smoothModY += (busPadY - smoothModY) * padCoeff
@@ -1407,11 +1429,14 @@ class SynthEngine(private val context: Context) {
                     rawR *= limG
                     if (rawL > 1f) rawL = 1f else if (rawL < -1f) rawL = -1f
                     if (rawR > 1f) rawR = 1f else if (rawR < -1f) rawR = -1f
+                    if (bufferProfile) profilePadMasterNs += System.nanoTime() - padMasterT0
+                    val pcmT0 = if (bufferProfile) System.nanoTime() else 0L
                     val shortL = (rawL * Short.MAX_VALUE * 0.92f).toInt().coerceIn(-32768, 32767).toShort()
                     val shortR = (rawR * Short.MAX_VALUE * 0.92f).toInt().coerceIn(-32768, 32767).toShort()
 
                     buffer[i * 2] = shortL
                     buffer[i * 2 + 1] = shortR
+                    if (bufferProfile) profilePcmConversionNs += System.nanoTime() - pcmT0
                     if ((i and 7) == 0) {
                         liveVisualizerBuffer[visRing] = frame.liveSample
                         looperVisualizerBuffer[visRing] = (pcmLoopL + pcmLoopR) * 0.5f
@@ -1419,6 +1444,7 @@ class SynthEngine(private val context: Context) {
                         visRing++
                         if (visRing >= liveVisualizerBuffer.size) visRing = 0
                     }
+                    val recordingT0 = if (bufferProfile) System.nanoTime() else 0L
                     if (recFadeTarget > recFade) {
                         recFade += recFadeStep
                         if (recFade > recFadeTarget) recFade = recFadeTarget
@@ -1443,6 +1469,7 @@ class SynthEngine(private val context: Context) {
                         slot[o + 4] = (vR shr 8 and 0xFF).toByte()
                         slot[o + 5] = (vR shr 16 and 0xFF).toByte()
                     }
+                    if (bufferProfile) profileRecordingNs += System.nanoTime() - recordingT0
 
                 }
 
@@ -1455,13 +1482,31 @@ class SynthEngine(private val context: Context) {
                     }
                 }
 
+                val recordingEnqueueT0 = if (bufferProfile) System.nanoTime() else 0L
                 if (recOn || recFade > 0.0001f) {
                     recordingQueue.offer(recPool24[recPoolIdx])
                     recPoolIdx = (recPoolIdx + 1) % recPool24.size
                 }
+                if (bufferProfile) profileRecordingNs += System.nanoTime() - recordingEnqueueT0
 
+                val audioWriteT0 = if (bufferProfile) System.nanoTime() else 0L
                 audioTrack.write(buffer, 0, buffer.size)
-                if (benchMode != 0) audioBenchmark.onBufferDone(System.nanoTime() - benchT0)
+                val totalNs = if (benchMode != 0) System.nanoTime() - benchT0 else 0L
+                if (benchMode != 0) audioBenchmark.onBufferDone(totalNs)
+                if (bufferProfile) {
+                    audioBenchmark.recordBufferProfile(
+                        dspNs = profileDspNs,
+                        drumsNs = profileDrumsNs,
+                        looperNs = profileLooperNs,
+                        micNs = profileMicNs,
+                        padMasterNs = profilePadMasterNs,
+                        pcmConversionNs = profilePcmConversionNs,
+                        recordingNs = profileRecordingNs,
+                        audioWriteNs = System.nanoTime() - audioWriteT0,
+                        bufferPrepNs = profileBufferPrepNs,
+                        totalNs = totalNs
+                    )
+                }
                 audioBenchmark.onBufferBoundary()
             }
         }.start()
