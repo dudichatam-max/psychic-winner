@@ -80,8 +80,7 @@ class BenchReport(
     val profileOscSubAvgNs: Long = 0L,
     val profileOscDetuneAvgNs: Long = 0L,
     val profileOscDividersAvgNs: Long = 0L
-)
-
+) {
     /**
      * Comparable 0..100 score for the same recorded/master workload.
      * Actual audio delivery failures (underruns) are weighted separately
@@ -111,6 +110,8 @@ class BenchReport(
                 .toInt()
                 .coerceIn(0, 100)
         }
+
+}
 
 /**
  * Measurement guest. Does not own audio output.
