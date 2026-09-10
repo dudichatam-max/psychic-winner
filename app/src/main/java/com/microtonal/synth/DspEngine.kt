@@ -945,14 +945,14 @@ class DspEngine(private val sampleRate: Int = 44100) {
                 (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)
             ) System.nanoTime() else 0L
             if (!isLooper && (div2Wet > 0.0005 || div3Wet > 0.0005 || div4Wet > 0.0005)) {
-                val fund = fastSine(phaseNorm)
-                if (slot.prevFund <= 0.0 && fund > 0.0) {
+                val fundIndex = (phaseNorm * lutSize).toInt() and lutMask
+                if (fundIndex in 1..2048 && (slot.prevFundIndex == 0 || slot.prevFundIndex > 2048)) {
                     slot.zcCount++
                     if (slot.zcCount % 2 == 0) slot.div2 = -slot.div2
                     if (slot.zcCount % 3 == 0) slot.div3 = -slot.div3
                     if (slot.zcCount % 4 == 0) slot.div4 = -slot.div4
                 }
-                slot.prevFund = fund
+                slot.prevFundIndex = fundIndex
                 // The divider target is reached only when the 1/5 oscillator target is 4,
                 // then one of the 3 divider targets is selected. Each specific divider is
                 // therefore sampled once per 5 * 3 profiling calls.

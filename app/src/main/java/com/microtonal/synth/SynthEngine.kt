@@ -47,7 +47,7 @@ class NoteSlot {
     var phase2P3: Double = 0.0
     var phase2P4: Double = 0.0
     var hammerEnv: Double = 0.0
-    var prevFund: Double = 0.0
+    var prevFundIndex: Int = 0
     var div2: Double = 1.0
     var div3: Double = 1.0
     var div4: Double = 1.0
@@ -110,12 +110,12 @@ class NoteSlot {
         phase2P3 = 0.0
         phase2P4 = 0.0
         hammerEnv = 1.0
-        prevFund = 0.0
+        prevFundIndex = 0
         div2 = 1.0
         div3 = 1.0
         div4 = 1.0
         zcCount = 0
-        prevFund = 0.0
+        prevFundIndex = 0
         div2 = 1.0
         div3 = 1.0
         div4 = 1.0
