@@ -222,7 +222,7 @@ class MicCaptureEngine(private val sampleRate: Int) {
                     }
                     val t = recordingTrack
                     if (t in 0 until trackCount && tracks[t].isRecording) {
-                        tracks[t].pushSample(boosted)
+                        tracks[t].pushSample(raw)
                     }
                 }
                 if (seen >= 2048) {
