@@ -15,7 +15,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -106,48 +105,6 @@ private fun syncLiveToLooper(
     Toast.makeText(context, "Synch: Live → Looper", Toast.LENGTH_SHORT).show()
 }
 
-@Composable
-private fun MiniWaveMeter(
-    buffer: FloatArray,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    var tick by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(40)
-            tick++
-        }
-    }
-    val meterPath = remember { Path() }
-    Canvas(
-        modifier = modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 36.dp)
-            .background(Color(0xFF0D0D0D), RoundedCornerShape(4.dp))
-            .border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(4.dp))
-            .padding(2.dp)
-    ) {
-        val pulse = tick
-        val w = size.width
-        val h = size.height
-        val mid = h / 2f
-        if (buffer.isEmpty() || w <= 0f) return@Canvas
-        meterPath.reset()
-        val n = buffer.size
-        val step = w / n.coerceAtLeast(1)
-        var i = 0
-        while (i < n) {
-            val sample = buffer[i]
-            val x = i * step
-            val y = mid + (sample.coerceIn(-1f, 1f) * mid * 0.9f)
-            if (i == 0) meterPath.moveTo(x, y) else meterPath.lineTo(x, y)
-            i++
-        }
-        drawLine(Color(0xFF2A2A2A), Offset(0f, mid), Offset(w, mid), strokeWidth = 1f)
-        drawPath(meterPath, color, style = Stroke(width = 1.6f))
-    }
-}
 
 
 @Composable
@@ -261,66 +218,7 @@ private fun PadVoiceDivRow(
     }
 }
 
-@Composable
-private fun PadLiveFxRow(
-    gold: Color,
-    wah: Float,
-    oct: Float,
-    cho: Float,
-    onWah: (Float) -> Unit,
-    onOct: (Float) -> Unit,
-    onCho: (Float) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            SynthKnob("WAH", "${(wah * 100).toInt()}%", wah, 0f..1f, gold, 34.dp, onValueChange = onWah)
-        }
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            SynthKnob("OCT", "${(oct * 100).toInt()}%", oct, 0f..1f, gold, 34.dp, onValueChange = onOct)
-        }
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            SynthKnob("CHO", "${(cho * 100).toInt()}%", cho, 0f..1f, gold, 34.dp, onValueChange = onCho)
-        }
-    }
-}
 
-@Composable
-private fun PadXyCursor(
-    engine: SynthEngine,
-    gold: Color,
-    modifier: Modifier = Modifier
-) {
-    var padTick by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(100)
-            padTick++
-        }
-    }
-    Canvas(modifier = modifier.fillMaxSize()) {
-        val dummy = padTick
-        val w = size.width
-        val h = size.height
-        val gridColor = Color(0xFF1F1F1F)
-        for (i in 1..4) {
-            drawLine(gridColor, Offset(w * (i / 5f), 0f), Offset(w * (i / 5f), h))
-            drawLine(gridColor, Offset(0f, h * (i / 5f)), Offset(w, h * (i / 5f)))
-        }
-        drawLine(Color(0xFF2A2A2A), Offset(0f, h), Offset(w, h), 2f)
-        drawLine(Color(0xFF2A2A2A), Offset(0f, 0f), Offset(0f, h), 2f)
-        val cx = engine.busPadX
-        val cy = engine.busPadY
-        val cursorX = cx * w
-        val cursorY = (1f - cy) * h
-        drawCircle(gold.copy(alpha = 0.2f), 40f, Offset(cursorX, cursorY))
-        drawCircle(gold, 16f, Offset(cursorX, cursorY), style = Stroke(width = 3f))
-        drawCircle(Color.White, 3f, Offset(cursorX, cursorY))
-    }
-}
 
 @Composable
 private fun VoiceActivityMeter(
@@ -351,59 +249,6 @@ private fun VoiceActivityMeter(
 }
 
 
-@Composable
-private fun QuickBrowsePanel(
-    caption: String,
-    value: String,
-    textColor: Color,
-    accent: Color,
-    onPrev: () -> Unit,
-    onNext: () -> Unit,
-    modifier: Modifier = Modifier,
-    compact: Boolean = false
-) {
-    Column(
-        modifier = modifier
-            .background(Color(0xFF1A1A1A), RoundedCornerShape(6.dp))
-            .border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(6.dp))
-            .padding(horizontal = 4.dp, vertical = if (compact) 1.dp else 3.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(caption, color = textColor, fontSize = if (compact) 6.sp else 7.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            OutlinedButton(
-                onClick = onPrev,
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.size(if (compact) 18.dp else 22.dp),
-                border = ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = androidx.compose.ui.graphics.SolidColor(accent)
-                )
-            ) { Text("‹", color = accent, fontSize = if (compact) 12.sp else 14.sp, fontWeight = FontWeight.Bold) }
-            Text(
-                text = value,
-                color = textColor,
-                fontSize = if (compact) 8.sp else 9.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
-            )
-            OutlinedButton(
-                onClick = onNext,
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.size(if (compact) 18.dp else 22.dp),
-                border = ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = androidx.compose.ui.graphics.SolidColor(accent)
-                )
-            ) { Text("›", color = accent, fontSize = if (compact) 12.sp else 14.sp, fontWeight = FontWeight.Bold) }
-        }
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -1722,746 +1567,137 @@ fun SynthAppUI(engine: SynthEngine) {
                     div3On = div3On, onDiv3 = { div3On = !div3On; engine.div3On = div3On },
                     div4On = div4On, onDiv4 = { div4On = !div4On; engine.div4On = div4On }
                 )
-                "MIC" -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    val scopeTick = 0L
-                    Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("MIC", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text(
-                            when {
-                                !micMonitorOn -> "מוניטור כבוי"
-                                engine.micEngine.inputLevel > 0.01f -> "אות נכנס"
-                                else -> if (engine.micEngine.headphonesConnected) "אוזניות • מחכה לאות" else "רמקול • זהירות מפידבק"
-                            },
-                            color = Color.Gray,
-                            fontSize = 8.sp,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1
-                        )
-                        Button(
-                            onClick = { micPage = 0 },
-                            colors = ButtonDefaults.buttonColors(containerColor = if (micPage == 0) gold else panelBg2),
-                            contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.width(28.dp).height(26.dp),
-                            shape = RoundedCornerShape(4.dp)
-                        ) { Text("1", color = if (micPage == 0) Color.Black else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-                        Button(
-                            onClick = { micPage = 1 },
-                            colors = ButtonDefaults.buttonColors(containerColor = if (micPage == 1) gold else panelBg2),
-                            contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.width(28.dp).height(26.dp),
-                            shape = RoundedCornerShape(4.dp)
-                        ) { Text("2", color = if (micPage == 1) Color.Black else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-                        Button(
-                            onClick = {
-                                val granted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                                if (!granted) { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO); return@Button }
-                                engine.refreshHeadphoneState()
-                                val next = !micMonitorOn
-                                if (engine.micEngine.setMonitor(next)) {
-                                    micMonitorOn = next
-                                    engine.micEngine.monitorVolume = micMonitorVol
-                                    if (next && !engine.micEngine.headphonesConnected) {
-                                        Toast.makeText(context, "מוניטור ברמקול עלול ליצור פידבק", Toast.LENGTH_SHORT).show()
-                                    }
-                                } else Toast.makeText(context, engine.micEngine.lastError.ifEmpty { "לא ניתן לפתוח את המיקרופון" }, Toast.LENGTH_SHORT).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = if (micMonitorOn) gold else panelBg2),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            modifier = Modifier.height(26.dp)
-                        ) { Text(if (micMonitorOn) "מוניטור פועל" else "מוניטור", fontSize = 10.sp, color = if (micMonitorOn) Color.Black else gold, fontWeight = FontWeight.Bold) }
-                    }
-                    Text(
-                        if (micPage == 0) "עמוד 1 • ווקלים • ללא הגבלת אורך" else "עמוד 2 • גיטרה / באס / אינסטרומנטלי",
-                        color = Color.Gray,
-                        fontSize = 8.sp
-                    )
-                    MiniWaveMeter(
-                        if (micMonitorOn) engine.micEngine.monitorVisualizer else silentVis,
-                        gold,
-                        Modifier.fillMaxWidth().height(52.dp).background(Color(0xFF0D0D0D), RoundedCornerShape(6.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(6.dp))
-                    )
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                        SynthKnob("Gain", String.format("%.1fx", micGain), (micGain - 1f) / 3f, 0f..1f, gold, 30.dp) { micGain = 1f + it * 3f; engine.micEngine.inputGain = micGain }
-                        SynthKnob("Mon", "${(micMonitorVol * 100).toInt()}%", micMonitorVol, 0f..1.5f, gold, 30.dp) { micMonitorVol = it; engine.micEngine.monitorVolume = it }
-                        SynthKnob("HPF", "${micHpf.toInt()}Hz", (micHpf - 40f) / 200f, 0f..1f, gold, 30.dp) { micHpf = 40f + it * 200f; engine.micEngine.hpfHz = micHpf }
-                        SynthKnob("Gate", "${(micGate * 100).toInt()}", micGate, 0f..0.12f, gold, 30.dp) { micGate = it; engine.micEngine.gateThresh = it }
-                        SynthKnob("Low", "${(micLow * 100).toInt()}%", micLow, 0.4f..1.6f, gold, 30.dp) { micLow = it; engine.micEngine.lowGain = it }
-                        SynthKnob("Pres", "${(micPresence * 100).toInt()}%", micPresence, 0.4f..2f, gold, 30.dp) { micPresence = it; engine.micEngine.presenceGain = it }
-                        SynthKnob("Comp", "${(micComp * 100).toInt()}%", micComp, 0f..1f, gold, 30.dp) { micComp = it; engine.micEngine.compAmount = it }
-                    }
-                    Row(modifier = Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        for (slot in 0 until 3) {
-                            Row(
-                                modifier = Modifier.weight(1f).fillMaxHeight().background(panelBg2, RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("${slot + 1}", color = gold, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text("טען", color = gold, fontSize = 8.sp, modifier = Modifier.clickable {
-                                    engine.micEngine.loadMonitorPreset(slot)
-                                    micMonitorVol = engine.micEngine.monitorVolume
-                                    micGain = engine.micEngine.inputGain
-                                    micHpf = engine.micEngine.hpfHz
-                                    micGate = engine.micEngine.gateThresh
-                                    micLow = engine.micEngine.lowGain
-                                    micPresence = engine.micEngine.presenceGain
-                                    micComp = engine.micEngine.compAmount
-                                })
-                                Text("שמור", color = Color.Gray, fontSize = 8.sp, modifier = Modifier.clickable {
-                                    engine.micEngine.saveMonitorPreset(slot)
-                                    Toast.makeText(context, "פריסט ${slot + 1} נשמר", Toast.LENGTH_SHORT).show()
-                                })
-                            }
-                        }
-                    }
-                    Column(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        for (row in 0 until 3) {
-                            val track = micPage * 3 + row
-                            val rec = micRecStates[track]
-                            val playing = micPlayStates[track]
-                            key(track) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().weight(1f).background(panelBg, RoundedCornerShape(8.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(8.dp)).padding(horizontal = 4.dp, vertical = 2.dp)
-                            ) {
-                                BasicTextField(
-                                    value = micNames[track],
-                                    onValueChange = { micNames[track] = it },
-                                    singleLine = true,
-                                    textStyle = TextStyle(color = gold, fontSize = 8.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
-                                    modifier = Modifier.fillMaxWidth().height(12.dp),
-                                    cursorBrush = androidx.compose.ui.graphics.SolidColor(gold)
-                                )
-                                Row(modifier = Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Button(
-                                        onClick = {
-                                            val granted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                                            if (!granted) { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO); return@Button }
-                                            if (rec) {
-                                                engine.micEngine.stopTrackRecording(track)
-                                                micRecStates[track] = false
-                                            } else {
-                                                engine.micEngine.tracks[track].stopPlayback()
-                                                micPlayStates[track] = false
-                                                if (engine.micEngine.startTrackRecording(track)) micRecStates[track] = true
-                                                else Toast.makeText(context, engine.micEngine.lastError.ifEmpty { "שגיאה בפתיחת המיקרופון" }, Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = if (rec) gold else panelBg2),
-                                        modifier = Modifier.width(56.dp).fillMaxHeight(),
-                                        contentPadding = PaddingValues(0.dp)
-                                    ) { Text(if (rec) "עצור" else "הקלט", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (rec) Color.Black else Color.White, textAlign = TextAlign.Center) }
-                                    Button(
-                                        onClick = {
-                                            val t = engine.micEngine.tracks[track]
-                                            if (t.isRecording) { engine.micEngine.stopTrackRecording(track); micRecStates[track] = false }
-                                            if (t.isPlaying) { t.stopPlayback(); micPlayStates[track] = false }
-                                            else { t.startPlayback(); micPlayStates[track] = t.isPlaying }
-                                        },
-                                        enabled = playing || engine.micEngine.tracks[track].hasContent() || rec,
-                                        colors = ButtonDefaults.buttonColors(containerColor = if (playing) gold else panelBg2),
-                                        modifier = Modifier.width(56.dp).fillMaxHeight(),
-                                        contentPadding = PaddingValues(0.dp)
-                                    ) { Text(if (playing) "עצור" else "נגן", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (playing) Color.Black else Color.White, textAlign = TextAlign.Center) }
-                                    MiniWaveMeter(engine.micEngine.tracks[track].visualizerBuffer, gold, Modifier.weight(1f).fillMaxHeight())
-                                    OutlinedButton(
-                                        onClick = {
-                                            engine.micEngine.tracks[track].clear()
-                                            micRecStates[track] = false
-                                            micPlayStates[track] = false
-                                        },
-                                        modifier = Modifier.width(44.dp).fillMaxHeight(),
-                                        contentPadding = PaddingValues(0.dp),
-                                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
-                                    ) { Text("נקה", color = Color.Gray, fontSize = 10.sp) }
-                                    OutlinedButton(
-                                        onClick = {
-                                            pendingMicSaveTrack = track
-                                            saveMicTrackLauncher.launch("Siren_Mic_T${track + 1}_${System.currentTimeMillis()}.wav")
-                                        },
-                                        enabled = engine.micEngine.tracks[track].hasContent(),
-                                        modifier = Modifier.width(44.dp).fillMaxHeight(),
-                                        contentPadding = PaddingValues(0.dp),
-                                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
-                                    ) { Text("שמור", color = gold, fontSize = 10.sp) }
-                                }
-                                Row(modifier = Modifier.fillMaxWidth().height(52.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                                    SynthKnob("HPF", "${micHpfCh[track].toInt()}", (micHpfCh[track] - 40f) / 200f, 0f..1f, gold, 28.dp) {
-                                        micHpfCh[track] = 40f + it * 200f
-                                        engine.micEngine.trackFx[track].hpfHz = micHpfCh[track]
-                                    }
-                                    SynthKnob("Gate", "${(micGateCh[track] * 100).toInt()}", micGateCh[track], 0f..0.12f, gold, 28.dp) {
-                                        micGateCh[track] = it
-                                        engine.micEngine.trackFx[track].gateThresh = it
-                                    }
-                                    SynthKnob("Pres", "${(micPresCh[track] * 100).toInt()}%", micPresCh[track], 0.4f..2f, gold, 28.dp) {
-                                        micPresCh[track] = it
-                                        engine.micEngine.trackFx[track].presenceGain = it
-                                    }
-                                    SynthKnob("Comp", "${(micCompCh[track] * 100).toInt()}%", micCompCh[track], 0f..1f, gold, 28.dp) {
-                                        micCompCh[track] = it
-                                        engine.micEngine.trackFx[track].compAmount = it
-                                    }
-                                    SynthKnob("Vol", "${(micVolStates[track] * 100).toInt()}%", micVolStates[track], 0f..1.5f, gold, 26.dp) {
-                                        micVolStates[track] = it
-                                        engine.micEngine.trackFx[track].volume = it
-                                        engine.micEngine.tracks[track].volume = it
-                                    }
-                                    SynthKnob("L/R", panCaption(micPanStates[track]), (micPanStates[track] + 1f) * 0.5f, 0f..1f, gold, 26.dp) {
-                                        val p = it * 2f - 1f
-                                        micPanStates[track] = p
-                                        engine.micEngine.trackFx[track].applyPan(p)
-                                    }
-                                }
-                            }
-                            }
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().height(28.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedButton(
-                            onClick = { importMicProjectLauncher.launch("application/zip") },
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                            contentPadding = PaddingValues(2.dp),
-                            border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
-                        ) { Text("ייבוא", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                        Button(
-                            onClick = { exportMicProjectLauncher.launch("Siren_Mic_${System.currentTimeMillis()}.zip") },
-                            colors = ButtonDefaults.buttonColors(containerColor = gold),
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                            contentPadding = PaddingValues(2.dp)
-                        ) { Text("ייצוא", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                    }
-                    if (scopeTick < 0L) Text("")
-                }
+                "MIC" -> MicTab(
+                    engine = engine,
+                    context = context,
+                    gold = gold,
+                    panelBg = panelBg,
+                    panelBg2 = panelBg2,
+                    silentVis = silentVis,
+                    micMonitorOn = micMonitorOn,
+                    setMicMonitorOn = { micMonitorOn = it },
+                    micMonitorVol = micMonitorVol,
+                    setMicMonitorVol = { micMonitorVol = it },
+                    micGain = micGain,
+                    setMicGain = { micGain = it },
+                    micHpf = micHpf,
+                    setMicHpf = { micHpf = it },
+                    micGate = micGate,
+                    setMicGate = { micGate = it },
+                    micLow = micLow,
+                    setMicLow = { micLow = it },
+                    micPresence = micPresence,
+                    setMicPresence = { micPresence = it },
+                    micComp = micComp,
+                    setMicComp = { micComp = it },
+                    micPage = micPage,
+                    setMicPage = { micPage = it },
+                    pendingMicSaveTrack = pendingMicSaveTrack,
+                    setPendingMicSaveTrack = { pendingMicSaveTrack = it },
+                    micRecStates = micRecStates,
+                    micPlayStates = micPlayStates,
+                    micVolStates = micVolStates,
+                    micPanStates = micPanStates,
+                    micNames = micNames,
+                    micHpfCh = micHpfCh,
+                    micGateCh = micGateCh,
+                    micPresCh = micPresCh,
+                    micCompCh = micCompCh,
+                    saveMicTrack = { saveMicTrackLauncher.launch(it) },
+                    importMicProject = { importMicProjectLauncher.launch(it) },
+                    exportMicProject = { exportMicProjectLauncher.launch(it) },
+                    requestMicPermission = { micPermissionLauncher.launch(it) }
+                )
 
-                "LOOP" -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    val scopeTick = 0L
-                    Row(
-                        modifier = Modifier.fillMaxWidth().height(22.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        BasicTextField(
-                            value = looperProjectName,
-                            onValueChange = { looperProjectName = it },
-                            singleLine = true,
-                            textStyle = TextStyle(color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
-                            modifier = Modifier.weight(1f).fillMaxHeight().background(panelBg, RoundedCornerShape(6.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 3.dp),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(gold)
-                        )
-                        for (p in 0 until 4) {
-                            val selected = looperPage == p
-                            Button(
-                                onClick = { looperPage = p },
-                                colors = ButtonDefaults.buttonColors(containerColor = if (selected) gold else panelBg2),
-                                contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.width(26.dp).fillMaxHeight(),
-                                shape = RoundedCornerShape(4.dp)
-                            ) { Text("${p + 1}", color = if (selected) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                        }
-                    }
-                    Column(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        for (row in 0 until 4) {
-                            val track = looperPage * 5 + row
-                            val rec = loopRecStates[track]
-                            val playing = loopPlayStates[track]
-                            val accent = gold
-                            key(track) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().weight(1f).background(panelBg, RoundedCornerShape(8.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(8.dp)).padding(horizontal = 4.dp, vertical = 2.dp)
-                            ) {
-                                BasicTextField(
-                                    value = loopChannelNames[track],
-                                    onValueChange = { loopChannelNames[track] = it },
-                                    singleLine = true,
-                                    textStyle = TextStyle(color = accent, fontSize = 8.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
-                                    modifier = Modifier.fillMaxWidth().height(12.dp),
-                                    cursorBrush = androidx.compose.ui.graphics.SolidColor(gold)
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                ) {
-                                Button(
-                                    onClick = {
-                                        if (rec) {
-                                            engine.stopTrackRecording(track)
-                                            loopRecStates[track] = false
-                                            loopHasContent[track] = engine.trackHasContent(track)
-                                            scope.launch(Dispatchers.IO) {
-                                                engine.saveLooperSession(looperProjectName, loopChannelNames.toList(), looperPage)
-                                            }
-                                        }
-                                        else { engine.setTrackPlaying(track, false); loopPlayStates[track] = false; engine.startTrackRecording(track); loopRecStates[track] = true }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = if (rec) gold else panelBg2),
-                                    modifier = Modifier.width(28.dp).fillMaxHeight(0.92f),
-                                    contentPadding = PaddingValues(0.dp)
-                                ) { Text(if (rec) "עצור" else "הקלט", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = if (rec) Color.Black else Color.White, textAlign = TextAlign.Center) }
-                                Button(
-                                    onClick = {
-                                        if (rec) {
-                                            engine.stopTrackRecording(track)
-                                            loopRecStates[track] = false
-                                            loopHasContent[track] = engine.trackHasContent(track)
-                                        }
-                                        loopPlayStates[track] = engine.toggleTrackPlayback(track)
-                                    },
-                                    enabled = playing || rec || loopHasContent[track],
-                                    colors = ButtonDefaults.buttonColors(containerColor = if (playing) gold else panelBg2),
-                                    modifier = Modifier.width(28.dp).fillMaxHeight(0.92f),
-                                    contentPadding = PaddingValues(0.dp)
-                                ) { Text(if (playing) "עצור" else "נגן", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = if (playing) Color.Black else Color.White, textAlign = TextAlign.Center) }
-                                Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                                    Text(if (rec) "מקליט…" else if (playing) "מנגן" else if (loopHasContent[track]) "מוכן" else "ריק", color = Color.Gray, fontSize = 7.sp, maxLines = 1)
-                                    MiniWaveMeter(engine.looperTracks[track].visualizerBuffer, if (rec) gold else accent, Modifier.fillMaxWidth().weight(1f))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().height(16.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                pendingLoopLoadTrack = track
-                                                loadAudioLauncher.launch("audio/*")
-                                            },
-                                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                                            contentPadding = PaddingValues(0.dp),
-                                            border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
-                                        ) { Text("טען", color = gold, fontSize = 7.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
-                                        OutlinedButton(
-                                            onClick = {
-                                                pendingLoopSaveTrack = track
-                                                saveLoopTrackLauncher.launch("Siren_Loop_P${looperPage + 1}_T${row + 1}_${System.currentTimeMillis()}.wav")
-                                            },
-                                            enabled = loopHasContent[track],
-                                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                                            contentPadding = PaddingValues(0.dp),
-                                            border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
-                                        ) { Text("שמור", color = gold, fontSize = 7.sp, fontWeight = FontWeight.Bold) }
-                                        OutlinedButton(
-                                            onClick = {
-                                                engine.clearTrack(track)
-                                                loopRecStates[track] = false
-                                                loopPlayStates[track] = false
-                                                loopHasContent[track] = false
-                                            },
-                                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                                            contentPadding = PaddingValues(0.dp),
-                                            border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.Gray))
-                                        ) { Text("נקה", color = Color.Gray, fontSize = 7.sp) }
-                                    }
-                                }
-                                SynthKnob("Vol", "${(loopChannelVolStates[track] * 100).toInt()}%", loopChannelVolStates[track], 0f..1f, accent, 22.dp) {
-                                    loopChannelVolStates[track] = it
-                                    engine.setTrackVolume(track, it)
-                                }
-                                LrPanKnob(loopChannelPanStates[track], accent, 22.dp) { p ->
-                                    loopChannelPanStates[track] = p
-                                    engine.setTrackPan(track, p)
-                                }
-                                }
-                            }
-                            }
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().height(22.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedButton(
-                            onClick = { importLooperProjectLauncher.launch("application/zip") },
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                            contentPadding = PaddingValues(2.dp),
-                            border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(gold))
-                        ) { Text("ייבוא", color = gold, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                        Button(
-                            onClick = { exportLooperProjectLauncher.launch("Siren_Looper_${System.currentTimeMillis()}.zip") },
-                            colors = ButtonDefaults.buttonColors(containerColor = gold),
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                            contentPadding = PaddingValues(2.dp)
-                        ) { Text("ייצוא", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                    }
-                    if (scopeTick < 0L) Text("")
-                }
+                "LOOP" -> LoopTab(
+                    engine = engine,
+                    gold = gold,
+                    panelBg = panelBg,
+                    panelBg2 = panelBg2,
+                    looperProjectName = looperProjectName,
+                    setLooperProjectName = { looperProjectName = it },
+                    looperPage = looperPage,
+                    setLooperPage = { looperPage = it },
+                    pendingLoopLoadTrack = pendingLoopLoadTrack,
+                    setPendingLoopLoadTrack = { pendingLoopLoadTrack = it },
+                    pendingLoopSaveTrack = pendingLoopSaveTrack,
+                    setPendingLoopSaveTrack = { pendingLoopSaveTrack = it },
+                    loopRecStates = loopRecStates,
+                    loopPlayStates = loopPlayStates,
+                    loopHasContent = loopHasContent,
+                    loopChannelVolStates = loopChannelVolStates,
+                    loopChannelPanStates = loopChannelPanStates,
+                    loopChannelNames = loopChannelNames,
+                    scope = scope,
+                    loadAudio = { loadAudioLauncher.launch(it) },
+                    saveLoopTrack = { saveLoopTrackLauncher.launch(it) },
+                    importLooperProject = { importLooperProjectLauncher.launch(it) },
+                    exportLooperProject = { exportLooperProjectLauncher.launch(it) }
+                )
 
-                "PAD" -> Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("LIVE PERFORMANCE PAD", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(2.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(
-                            Triple("KEY", padTargetKey) { padTargetKey = !padTargetKey; engine.padTargetKey = padTargetKey },
-                            Triple("MIC", padTargetMic) { padTargetMic = !padTargetMic; engine.padTargetMic = padTargetMic },
-                            Triple("LOOP", padTargetLoop) { padTargetLoop = !padTargetLoop; engine.padTargetLoop = padTargetLoop },
-                            Triple("DRUM", padTargetDrum) { padTargetDrum = !padTargetDrum; engine.padTargetDrum = padTargetDrum }
-                        ).forEach { (label, on, toggle) ->
-                            Button(
-                                onClick = toggle,
-                                colors = ButtonDefaults.buttonColors(containerColor = if (on) gold else panelBg2),
-                                contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.weight(1f).height(24.dp),
-                                shape = RoundedCornerShape(4.dp)
-                            ) { Text(label, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (on) Color.Black else gold) }
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(148.dp).background(Color(0xFF0D0D0D), RoundedCornerShape(8.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(8.dp)).pointerInput(Unit) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown()
-                                fun applyAt(px: Float, py: Float, first: Boolean) {
-                                    val x = (px / size.width.toFloat()).coerceIn(0f, 1f)
-                                    val y = 1f - (py / size.height.toFloat()).coerceIn(0f, 1f)
-                                    engine.busPadX = x
-                                    engine.busPadY = y
-                                    engine.busPadTouched = true
-                                    engine.benchmarkReferenceRecorder.recordPad(x, y, true)
-                                    if (first) {
-                                        engine.padOriginX = x
-                                        engine.padOriginY = y
-                                    }
-                                    val mx = kotlin.math.abs(x - engine.padOriginX) * 2f
-                                    val my = kotlin.math.abs(y - engine.padOriginY) * 2f
-                                    engine.padModX = mx.coerceIn(0f, 1f)
-                                    engine.padModY = my.coerceIn(0f, 1f)
-                                    if (engine.padTargetKey) {
-                                        engine.performanceX = engine.padModX
-                                        engine.performanceY = engine.padModY
-                                    } else {
-                                        engine.performanceX = 0f
-                                        engine.performanceY = 0f
-                                    }
-                                }
-                                applyAt(down.position.x, down.position.y, first = true)
-                                drag(down.id) { change ->
-                                    applyAt(change.position.x, change.position.y, first = false)
-                                }
-                                engine.benchmarkReferenceRecorder.recordPad(engine.busPadX, engine.busPadY, false)
-                                engine.busPadTouched = false
-                            }
-                        }
-                    ) {
-                        PadXyCursor(engine, gold)
-                        Text("L  ·  R", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
-                        Text("HIGH", color = Color.Gray, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.TopStart).padding(start = 6.dp, top = 4.dp))
-                        Text("BASS", color = Color.Gray, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomStart).padding(start = 6.dp, bottom = 4.dp))
-                    }
-                    PadLiveFxRow(
-                        gold = gold,
-                        wah = padWahVal,
-                        oct = padOctVal,
-                        cho = padChoVal,
-                        onWah = { padWahVal = it; engine.padWah = it },
-                        onOct = { padOctVal = it; engine.padOct = it },
-                        onCho = { padChoVal = it; engine.padCho = it }
-                    )
-                    Row(modifier = Modifier.fillMaxWidth().height(36.dp).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        listOf(
-                            Triple("SUB", subOn) { subOn = !subOn; engine.subOn = subOn },
-                            Triple("WARM", warmOn) { warmOn = !warmOn; engine.warmOn = warmOn },
-                            Triple("VIBE", vibeOn) { vibeOn = !vibeOn; engine.vibeOn = vibeOn }
-                        ).forEach { (label, enabled, toggle) ->
-                            Button(
-                                onClick = toggle,
-                                colors = ButtonDefaults.buttonColors(containerColor = if (enabled) gold else panelBg2),
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
-                                contentPadding = PaddingValues(0.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (enabled) Color.Black else gold)
-                                    Text(
-                                        when (label) { "SUB" -> "באס −1 אוקטבה"; "WARM" -> "חום אנלוגי"; else -> "ויברטו עדין" },
-                                        fontSize = 7.sp,
-                                        color = if (enabled) Color.Black.copy(alpha = 0.7f) else Color.Gray
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().height(34.dp).padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        listOf(4 to "1/4", 8 to "1/8", 16 to "1/16", 32 to "1/32").forEach { (div, label) ->
-                            val src = remember { MutableInteractionSource() }
-                            val pressed by src.collectIsPressedAsState()
-                            LaunchedEffect(pressed, div) {
-                                if (pressed) engine.busStutterDiv = div else if (engine.busStutterDiv == div) engine.busStutterDiv = 0
-                            }
-                            Button(
-                                onClick = {},
-                                interactionSource = src,
-                                colors = ButtonDefaults.buttonColors(containerColor = if (pressed) gold else panelBg2),
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
-                                contentPadding = PaddingValues(0.dp),
-                                shape = RoundedCornerShape(6.dp)
-                            ) { Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (pressed) Color.Black else gold) }
-                        }
-                        val stopSrc = remember { MutableInteractionSource() }
-                        val stopPressed by stopSrc.collectIsPressedAsState()
-                        LaunchedEffect(stopPressed) { engine.busHoldStop = stopPressed }
-                        Button(
-                            onClick = {},
-                            interactionSource = stopSrc,
-                            colors = ButtonDefaults.buttonColors(containerColor = if (stopPressed) Color(0xFFFF1744) else panelBg2),
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                            contentPadding = PaddingValues(0.dp),
-                            shape = RoundedCornerShape(6.dp)
-                        ) { Text("STOP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (stopPressed) Color.White else Color(0xFFFF8A80)) }
-                    }
-                }
+                "PAD" -> PadTab(
+                    engine = engine,
+                    gold = gold,
+                    panelBg2 = panelBg2,
+                    padTargetKey = padTargetKey,
+                    setPadTargetKey = { padTargetKey = it },
+                    padTargetMic = padTargetMic,
+                    setPadTargetMic = { padTargetMic = it },
+                    padTargetLoop = padTargetLoop,
+                    setPadTargetLoop = { padTargetLoop = it },
+                    padTargetDrum = padTargetDrum,
+                    setPadTargetDrum = { padTargetDrum = it },
+                    padWahVal = padWahVal,
+                    setPadWahVal = { padWahVal = it },
+                    padOctVal = padOctVal,
+                    setPadOctVal = { padOctVal = it },
+                    padChoVal = padChoVal,
+                    setPadChoVal = { padChoVal = it },
+                    subOn = subOn,
+                    setSubOn = { subOn = it },
+                    warmOn = warmOn,
+                    setWarmOn = { warmOn = it },
+                    vibeOn = vibeOn,
+                    setVibeOn = { vibeOn = it }
+                )
 
-                "DRUM" -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
-                    LaunchedEffect(Unit) {
-                        if (!drumTabInitialized) {
-                            PresetManager.loadAllDrumKits(prefs, engine)
-                            val curKit = engine.drumEngine.currentKitIndex
-                            val patternToUse = engine.drumEngine.currentPatternIndex.coerceIn(0, 7)
-                            engine.drumEngine.loadKit(curKit, context, startPattern = patternToUse)
-                            drumTabInitialized = true
-                            val hasSamples = engine.drumEngine.drumSamples.any { it != null }
-                            if (!hasSamples) {
-                                val ok = engine.drumEngine.loadDefaultKit(context)
-                                if (ok) { defaultKitLoaded = true; useDefaultKit = true }
-                            } else {
-                                useDefaultKit = false
-                                defaultKitLoaded = true
-                            }
-                        }
-                        selectedDrumPattern = engine.drumEngine.currentPatternIndex
-                        drumBpmState = engine.drumEngine.bpm
-                        drumVolState = engine.drumEngine.masterVolume
-                        drumSwingState = engine.drumEngine.swing
-                        for (t in 0 until 8) {
-                            trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
-                            trackPanStates[t].value = engine.drumEngine.trackPans[t]
-                        }
-                        gridRefreshTrigger = System.currentTimeMillis()
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().background(panelBg2, RoundedCornerShape(8.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("DRUM MACHINE", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Button(
-                                onClick = {
-                                    if (drumPlayingState) { engine.drumEngine.stopAndRewind(); engine.benchmarkReferenceRecorder.recordDrumState(); drumPlayingState = false }
-                                    else { engine.drumEngine.startFromBeginning(); engine.benchmarkReferenceRecorder.recordDrumState(); drumPlayingState = true }
-                                    gridRefreshTrigger = System.currentTimeMillis()
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.height(26.dp)
-                            ) { Text(if (drumPlayingState) "עצור תופים" else "נגן תופים", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold) }
-                            Button(
-                                onClick = { drumExtrasOpen = !drumExtrasOpen },
-                                colors = ButtonDefaults.buttonColors(containerColor = if (drumExtrasOpen) gold else panelBg2),
-                                contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.width(26.dp).height(26.dp)
-                            ) { Text(if (drumExtrasOpen) "–" else "+", fontSize = 14.sp, color = if (drumExtrasOpen) Color.Black else gold, fontWeight = FontWeight.Bold) }
-                            Button(
-                                onClick = {
-                                    if (useDefaultKit) {
-                                        for (i in 0 until 4) engine.drumEngine.drumSamples[i] = null
-                                        useDefaultKit = false
-                                    } else {
-                                        scope.launch {
-                                            val ok = engine.drumEngine.loadDefaultKit(context)
-                                            if (ok) { useDefaultKit = true; Toast.makeText(context, "ערכת ברירת מחדל נטענה", Toast.LENGTH_SHORT).show() }
-                                            else Toast.makeText(context, "שגיאה בטעינת הערכה", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = if (useDefaultKit) gold else panelBg2),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.height(26.dp)
-                            ) { Text(if (useDefaultKit) "ערכת ברירת מחדל" else "טעינה ידנית", fontSize = 9.sp, color = if (useDefaultKit) Color.Black else gold, fontWeight = FontWeight.Bold) }
-                            Button(
-                                onClick = { showStyleDialog = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.height(26.dp)
-                            ) { Text("סגנון", fontSize = 9.sp, color = gold, fontWeight = FontWeight.Bold) }
-                        }
-                    }
-                    Spacer(Modifier.height(3.dp))
-                    val drumKitName = engine.drumEngine.kits[engine.drumEngine.currentKitIndex.coerceIn(0, 7)].name
-                    QuickBrowsePanel("DRUM KIT", drumKitName, Color.White, gold, { browseDrumKit(-1) }, { browseDrumKit(1) }, Modifier.fillMaxWidth(), compact = true)
-                    Spacer(Modifier.height(3.dp))
-                    Column(
-                        modifier = Modifier.fillMaxWidth().background(panelBg2, RoundedCornerShape(8.dp)).border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                        SynthKnob("Drum Vol", "${(drumVolState * 100).toInt()}%", drumVolState, 0f..1f, gold, 32.dp) { drumVolState = it; engine.drumEngine.masterVolume = it }
-                        SynthKnob("Swing", "${(drumSwingState * 100).toInt()}%", drumSwingState, 0f..1f, gold, 32.dp) { drumSwingState = it; engine.drumEngine.swing = it }
-                        SynthKnob("BPM", "${drumBpmState.toInt()}", drumBpmState, 60f..200f, gold, 32.dp) { drumBpmState = it; engine.drumEngine.bpm = it }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().height(26.dp).padding(top = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        listOf(4 to "1/4", 8 to "1/8", 16 to "1/16", 32 to "1/32").forEach { (div, label) ->
-                            val src = remember { MutableInteractionSource() }
-                            val pressed by src.collectIsPressedAsState()
-                            LaunchedEffect(pressed, div) {
-                                if (pressed) engine.drumStutterDiv = div else if (engine.drumStutterDiv == div) engine.drumStutterDiv = 0
-                            }
-                            Button(
-                                onClick = {},
-                                interactionSource = src,
-                                colors = ButtonDefaults.buttonColors(containerColor = if (pressed) gold else panelBg2),
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
-                                contentPadding = PaddingValues(0.dp),
-                                shape = RoundedCornerShape(6.dp)
-                            ) { Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (pressed) Color.Black else gold) }
-                        }
-                        val drumStopSrc = remember { MutableInteractionSource() }
-                        val drumStopPressed by drumStopSrc.collectIsPressedAsState()
-                        LaunchedEffect(drumStopPressed) { engine.drumHoldStop = drumStopPressed }
-                        Button(
-                            onClick = {},
-                            interactionSource = drumStopSrc,
-                            colors = ButtonDefaults.buttonColors(containerColor = if (drumStopPressed) Color(0xFFFF1744) else panelBg2),
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                            contentPadding = PaddingValues(0.dp),
-                            shape = RoundedCornerShape(6.dp)
-                        ) { Text("STOP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (drumStopPressed) Color.White else Color(0xFFFF8A80)) }
-                    }
-                    }
-                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        for (i in 0 until 8) {
-                            val liveIdx = engine.drumEngine.currentPatternIndex
-                            val isSelected = selectedDrumPattern == i || liveIdx == i
-                            val programmed = engine.drumEngine.patternRepeat[i] != 0
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(20.dp)
-                                    .background(if (isSelected) gold else panelBg2, RoundedCornerShape(4.dp))
-                                    .pointerInput(i) {
-                                        detectTapGestures(
-                                            onLongPress = { patternRepeatEdit = i },
-                                            onTap = {
-                                                engine.drumEngine.loadPattern(i)
-                                                engine.benchmarkReferenceRecorder.recordDrumState()
-                                                selectedDrumPattern = i
-                                                drumBpmState = engine.drumEngine.bpm
-                                                drumVolState = engine.drumEngine.masterVolume
-                                                drumSwingState = engine.drumEngine.swing
-                                                for (t in 0 until 8) {
-                                                    trackVolStates[t].value = engine.drumEngine.trackVolumes[t]
-                                                    trackPanStates[t].value = engine.drumEngine.trackPans[t]
-                                                }
-                                                gridRefreshTrigger = System.currentTimeMillis()
-                                                PresetManager.saveCurrentDrumSelection(prefs, engine)
-                                            }
-                                        )
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    if (programmed) "${i + 1}•" else "${i + 1}",
-                                    color = if (isSelected) Color.Black else Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                        Button(
-                            onClick = {
-                                engine.drumEngine.saveCurrentToPattern(selectedDrumPattern)
-                                PresetManager.saveAllDrumKits(prefs, engine)
-                                Toast.makeText(context, "מקצב נשמר בחריץ ${selectedDrumPattern + 1}", Toast.LENGTH_SHORT).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                            modifier = Modifier.height(20.dp),
-                            shape = RoundedCornerShape(4.dp)
-                        ) { Text("שמור", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold) }
-                        Button(
-                            onClick = {
-                                engine.drumEngine.generateRandomLogicalPattern()
-                                engine.benchmarkReferenceRecorder.recordDrumState()
-                                gridRefreshTrigger = System.currentTimeMillis()
-                                Toast.makeText(context, "מקצב אקראי הגיוני נוצר", Toast.LENGTH_SHORT).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                            modifier = Modifier.height(20.dp),
-                            shape = RoundedCornerShape(4.dp)
-                        ) { Text("Random", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold) }
-                    }
-                    Column(modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = 0.dp), verticalArrangement = Arrangement.SpaceEvenly) {
-                        val currentActiveStep = remember(gridRefreshTrigger) { engine.drumEngine.currentStep }
-                        val visibleDrumTracks = if (drumExtrasOpen) 8 else 4
-                        for (t in 0 until visibleDrumTracks) {
-                            val trackName = engine.drumEngine.trackNames[t]
-                            val isSampleLoaded = engine.drumEngine.drumSamples[t] != null
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Row(modifier = Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${t + 1}. $trackName", color = if (isSampleLoaded) gold else Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(72.dp), maxLines = 1)
-                                    OutlinedButton(
-                                        onClick = { activeLoadingTrack = t; loadDrumSampleLauncher.launch("audio/*") },
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                                        modifier = Modifier.height(16.dp)
-                                    ) { Text(if (isSampleLoaded) "החלף" else "טעון סאמפל", fontSize = 7.sp, color = gold) }
-                                    Slider(
-                                        value = trackVolStates[t].value,
-                                        onValueChange = {
-                                            trackVolStates[t].value = it
-                                            engine.drumEngine.trackVolumes[t] = it
-                                            engine.benchmarkReferenceRecorder.recordDrumState()
-                                        },
-                                        valueRange = 0f..1f,
-                                        modifier = Modifier.weight(1f).height(16.dp),
-                                        colors = SliderDefaults.colors(thumbColor = gold, activeTrackColor = gold, inactiveTrackColor = Color(0xFF333333))
-                                    )
-                                    Text("${(trackVolStates[t].value * 100).toInt()}", color = gold, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(24.dp), textAlign = TextAlign.End)
-                                    LrPanKnob(trackPanStates[t].value, gold, 20.dp) { p ->
-                                        trackPanStates[t].value = p
-                                        engine.drumEngine.setTrackPan(t, p)
-                                        engine.benchmarkReferenceRecorder.recordDrumState()
-                                    }
-                                }
-                                Spacer(Modifier.height(1.dp))
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    for (s in 0 until 16) {
-                                        val isActive = engine.drumEngine.grid[t][s]
-                                        val isCurrentStep = drumPlayingState && s == currentActiveStep
-                                        Box(
-                                            modifier = Modifier.weight(1f).height(18.dp)
-                                                .background(
-                                                    when {
-                                                        isActive && isCurrentStep -> Color.White
-                                                        isActive -> gold
-                                                        isCurrentStep -> Color(0xFF333333)
-                                                        else -> panelBg2
-                                                    },
-                                                    RoundedCornerShape(3.dp)
-                                                )
-                                                .border(1.dp, if (isCurrentStep) gold else Color(0xFF2A2A2A), RoundedCornerShape(3.dp))
-                                                .clickable {
-                                                    engine.drumEngine.grid[t][s] = !isActive
-                                                    engine.benchmarkReferenceRecorder.recordDrumState()
-                                                    gridRefreshTrigger = System.currentTimeMillis()
-                                                }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                "DRUM" -> DrumTab(
+                    engine = engine,
+                    context = context,
+                    prefs = prefs,
+                    gold = gold,
+                    panelBg2 = panelBg2,
+                    selectedDrumPattern = selectedDrumPattern,
+                    setSelectedDrumPattern = { selectedDrumPattern = it },
+                    drumTabInitialized = drumTabInitialized,
+                    setDrumTabInitialized = { drumTabInitialized = it },
+                    drumBpmState = drumBpmState,
+                    setDrumBpmState = { drumBpmState = it },
+                    drumVolState = drumVolState,
+                    setDrumVolState = { drumVolState = it },
+                    drumSwingState = drumSwingState,
+                    setDrumSwingState = { drumSwingState = it },
+                    drumPlayingState = drumPlayingState,
+                    setDrumPlayingState = { drumPlayingState = it },
+                    drumExtrasOpen = drumExtrasOpen,
+                    setDrumExtrasOpen = { drumExtrasOpen = it },
+                    useDefaultKit = useDefaultKit,
+                    setUseDefaultKit = { useDefaultKit = it },
+                    defaultKitLoaded = defaultKitLoaded,
+                    setDefaultKitLoaded = { defaultKitLoaded = it },
+                    activeLoadingTrack = activeLoadingTrack,
+                    setActiveLoadingTrack = { activeLoadingTrack = it },
+                    gridRefreshTrigger = gridRefreshTrigger,
+                    setGridRefreshTrigger = { gridRefreshTrigger = it },
+                    patternRepeatEdit = patternRepeatEdit,
+                    setPatternRepeatEdit = { patternRepeatEdit = it },
+                    trackVolStates = trackVolStates,
+                    trackPanStates = trackPanStates,
+                    scope = scope,
+                    loadDrumSample = { loadDrumSampleLauncher.launch(it) },
+                    onBrowseDrumKit = { browseDrumKit(it) },
+                    setShowStyleDialog = { showStyleDialog = it }
+                )
             }
         }
 
@@ -2770,72 +2006,6 @@ private fun SoundTab(
     }
 }
 
-private fun panCaption(p: Float): String {
-    return when {
-        p < -0.02f -> "L${((-p) * 100f).toInt()}"
-        p > 0.02f -> "R${((p) * 100f).toInt()}"
-        else -> "C"
-    }
-}
-
-@Composable
-private fun LrPanKnob(
-    pan: Float,
-    gold: Color,
-    knobSize: Dp,
-    onChange: (Float) -> Unit
-) {
-    val valueRef = remember { mutableStateOf(pan) }
-    valueRef.value = pan
-    var initialValue by remember { mutableStateOf(pan) }
-    var totalDragY by remember { mutableStateOf(0f) }
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp)
-    ) {
-        Text("L", color = Color.Gray, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-        Box(
-            modifier = Modifier
-                .size(knobSize)
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = {
-                            initialValue = valueRef.value
-                            totalDragY = 0f
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            totalDragY += dragAmount.y
-                            onChange((initialValue - totalDragY / 180f).coerceIn(-1f, 1f))
-                        }
-                    )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val radius = size.minDimension / 2f
-                val c = center
-                drawCircle(color = Color(0xFF1F1F1F), radius = radius, center = c)
-                drawCircle(color = Color(0xFF2A2A2A), radius = radius, center = c, style = Stroke(width = 1.5f))
-                val fraction = ((pan + 1f) / 2f).coerceIn(0f, 1f)
-                val angle = Math.toRadians((135f + fraction * 270f).toDouble())
-                val line = radius * 0.65f
-                drawLine(
-                    color = gold,
-                    start = c,
-                    end = Offset(
-                        c.x + line * kotlin.math.cos(angle).toFloat(),
-                        c.y + line * kotlin.math.sin(angle).toFloat()
-                    ),
-                    strokeWidth = 2.5f
-                )
-            }
-        }
-        Text("R", color = Color.Gray, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-    }
-    }
-}
 
 @Composable
 private fun SirenKeyboard(
