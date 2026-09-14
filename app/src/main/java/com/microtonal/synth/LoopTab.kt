@@ -3,6 +3,7 @@ package com.microtonal.synth
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -17,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun LoopTab(
@@ -82,7 +84,7 @@ Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spac
             ) {
                 BasicTextField(
                     value = loopChannelNames[track],
-                    onValueChange = { loopChannelNames[track] = it },
+                    onValueChange = { value -> loopChannelNames[track] = value },
                     singleLine = true,
                     textStyle = TextStyle(color = accent, fontSize = 8.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
                     modifier = Modifier.fillMaxWidth().height(12.dp),

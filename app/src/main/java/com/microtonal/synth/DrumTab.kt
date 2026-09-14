@@ -19,7 +19,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun DrumTab(
@@ -56,7 +58,8 @@ internal fun DrumTab(
     trackPanStates: List<MutableState<Float>>,
     scope: CoroutineScope,
     loadDrumSample: (String) -> Unit,
-    onBrowseDrumKit: (Int) -> Unit
+    onBrowseDrumKit: (Int) -> Unit,
+    setShowStyleDialog: (Boolean) -> Unit
 ) {
 Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
     LaunchedEffect(Unit) {
@@ -94,8 +97,8 @@ Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Spac
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Button(
                 onClick = {
-                    if (drumPlayingState) { engine.drumEngine.stopAndRewind(); engine.benchmarkReferenceRecorder.recordDrumState(); drumPlayingState = false }
-                    else { engine.drumEngine.startFromBeginning(); engine.benchmarkReferenceRecorder.recordDrumState(); drumPlayingState = true }
+                    if (drumPlayingState) { engine.drumEngine.stopAndRewind(); engine.benchmarkReferenceRecorder.recordDrumState(); setDrumPlayingState(false) }
+                    else { engine.drumEngine.startFromBeginning(); engine.benchmarkReferenceRecorder.recordDrumState(); setDrumPlayingState(true) }
                     setGridRefreshTrigger(System.currentTimeMillis())
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
@@ -126,7 +129,7 @@ Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Spac
                 modifier = Modifier.height(26.dp)
             ) { Text(if (useDefaultKit) "ערכת ברירת מחדל" else "טעינה ידנית", fontSize = 9.sp, color = if (useDefaultKit) Color.Black else gold, fontWeight = FontWeight.Bold) }
             Button(
-                onClick = { showStyleDialog = true },
+                onClick = { setShowStyleDialog(true) },
                 colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                 modifier = Modifier.height(26.dp)

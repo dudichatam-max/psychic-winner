@@ -1657,7 +1657,8 @@ fun SynthAppUI(engine: SynthEngine) {
                     setSubOn = { subOn = it },
                     warmOn = warmOn,
                     setWarmOn = { warmOn = it },
-                    vibeOn = vibeOn
+                    vibeOn = vibeOn,
+                    setVibeOn = { vibeOn = it }
                 )
 
                 "DRUM" -> DrumTab(
@@ -1694,7 +1695,8 @@ fun SynthAppUI(engine: SynthEngine) {
                     trackPanStates = trackPanStates,
                     scope = scope,
                     loadDrumSample = { loadDrumSampleLauncher.launch(it) },
-                    onBrowseDrumKit = { browseDrumKit(it) }
+                    onBrowseDrumKit = { browseDrumKit(it) },
+                    setShowStyleDialog = { showStyleDialog = it }
                 )
             }
         }
