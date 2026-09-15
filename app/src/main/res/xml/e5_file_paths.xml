@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-files-path name="e5_external" path="e5/" />
+    <files-path name="e5_internal" path="e5/" />
+    <cache-path name="e5_cache" path="e5/" />
+</paths>

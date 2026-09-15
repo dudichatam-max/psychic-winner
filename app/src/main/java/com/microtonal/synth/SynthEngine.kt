@@ -34,6 +34,9 @@ import kotlin.math.abs
 
 class NoteSlot {
     @Volatile var active: Boolean = false
+    /** E5 R1.1: diagnostic event identity. 0 = no published diagnostic event.
+     *  Written BEFORE active=true (publication contract §7.3). */
+    @Volatile var diagnosticEventId: Long = 0L
     @Volatile var baseFreq: Float = 440f
     @Volatile var targetFreq: Float = 440f
     @Volatile var currentFreq: Float = 440f
@@ -95,7 +98,11 @@ class NoteSlot {
         decay: Float,
         sustain: Float,
         release: Float,
-        sampleRate: Int
+        sampleRate: Int,
+        /** E5 event identity; published AFTER mutation, BEFORE active=true. */
+        e5EventId: Long = 0L,
+        /** Optional AFTER snapshot capture at the defined boundary (control plane). */
+        e5OnAfterMutation: (() -> Unit)? = null
     ) = synchronized(lock) {
         baseFreq = newBaseFreq
         targetFreq = newTargetFreq
@@ -140,6 +147,14 @@ class NoteSlot {
         attackCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (attack / 1000.0).coerceAtLeast(0.001)))
         decayCoeff = 1.0 - Math.exp(-1.0 / (sampleRate * (decay / 1000.0).coerceAtLeast(0.001)))
         releaseCoeff = Math.exp(-1.0 / (sampleRate * (release / 1000.0).coerceAtLeast(0.001)))
+
+        // E5 R1.1 §7.3 / §16.2: AFTER boundary = after mutation/coeffs, BEFORE publication
+        e5OnAfterMutation?.invoke()
+
+        // Publication order (NON-NEGOTIABLE): diagnosticEventId THEN active=true
+        if (e5EventId != 0L) {
+            diagnosticEventId = e5EventId
+        }
         active = true
     }
 }
@@ -690,6 +705,9 @@ class SynthEngine(private val context: Context) {
     private val maxVoices = 8
     private val noteSlots = Array(maxVoices) { NoteSlot() }
 
+    /** E5 R1.1 diagnostic instrumentation (observational only). */
+    val e5 = E5Diagnostics(maxVoices)
+
     private fun setSlotActive(slot: NoteSlot, value: Boolean) {
         if (slot.active == value) return
         slot.active = value
@@ -1089,6 +1107,12 @@ class SynthEngine(private val context: Context) {
         Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
 
+            // E5: storage is preallocated in E5Diagnostics ctor. Do not wipe an
+            // active user session if START E5 already reset+armed collection.
+            if (!e5.isSessionActive()) {
+                e5.initialize()
+            }
+
             val bufferSize = 512
             val buffer = ShortArray(bufferSize * 2)
             val byteBuffer = ByteBuffer.allocate(bufferSize * 4).order(ByteOrder.LITTLE_ENDIAN)
@@ -1193,6 +1217,12 @@ class SynthEngine(private val context: Context) {
                     reverbMix = reverbMix
                 )
                 for (i in 0 until bufferSize) {
+                    // E5 R1.1 §10: N = absoluteRenderFrame; observe BEFORE render N.
+                    // Discovery reserves center N; ring supplies only N-32..N-1.
+                    // Center is NOT captured here (discovery ≠ center capture).
+                    val e5FrameN = e5.absoluteRenderFrame
+                    e5.observeEventsAtFrameStart(noteSlots, maxVoices)
+
                     // Diagnostic timing is sampled at 1/128 audio samples.
                     // Keeping the gate here prevents the profiler itself from
                     // materially changing the AudioThread workload.
@@ -1412,6 +1442,13 @@ class SynthEngine(private val context: Context) {
 
                     buffer[i * 2] = shortL
                     buffer[i * 2 + 1] = shortR
+
+                    // E5 R1.1 §10/§17/§23: primary artifact = final PCM16 pair
+                    // just assigned to output ShortArray. Write ring + pending
+                    // windows (including center N for newly opened windows).
+                    e5.onFinalPcm16Produced(e5FrameN, shortL, shortR)
+                    e5.incrementRenderFrame()
+
                     if ((i and 7) == 0) {
                         liveVisualizerBuffer[visRing] = frame.liveSample
                         looperVisualizerBuffer[visRing] = (pcmLoopL + pcmLoopR) * 0.5f
@@ -1482,7 +1519,43 @@ class SynthEngine(private val context: Context) {
         micEngine.stopCapture()
         audioTrack.stop()
         audioTrack.release()
+        // E5: end session off-RT; never serialize on AudioThread
+        if (e5.isSessionActive()) {
+            e5.setSessionActive(false)
+        }
+        e5.markIncompleteOnShutdown()
     }
+
+    /**
+     * START E5 session: full reset then arm collection.
+     * Does NOT start a benchmark or change benchmark parameters/results.
+     * Must be called off the AudioThread.
+     */
+    fun startE5Session() {
+        e5.setSessionActive(false)
+        e5.resetControlRecords()
+        e5.initialize()
+        e5.setSessionActive(true)
+    }
+
+    /**
+     * STOP E5 session: disarm collection, mark incomplete windows.
+     * Does NOT export. Must be called off the AudioThread.
+     */
+    fun stopE5Session() {
+        e5.setSessionActive(false)
+        e5.markIncompleteOnShutdown()
+    }
+
+    fun isE5SessionActive(): Boolean = e5.isSessionActive()
+
+    fun hasE5ExportableData(): Boolean = e5.hasExportableData()
+
+    /**
+     * E5 offline export. Never classifies BUG. Never runs on AudioThread.
+     * Safe while session is still active (exports live buffers without stopping).
+     */
+    fun exportE5Diagnostics(file: java.io.File): Boolean = e5.exportToFile(file)
 
     fun refreshHeadphoneState() {
         try {
@@ -1577,21 +1650,42 @@ class SynthEngine(private val context: Context) {
         }
 
         var slot: NoteSlot? = null
+        var slotIndex = -1
 
         for (i in 0 until maxVoices) {
             val s = noteSlots[i]
             if (s.active && s.baseFreq == baseFreq && s.isLooperNote == isLooper) {
                 slot = s
+                slotIndex = i
                 break
             }
         }
 
+        // E5: only instrument when a user E5 session is active
+        val e5Active = e5.isSessionActive()
+        val e5EventId = if (e5Active) e5.allocateEventId() else 0L
+        val e5ControlTimeNs = if (e5Active) System.nanoTime() else 0L
+
         if (slot != null) {
-            slot.isReleasing = false
-            slot.targetFreq = freq
-            slot.waveform = wave ?: waveformType
-            setSlotActive(slot, true)
-            if (slot.envelopeVolume < 0.001) slot.envelopeVolume = 0.001
+            // Retrigger path (may stay active=true). Preserve existing mutations.
+            if (e5Active) {
+                val before = slot.captureE5Snapshot()
+                slot.isReleasing = false
+                slot.targetFreq = freq
+                slot.waveform = wave ?: waveformType
+                if (slot.envelopeVolume < 0.001) slot.envelopeVolume = 0.001
+                val after = slot.captureE5Snapshot()
+                // Publication: diagnosticEventId BEFORE ensuring active=true
+                slot.diagnosticEventId = e5EventId
+                setSlotActive(slot, true)
+                e5.recordControl(e5EventId, slotIndex, e5ControlTimeNs, before, after)
+            } else {
+                slot.isReleasing = false
+                slot.targetFreq = freq
+                slot.waveform = wave ?: waveformType
+                setSlotActive(slot, true)
+                if (slot.envelopeVolume < 0.001) slot.envelopeVolume = 0.001
+            }
             return
         }
 
@@ -1599,6 +1693,7 @@ class SynthEngine(private val context: Context) {
             val s = noteSlots[i]
             if (!s.active) {
                 slot = s
+                slotIndex = i
                 break
             }
         }
@@ -1610,6 +1705,7 @@ class SynthEngine(private val context: Context) {
                 if (s.isReleasing && s.envelopeVolume < minVol) {
                     minVol = s.envelopeVolume
                     slot = s
+                    slotIndex = i
                 }
             }
         }
@@ -1621,6 +1717,7 @@ class SynthEngine(private val context: Context) {
                 if (!s.isLooperNote && s.envelopeVolume < minVol) {
                     minVol = s.envelopeVolume
                     slot = s
+                    slotIndex = i
                 }
             }
         }
@@ -1632,6 +1729,7 @@ class SynthEngine(private val context: Context) {
                 if (s.envelopeVolume < minVol) {
                     minVol = s.envelopeVolume
                     slot = s
+                    slotIndex = i
                 }
             }
         }
@@ -1646,20 +1744,52 @@ class SynthEngine(private val context: Context) {
             if (isLooper) lastLooperPlayedFreq = freq else lastPlayedFreq = freq
 
             val wasActive = slot.active
-            slot.updateAndActivate(
-                newBaseFreq = baseFreq,
-                newTargetFreq = freq,
-                newStartFreq = startFreq,
-                newWaveform = wave ?: waveformType,
-                isLooper = isLooper,
-                cutoff = cutoff ?: cutoffFreq,
-                res = res ?: resonance,
-                attack = attack ?: attackMs,
-                decay = decay ?: decayMs,
-                sustain = sustain ?: sustainLevel,
-                release = release ?: releaseMs,
-                sampleRate = sampleRate
-            )
+            if (e5Active) {
+                // BEFORE: prior to first state mutation of this noteOn (§16.1)
+                val before = slot.captureE5Snapshot()
+                var afterSnapshot: E5NoteSlotSnapshot? = null
+                slot.updateAndActivate(
+                    newBaseFreq = baseFreq,
+                    newTargetFreq = freq,
+                    newStartFreq = startFreq,
+                    newWaveform = wave ?: waveformType,
+                    isLooper = isLooper,
+                    cutoff = cutoff ?: cutoffFreq,
+                    res = res ?: resonance,
+                    attack = attack ?: attackMs,
+                    decay = decay ?: decayMs,
+                    sustain = sustain ?: sustainLevel,
+                    release = release ?: releaseMs,
+                    sampleRate = sampleRate,
+                    e5EventId = e5EventId,
+                    e5OnAfterMutation = {
+                        // AFTER boundary inside lock, before diagnosticEventId/active (§16.2)
+                        afterSnapshot = slot!!.captureE5Snapshot()
+                    }
+                )
+                e5.recordControl(
+                    e5EventId,
+                    slotIndex,
+                    e5ControlTimeNs,
+                    before,
+                    afterSnapshot ?: slot.captureE5Snapshot()
+                )
+            } else {
+                slot.updateAndActivate(
+                    newBaseFreq = baseFreq,
+                    newTargetFreq = freq,
+                    newStartFreq = startFreq,
+                    newWaveform = wave ?: waveformType,
+                    isLooper = isLooper,
+                    cutoff = cutoff ?: cutoffFreq,
+                    res = res ?: resonance,
+                    attack = attack ?: attackMs,
+                    decay = decay ?: decayMs,
+                    sustain = sustain ?: sustainLevel,
+                    release = release ?: releaseMs,
+                    sampleRate = sampleRate
+                )
+            }
             if (!wasActive) dspEngine.onVoiceActivated()
         }
     }

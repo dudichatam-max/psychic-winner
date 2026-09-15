@@ -1,6 +1,7 @@
 package com.microtonal.synth
 
 import android.content.Context
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -39,6 +40,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.core.content.FileProvider
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun BenchmarkScreen(
@@ -74,6 +80,26 @@ fun BenchmarkScreen(
     }
     var finalizingReference by remember { mutableStateOf(false) }
     var deletingReference by remember { mutableStateOf(false) }
+
+    // E5 diagnostic session UI (independent of benchmark stress `running`)
+    var e5Running by remember { mutableStateOf(engine.isE5SessionActive()) }
+    var e5Status by remember { mutableStateOf(if (engine.isE5SessionActive()) "E5 RUNNING" else "E5 IDLE") }
+    var e5LastExportPath by remember { mutableStateOf("") }
+    var e5ExportBusy by remember { mutableStateOf(false) }
+    var e5Msg by remember { mutableStateOf("") }
+    var e5HasData by remember { mutableStateOf(engine.hasE5ExportableData()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val active = engine.isE5SessionActive()
+            e5Running = active
+            e5HasData = engine.hasE5ExportableData()
+            if (!e5ExportBusy) {
+                e5Status = if (active) "E5 RUNNING" else "E5 IDLE"
+            }
+            delay(200)
+        }
+    }
 
     LaunchedEffect(context) {
         loadingReference = true
@@ -157,7 +183,7 @@ fun BenchmarkScreen(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 560.dp)
+            .heightIn(max = 620.dp)
             .background(panelBg, RoundedCornerShape(10.dp))
             .padding(10.dp)
             .verticalScroll(rememberScrollState()),
@@ -368,6 +394,111 @@ fun BenchmarkScreen(
                 fontWeight = FontWeight.Bold,
                 fontSize = 11.sp
             )
+        }
+
+        // ---- E5 DIAGNOSTICS (observational; does not start/alter benchmark) ----
+        Text("E5 DIAGNOSTICS", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Capture noteOn ↔ render-frame evidence without changing audio or benchmark.",
+            color = Color.LightGray, fontSize = 9.sp
+        )
+        Text(
+            e5Status,
+            color = if (e5Running) Color(0xFF81C784) else Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Button(
+                onClick = {
+                    engine.startE5Session()
+                    e5Running = true
+                    e5Status = "E5 RUNNING"
+                    e5Msg = "E5 session started"
+                    e5LastExportPath = ""
+                },
+                enabled = !e5Running && !e5ExportBusy,
+                colors = ButtonDefaults.buttonColors(containerColor = gold),
+                modifier = Modifier.weight(1f).height(32.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+            ) {
+                Text("START E5", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+            }
+            OutlinedButton(
+                onClick = {
+                    engine.stopE5Session()
+                    e5Running = false
+                    e5Status = "E5 IDLE"
+                    e5Msg = "E5 session stopped"
+                },
+                enabled = e5Running && !e5ExportBusy,
+                modifier = Modifier.weight(1f).height(32.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+            ) {
+                Text("STOP E5", color = gold, fontSize = 9.sp)
+            }
+            OutlinedButton(
+                onClick = {
+                    if (e5ExportBusy) return@OutlinedButton
+                    e5ExportBusy = true
+                    e5Msg = "Exporting…"
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            try {
+                                val base = context.getExternalFilesDir(null) ?: context.filesDir
+                                val dir = File(base, "e5")
+                                if (!dir.exists()) dir.mkdirs()
+                                val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                                val file = File(dir, "e5_diagnostics_$stamp.json")
+                                val ok = engine.exportE5Diagnostics(file)
+                                Triple(ok, file.absolutePath, file)
+                            } catch (t: Throwable) {
+                                Triple(false, t.message ?: "export failed", null as File?)
+                            }
+                        }
+                        val (ok, pathOrErr, file) = result
+                        if (ok && file != null) {
+                            e5LastExportPath = pathOrErr
+                            e5HasData = engine.hasE5ExportableData()
+                            e5Msg = "Saved: $pathOrErr"
+                            // Offer Share via FileProvider (added for E5)
+                            try {
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    context.packageName + ".fileprovider",
+                                    file
+                                )
+                                val send = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/json"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    putExtra(Intent.EXTRA_SUBJECT, file.name)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(send, "Share E5 JSON"))
+                            } catch (t: Throwable) {
+                                e5Msg = "Saved: $pathOrErr (share unavailable: ${t.message})"
+                            }
+                        } else {
+                            e5Msg = "EXPORT failed: $pathOrErr"
+                        }
+                        e5ExportBusy = false
+                    }
+                },
+                enabled = !e5ExportBusy && (e5Running || e5HasData),
+                modifier = Modifier.weight(1f).height(32.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+            ) {
+                Text(if (e5ExportBusy) "…" else "EXPORT E5 JSON", color = gold, fontSize = 8.sp)
+            }
+        }
+        if (e5LastExportPath.isNotEmpty()) {
+            Text("Last file: $e5LastExportPath", color = Color(0xFFB0BEC5), fontSize = 8.sp)
+        }
+        if (e5Msg.isNotEmpty()) {
+            Text(e5Msg, color = Color(0xFFCE93D8), fontSize = 9.sp)
         }
 
         Text("EXTREME STRESS", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
