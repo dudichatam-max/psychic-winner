@@ -390,9 +390,6 @@ object E5ScenarioJson {
         )
     }
 
-    fun E5Scenario.toBenchmarkSession(engineSampleRate: Int): BenchmarkReferenceSession =
-        toBenchmarkSession(this, engineSampleRate)
-
     // ---- internals ----
 
     private fun ensureScenarioSchema(obj: JSONObject): JSONObject {
