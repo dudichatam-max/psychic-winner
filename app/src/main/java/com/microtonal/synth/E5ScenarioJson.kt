@@ -488,11 +488,20 @@ object E5ScenarioJson {
     }
 
     fun mergeSettings(base: BenchmarkReferenceSettings, patch: JSONObject): BenchmarkReferenceSettings {
+        // Copy via fromJson+explicit defaults first so missing padWah/padOct/padCho are never NaN
+        // (Android JSONObject.optDouble(name) returns NaN when absent — breaks toJson put).
         val o = base.toJson()
         val keys = patch.keys()
         while (keys.hasNext()) {
             val k = keys.next()
-            o.put(k, patch.get(k))
+            val v = patch.get(k)
+            if (v is Number) {
+                val d = v.toDouble()
+                if (!d.isFinite()) {
+                    throw IllegalArgumentException("settings.$k must be finite (got non-finite)")
+                }
+            }
+            o.put(k, v)
         }
         return BenchmarkReferenceSettings.fromJson(o)
     }
