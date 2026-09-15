@@ -1,0 +1,66 @@
+{
+  "schema": "e5-test-reference",
+  "schemaVersion": 1,
+  "testId": "bug04-detune-drive100",
+  "title": "BUG-04 Detune ON + Drive 100%",
+  "description": "PROTOCOL: Detune on, Drive=100%, other extras off. START E5. Add voices: expect distortion ~6 overall; Sine toward 8; Square after ~5; Triangle/Saw ~6. Prefer Square path for worst case: >=5 noteOns then EXPORT. Capture health gates only.",
+  "session": {
+    "durationMs": 60000
+  },
+  "assertions": [
+    {
+      "id": "after-stop-session-off",
+      "path": "e5.sessionActive",
+      "operator": "equals",
+      "expected": false
+    },
+    {
+      "id": "has-exportable-data",
+      "path": "e5.hasExportableData",
+      "operator": "equals",
+      "expected": true
+    },
+    {
+      "id": "control-records-min",
+      "path": "e5.controlRecordCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 5
+    },
+    {
+      "id": "audio-obs-min",
+      "path": "e5.audioObservationCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 5
+    },
+    {
+      "id": "pending-windows-nonneg",
+      "path": "e5.pendingWindowCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    },
+    {
+      "id": "frames-advanced",
+      "path": "e5.absoluteRenderFrame",
+      "operator": "greaterThan",
+      "expected": 0
+    },
+    {
+      "id": "no-control-overflow",
+      "path": "e5.controlOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-window-overflow",
+      "path": "e5.windowOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-audio-obs-overflow",
+      "path": "e5.audioObservationOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    }
+  ]
+}
