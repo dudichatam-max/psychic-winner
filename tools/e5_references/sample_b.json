@@ -1,0 +1,48 @@
+{
+  "schema": "e5-test-reference",
+  "schemaVersion": 1,
+  "testId": "sample-b",
+  "title": "Sample B \u2014 counts after activity",
+  "description": "On-device A\u2192B: IMPORT sample_b while idle, START, play notes, STOP. durationMs is metadata only (no auto-STOP).",
+  "session": {
+    "durationMs": 15000
+  },
+  "assertions": [
+    {
+      "id": "session-inactive",
+      "path": "e5.sessionActive",
+      "operator": "equals",
+      "expected": false
+    },
+    {
+      "id": "pending-windows-nonneg",
+      "path": "e5.pendingWindowCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    },
+    {
+      "id": "audio-obs-nonneg",
+      "path": "e5.audioObservationCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    },
+    {
+      "id": "control-count-nonneg",
+      "path": "e5.controlRecordCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    },
+    {
+      "id": "no-control-overflow",
+      "path": "e5.controlOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "frame-nonneg",
+      "path": "e5.absoluteRenderFrame",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    }
+  ]
+}
