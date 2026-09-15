@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "testId": "bug04-detune-drive100",
   "title": "BUG-04 Detune ON + Drive 100%",
-  "description": "PROTOCOL: Detune on, Drive=100%, other extras off. START E5. Add voices: expect distortion ~6 overall; Sine toward 8; Square after ~5; Triangle/Saw ~6. Prefer Square path for worst case: >=5 noteOns then EXPORT. Capture health gates only.",
+  "description": "PROTOCOL: Detune on, Drive=100%, other extras off. START E5. Add voices: expect distortion ~6 overall; Sine toward 8; Square after ~5; Triangle/Saw ~6. Prefer Square path for worst case: >=5 noteOns then EXPORT. Capture health gates only. AUTO: prefer tools/e5_scenarios/bug04-detune-drive.bundle.json.",
   "session": {
     "durationMs": 60000
   },

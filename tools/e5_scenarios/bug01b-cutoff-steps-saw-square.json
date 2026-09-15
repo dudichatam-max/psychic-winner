@@ -1,0 +1,194 @@
+{
+  "schema": "e5-scenario",
+  "schemaVersion": 1,
+  "scenarioId": "bug01b-cutoff-steps-saw-square",
+  "title": "BUG-01b Saw/Square cutoff steps while held (auto)",
+  "description": "Auto: held note, rapid SETTINGS cutoff steps on Saw then Square. ~11s.",
+  "durationUs": 11000000,
+  "initialSettings": {
+    "waveform": 3,
+    "volume": 0.5,
+    "attack": 15.0,
+    "decay": 50.0,
+    "sustain": 0.8,
+    "release": 200.0,
+    "drive": 0.0,
+    "reverb": 0.0,
+    "cutoff": 500.0,
+    "resonance": 0.3,
+    "echo": 0.0,
+    "glide": 0.0,
+    "octave": 0,
+    "detune": false,
+    "sub": false,
+    "warm": false,
+    "vibe": false,
+    "rip": false,
+    "fuzz": false,
+    "phaz": false,
+    "piano": false,
+    "div2": false,
+    "div3": false,
+    "div4": false
+  },
+  "events": [
+    {
+      "timeUs": 300000,
+      "type": "NOTE_ON",
+      "freq": 329.63
+    },
+    {
+      "timeUs": 800000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 500.0
+      }
+    },
+    {
+      "timeUs": 1200000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 1500.0
+      }
+    },
+    {
+      "timeUs": 1600000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 3000.0
+      }
+    },
+    {
+      "timeUs": 2000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 6000.0
+      }
+    },
+    {
+      "timeUs": 2400000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 2000.0
+      }
+    },
+    {
+      "timeUs": 2800000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 8000.0
+      }
+    },
+    {
+      "timeUs": 3200000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 1000.0
+      }
+    },
+    {
+      "timeUs": 3600000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 4000.0
+      }
+    },
+    {
+      "timeUs": 4000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 7000.0
+      }
+    },
+    {
+      "timeUs": 4400000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 2500.0
+      }
+    },
+    {
+      "timeUs": 5000000,
+      "type": "SETTINGS",
+      "settings": {
+        "waveform": 1,
+        "cutoff": 500.0
+      }
+    },
+    {
+      "timeUs": 5400000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 500.0
+      }
+    },
+    {
+      "timeUs": 5800000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 1500.0
+      }
+    },
+    {
+      "timeUs": 6200000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 3000.0
+      }
+    },
+    {
+      "timeUs": 6600000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 6000.0
+      }
+    },
+    {
+      "timeUs": 7000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 2000.0
+      }
+    },
+    {
+      "timeUs": 7400000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 8000.0
+      }
+    },
+    {
+      "timeUs": 7800000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 1000.0
+      }
+    },
+    {
+      "timeUs": 8200000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 4000.0
+      }
+    },
+    {
+      "timeUs": 8600000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 7000.0
+      }
+    },
+    {
+      "timeUs": 9000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 2500.0
+      }
+    },
+    {
+      "timeUs": 10000000,
+      "type": "NOTE_OFF",
+      "freq": 329.63
+    }
+  ]
+}

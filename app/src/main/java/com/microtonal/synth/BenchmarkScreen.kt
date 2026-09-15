@@ -82,6 +82,7 @@ fun BenchmarkScreen(
     // E5 Reference JSON + diagnostics UI (Active Reference lives in E5TestController singleton)
     var e5Phase by remember { mutableStateOf(E5TestController.getPhase()) }
     var e5ActiveRef by remember { mutableStateOf(E5TestController.getActiveReference()) }
+    var e5ActiveScenario by remember { mutableStateOf(E5TestController.getActiveScenario()) }
     var e5LastResult by remember { mutableStateOf(E5TestController.getLastResult()) }
     var e5LastExportPath by remember { mutableStateOf("") }
     var e5ExportBusy by remember { mutableStateOf(false) }
@@ -92,6 +93,7 @@ fun BenchmarkScreen(
     fun refreshE5UiFromController() {
         e5Phase = E5TestController.getPhase()
         e5ActiveRef = E5TestController.getActiveReference()
+        e5ActiveScenario = E5TestController.getActiveScenario()
         e5LastResult = E5TestController.getLastResult()
         e5HasData = engine.hasE5ExportableData()
     }
@@ -231,8 +233,12 @@ fun BenchmarkScreen(
             withContext(Dispatchers.Main) {
                 refreshE5UiFromController()
                 e5Msg = when (outcome) {
-                    is E5ImportResult.Success ->
-                        "Imported: ${outcome.reference.testId} — ${outcome.reference.title}"
+                    is E5ImportResult.Success -> {
+                        val parts = mutableListOf<String>()
+                        outcome.scenario?.let { parts += "scenario ${it.scenarioId} — ${it.title}" }
+                        outcome.reference?.let { parts += "ref ${it.testId} — ${it.title}" }
+                        if (parts.isEmpty()) "Imported (empty)" else "Imported: ${parts.joinToString(" | ")}"
+                    }
                     is E5ImportResult.Rejected ->
                         "Import rejected (active unchanged): ${outcome.reason}"
                 }
@@ -484,31 +490,42 @@ fun BenchmarkScreen(
         }
 
         // ---- E5 REFERENCE JSON + DIAGNOSTICS (observational; no 5th RUN button) ----
-        Text("E5 REFERENCE", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text("E5 REFERENCE / SCENARIO", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Text(
-            "Import declarative JSON → START/STOP existing E5 → assert → EXPORT diagnostics.",
+            "IMPORT scenario and/or assertions → START auto-replays when scenario loaded → STOP/EXPORT.",
             color = Color.LightGray, fontSize = 8.sp
         )
         val e5Running = e5Phase == E5ControllerPhase.RUNNING
+        val e5HasScenario = e5ActiveScenario != null
         Text(
             when (e5Phase) {
                 E5ControllerPhase.NO_REFERENCE -> "NO REFERENCE"
-                E5ControllerPhase.REFERENCE_READY -> "REFERENCE READY"
-                E5ControllerPhase.RUNNING -> "RUNNING"
+                E5ControllerPhase.REFERENCE_READY ->
+                    if (e5HasScenario) "SCENARIO READY" else "REFERENCE READY"
+                E5ControllerPhase.RUNNING ->
+                    if (e5HasScenario) "SCENARIO RUNNING…" else "RUNNING"
                 E5ControllerPhase.RESULT_READY -> "RESULT READY"
             },
             color = if (e5Running) Color(0xFF81C784) else Color.White,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold
         )
+        val scen = e5ActiveScenario
+        if (scen != null) {
+            Text(
+                "Scenario: ${scen.scenarioId} — ${scen.title}",
+                color = Color(0xFF80CBC4),
+                fontSize = 8.sp
+            )
+        }
         val ref = e5ActiveRef
         if (ref != null) {
             Text(
-                "Active: ${ref.testId} — ${ref.title}",
+                "Reference: ${ref.testId} — ${ref.title}",
                 color = Color(0xFFB0BEC5),
                 fontSize = 8.sp
             )
-        } else {
+        } else if (scen == null) {
             Text("Active: (none)", color = Color.DarkGray, fontSize = 8.sp)
         }
         if (e5ResultFlash.isNotEmpty()) {
@@ -522,7 +539,11 @@ fun BenchmarkScreen(
                 onClick = {
                     val ok = E5TestController.start(engine)
                     refreshE5UiFromController()
-                    e5Msg = if (ok) "E5 session started" else "START rejected (need REFERENCE_READY)"
+                    e5Msg = when {
+                        !ok -> "START rejected (need scenario or reference READY)"
+                        e5ActiveScenario != null -> "SCENARIO RUNNING… (auto-replay)"
+                        else -> "E5 session started (manual play)"
+                    }
                     e5LastExportPath = ""
                     e5ResultFlash = ""
                 },

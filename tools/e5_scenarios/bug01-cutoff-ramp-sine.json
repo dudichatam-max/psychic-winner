@@ -1,0 +1,263 @@
+{
+  "schema": "e5-scenario",
+  "schemaVersion": 1,
+  "scenarioId": "bug01-cutoff-ramp-sine",
+  "title": "BUG-01 Cutoff ramp \u2014 Sine held note (auto)",
+  "description": "Auto: Wave=Sine, hold A4, SETTINGS sweep cutoff 200\u21928000. ~18s.",
+  "durationUs": 18500000,
+  "initialSettings": {
+    "waveform": 0,
+    "volume": 0.5,
+    "attack": 15.0,
+    "decay": 50.0,
+    "sustain": 0.8,
+    "release": 200.0,
+    "drive": 0.0,
+    "reverb": 0.0,
+    "cutoff": 200.0,
+    "resonance": 0.3,
+    "echo": 0.0,
+    "glide": 0.0,
+    "octave": 0,
+    "detune": false,
+    "sub": false,
+    "warm": false,
+    "vibe": false,
+    "rip": false,
+    "fuzz": false,
+    "phaz": false,
+    "piano": false,
+    "div2": false,
+    "div3": false,
+    "div4": false
+  },
+  "events": [
+    {
+      "timeUs": 500000,
+      "type": "NOTE_ON",
+      "freq": 440.0
+    },
+    {
+      "timeUs": 1000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 200.0
+      }
+    },
+    {
+      "timeUs": 1500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 460.0
+      }
+    },
+    {
+      "timeUs": 2000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 720.0
+      }
+    },
+    {
+      "timeUs": 2500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 980.0
+      }
+    },
+    {
+      "timeUs": 3000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 1240.0
+      }
+    },
+    {
+      "timeUs": 3500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 1500.0
+      }
+    },
+    {
+      "timeUs": 4000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 1760.0
+      }
+    },
+    {
+      "timeUs": 4500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 2020.0
+      }
+    },
+    {
+      "timeUs": 5000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 2280.0
+      }
+    },
+    {
+      "timeUs": 5500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 2540.0
+      }
+    },
+    {
+      "timeUs": 6000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 2800.0
+      }
+    },
+    {
+      "timeUs": 6500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 3060.0
+      }
+    },
+    {
+      "timeUs": 7000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 3320.0
+      }
+    },
+    {
+      "timeUs": 7500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 3580.0
+      }
+    },
+    {
+      "timeUs": 8000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 3840.0
+      }
+    },
+    {
+      "timeUs": 8500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 4100.0
+      }
+    },
+    {
+      "timeUs": 9000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 4360.0
+      }
+    },
+    {
+      "timeUs": 9500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 4620.0
+      }
+    },
+    {
+      "timeUs": 10000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 4880.0
+      }
+    },
+    {
+      "timeUs": 10500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 5140.0
+      }
+    },
+    {
+      "timeUs": 11000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 5400.0
+      }
+    },
+    {
+      "timeUs": 11500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 5660.0
+      }
+    },
+    {
+      "timeUs": 12000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 5920.0
+      }
+    },
+    {
+      "timeUs": 12500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 6180.0
+      }
+    },
+    {
+      "timeUs": 13000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 6440.0
+      }
+    },
+    {
+      "timeUs": 13500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 6700.0
+      }
+    },
+    {
+      "timeUs": 14000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 6960.0
+      }
+    },
+    {
+      "timeUs": 14500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 7220.0
+      }
+    },
+    {
+      "timeUs": 15000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 7480.0
+      }
+    },
+    {
+      "timeUs": 15500000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 7740.0
+      }
+    },
+    {
+      "timeUs": 16000000,
+      "type": "SETTINGS",
+      "settings": {
+        "cutoff": 8000.0
+      }
+    },
+    {
+      "timeUs": 17000000,
+      "type": "NOTE_OFF",
+      "freq": 440.0
+    }
+  ]
+}

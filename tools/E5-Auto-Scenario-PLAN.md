@@ -1,7 +1,7 @@
 # תכנון: הרצת תרחיש E5 אוטומטית (בסגנון Benchmark)
 
-**סטטוס:** מסמך תכנון בלבד — ללא מימוש  
-**ענף יעד מוצע (כשאושר):** `E5-Reference-JSON`  
+**סטטוס:** IMPLEMENTATION DONE on branch `E5-Reference-JSON` (scenario JSON → IMPORT → auto-replay → E5 observe → auto STOP → assert → EXPORT)  
+**ענף:** `E5-Reference-JSON`  
 **בסיס קיים:** E5 observational + Reference JSON (assertions) + Benchmark Reference Replay  
 
 ---
