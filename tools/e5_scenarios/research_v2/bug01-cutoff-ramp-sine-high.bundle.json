@@ -1,0 +1,403 @@
+{
+  "schema": "e5-bundle",
+  "schemaVersion": 1,
+  "scenario": {
+    "schema": "e5-scenario",
+    "schemaVersion": 1,
+    "scenarioId": "bug01-cutoff-ramp-sine-high",
+    "title": "BUG-01 Cutoff ramp — sine @ high (1760.0Hz)",
+    "description": "RESEARCH BUG-01 / RQ2: User reports Sine/Triangle cutoff feels ineffective especially on highs; lows feel more like level. Auto ramp cutoff 200->9000 while holding 1760.0Hz. Compare EXPORT PCM spectral/energy vs SETTINGS timeline. UI row sideways drift is UI-only — not in E5 audio evidence.",
+    "durationUs": 16950000,
+    "initialSettings": {
+      "waveform": 0,
+      "volume": 0.55,
+      "attack": 10.0,
+      "decay": 40.0,
+      "sustain": 0.85,
+      "release": 120.0,
+      "drive": 0.0,
+      "reverb": 0.0,
+      "cutoff": 200.0,
+      "resonance": 0.25,
+      "echo": 0.0,
+      "glide": 0.0,
+      "octave": 0,
+      "detune": false,
+      "sub": false,
+      "warm": false,
+      "vibe": false,
+      "rip": false,
+      "fuzz": false,
+      "phaz": false,
+      "piano": false,
+      "div2": false,
+      "div3": false,
+      "div4": false
+    },
+    "events": [
+      {
+        "timeUs": 300000,
+        "type": "NOTE_ON",
+        "freq": 1760.0
+      },
+      {
+        "timeUs": 800000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 200.0
+        }
+      },
+      {
+        "timeUs": 1150000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 420.0
+        }
+      },
+      {
+        "timeUs": 1500000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 640.0
+        }
+      },
+      {
+        "timeUs": 1850000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 860.0
+        }
+      },
+      {
+        "timeUs": 2200000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 1080.0
+        }
+      },
+      {
+        "timeUs": 2550000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 1300.0
+        }
+      },
+      {
+        "timeUs": 2900000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 1520.0
+        }
+      },
+      {
+        "timeUs": 3250000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 1740.0
+        }
+      },
+      {
+        "timeUs": 3600000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 1960.0
+        }
+      },
+      {
+        "timeUs": 3950000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 2180.0
+        }
+      },
+      {
+        "timeUs": 4300000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 2400.0
+        }
+      },
+      {
+        "timeUs": 4650000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 2620.0
+        }
+      },
+      {
+        "timeUs": 5000000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 2840.0
+        }
+      },
+      {
+        "timeUs": 5350000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 3060.0
+        }
+      },
+      {
+        "timeUs": 5700000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 3280.0
+        }
+      },
+      {
+        "timeUs": 6050000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 3500.0
+        }
+      },
+      {
+        "timeUs": 6400000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 3720.0
+        }
+      },
+      {
+        "timeUs": 6750000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 3940.0
+        }
+      },
+      {
+        "timeUs": 7100000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 4160.0
+        }
+      },
+      {
+        "timeUs": 7450000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 4380.0
+        }
+      },
+      {
+        "timeUs": 7800000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 4600.0
+        }
+      },
+      {
+        "timeUs": 8150000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 4820.0
+        }
+      },
+      {
+        "timeUs": 8500000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 5040.0
+        }
+      },
+      {
+        "timeUs": 8850000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 5260.0
+        }
+      },
+      {
+        "timeUs": 9200000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 5480.0
+        }
+      },
+      {
+        "timeUs": 9550000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 5700.0
+        }
+      },
+      {
+        "timeUs": 9900000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 5920.0
+        }
+      },
+      {
+        "timeUs": 10250000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 6140.0
+        }
+      },
+      {
+        "timeUs": 10600000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 6360.0
+        }
+      },
+      {
+        "timeUs": 10950000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 6580.0
+        }
+      },
+      {
+        "timeUs": 11300000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 6800.0
+        }
+      },
+      {
+        "timeUs": 11650000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 7020.0
+        }
+      },
+      {
+        "timeUs": 12000000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 7240.0
+        }
+      },
+      {
+        "timeUs": 12350000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 7460.0
+        }
+      },
+      {
+        "timeUs": 12700000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 7680.0
+        }
+      },
+      {
+        "timeUs": 13050000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 7900.0
+        }
+      },
+      {
+        "timeUs": 13400000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 8120.0
+        }
+      },
+      {
+        "timeUs": 13750000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 8340.0
+        }
+      },
+      {
+        "timeUs": 14100000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 8560.0
+        }
+      },
+      {
+        "timeUs": 14450000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 8780.0
+        }
+      },
+      {
+        "timeUs": 14800000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 9000.0
+        }
+      },
+      {
+        "timeUs": 16150000,
+        "type": "NOTE_OFF",
+        "freq": 1760.0
+      }
+    ]
+  },
+  "reference": {
+    "schema": "e5-test-reference",
+    "schemaVersion": 1,
+    "testId": "bug01-cutoff-ramp-sine-high-assert",
+    "title": "BUG-01 Cutoff ramp — sine @ high (1760.0Hz) — assertions",
+    "description": "Expect 1 noteOn. Compare EXPORT PCM energy vs cutoff SETTINGS timeline; BEFORE/AFTER on control if retrigger. RESEARCH BUG-01 / RQ2: User reports Sine/Triangle cutoff feels ineffective especially on highs; lows feel more like level. Auto ramp cutoff 200->9000 while holding 1760.0Hz. Compare EXPORT PCM spectral/energy vs SETTINGS timeline. UI row sideways drift is UI-only — not in E5 audio evidence.",
+    "session": {
+      "durationMs": 16950
+    },
+    "assertions": [
+      {
+        "id": "session-off",
+        "path": "e5.sessionActive",
+        "operator": "equals",
+        "expected": false
+      },
+      {
+        "id": "exportable",
+        "path": "e5.hasExportableData",
+        "operator": "equals",
+        "expected": true
+      },
+      {
+        "id": "controls-min",
+        "path": "e5.controlRecordCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 1
+      },
+      {
+        "id": "obs-min",
+        "path": "e5.audioObservationCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 1
+      },
+      {
+        "id": "windows-nonneg",
+        "path": "e5.pendingWindowCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 0
+      },
+      {
+        "id": "frames-advanced",
+        "path": "e5.absoluteRenderFrame",
+        "operator": "greaterThan",
+        "expected": 0
+      },
+      {
+        "id": "no-c-ovf",
+        "path": "e5.controlOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      },
+      {
+        "id": "no-w-ovf",
+        "path": "e5.windowOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      },
+      {
+        "id": "no-a-ovf",
+        "path": "e5.audioObservationOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      }
+    ]
+  }
+}

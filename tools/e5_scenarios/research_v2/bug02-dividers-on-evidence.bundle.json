@@ -1,0 +1,146 @@
+{
+  "schema": "e5-bundle",
+  "schemaVersion": 1,
+  "scenario": {
+    "schema": "e5-scenario",
+    "schemaVersion": 1,
+    "scenarioId": "bug02-dividers-on-evidence",
+    "title": "BUG-02 Dividers ON — snapshot evidence (not preset IO)",
+    "description": "BUG-02 SCOPE: Preset save/load is NOT automated by E5. This scenario forces div2+div3+div4 ON and plays 4 notes so EXPORT control BEFORE/AFTER snapshots include divider-related fields for research. Manual follow-up: save preset, reload, compare UI div toggles — outside this auto run.",
+    "durationUs": 9500000,
+    "initialSettings": {
+      "waveform": 3,
+      "volume": 0.55,
+      "attack": 10.0,
+      "decay": 40.0,
+      "sustain": 0.85,
+      "release": 120.0,
+      "drive": 0.0,
+      "reverb": 0.0,
+      "cutoff": 4000.0,
+      "resonance": 0.25,
+      "echo": 0.0,
+      "glide": 0.0,
+      "octave": 0,
+      "detune": false,
+      "sub": false,
+      "warm": false,
+      "vibe": false,
+      "rip": false,
+      "fuzz": false,
+      "phaz": false,
+      "piano": false,
+      "div2": true,
+      "div3": true,
+      "div4": true
+    },
+    "events": [
+      {
+        "timeUs": 400000,
+        "type": "NOTE_ON",
+        "freq": 261.63
+      },
+      {
+        "timeUs": 1600000,
+        "type": "NOTE_ON",
+        "freq": 293.66
+      },
+      {
+        "timeUs": 2800000,
+        "type": "NOTE_ON",
+        "freq": 329.63
+      },
+      {
+        "timeUs": 4000000,
+        "type": "NOTE_ON",
+        "freq": 349.23
+      },
+      {
+        "timeUs": 8200000,
+        "type": "NOTE_OFF",
+        "freq": 261.63
+      },
+      {
+        "timeUs": 8400000,
+        "type": "NOTE_OFF",
+        "freq": 293.66
+      },
+      {
+        "timeUs": 8600000,
+        "type": "NOTE_OFF",
+        "freq": 329.63
+      },
+      {
+        "timeUs": 8800000,
+        "type": "NOTE_OFF",
+        "freq": 349.23
+      }
+    ]
+  },
+  "reference": {
+    "schema": "e5-test-reference",
+    "schemaVersion": 1,
+    "testId": "bug02-dividers-on-assert",
+    "title": "BUG-02 dividers evidence assertions",
+    "description": "BUG-02 SCOPE: Preset save/load is NOT automated by E5. This scenario forces div2+div3+div4 ON and plays 4 notes so EXPORT control BEFORE/AFTER snapshots include divider-related fields for research. Manual follow-up: save preset, reload, compare UI div toggles — outside this auto run.",
+    "session": {
+      "durationMs": 9500
+    },
+    "assertions": [
+      {
+        "id": "session-off",
+        "path": "e5.sessionActive",
+        "operator": "equals",
+        "expected": false
+      },
+      {
+        "id": "exportable",
+        "path": "e5.hasExportableData",
+        "operator": "equals",
+        "expected": true
+      },
+      {
+        "id": "controls-min",
+        "path": "e5.controlRecordCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 4
+      },
+      {
+        "id": "obs-min",
+        "path": "e5.audioObservationCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 4
+      },
+      {
+        "id": "windows-nonneg",
+        "path": "e5.pendingWindowCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 0
+      },
+      {
+        "id": "frames-advanced",
+        "path": "e5.absoluteRenderFrame",
+        "operator": "greaterThan",
+        "expected": 0
+      },
+      {
+        "id": "no-c-ovf",
+        "path": "e5.controlOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      },
+      {
+        "id": "no-w-ovf",
+        "path": "e5.windowOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      },
+      {
+        "id": "no-a-ovf",
+        "path": "e5.audioObservationOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      }
+    ]
+  }
+}

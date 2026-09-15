@@ -1,0 +1,194 @@
+{
+  "package": "e5-research-refs-v2",
+  "format": "e5-bundle (scenario + reference)",
+  "branch": "E5-Reference-JSON",
+  "waveformIndex": {
+    "sine": 0,
+    "square": 1,
+    "triangle": 2,
+    "saw": 3
+  },
+  "usage": [
+    "Build APK from E5-Reference-JSON",
+    "IMPORT a .bundle.json",
+    "START — auto replay, no manual playing",
+    "Wait for auto STOP / RESULT",
+    "EXPORT diagnostics for research offline analysis"
+  ],
+  "important": [
+    "PASS/FAIL = evidence health (counts/overflows), NOT acoustic bug verdict.",
+    "Root-cause analysis = EXPORT JSON (controlRecords BEFORE/AFTER + pendingWindows PCM).",
+    "BUG-02 bundle does not save/load presets; only captures div2/3/4 ON snapshots.",
+    "UI sideways knob row drift is out of E5 audio scope."
+  ],
+  "files": [
+    {
+      "file": "bug01-cutoff-ramp-sine-low.bundle.json",
+      "scenarioId": "bug01-cutoff-ramp-sine-low",
+      "title": "BUG-01 Cutoff ramp — sine @ low (110.0Hz)",
+      "durationUs": 16950000,
+      "noteOns": 1,
+      "settingsEvents": 41
+    },
+    {
+      "file": "bug01-cutoff-ramp-sine-high.bundle.json",
+      "scenarioId": "bug01-cutoff-ramp-sine-high",
+      "title": "BUG-01 Cutoff ramp — sine @ high (1760.0Hz)",
+      "durationUs": 16950000,
+      "noteOns": 1,
+      "settingsEvents": 41
+    },
+    {
+      "file": "bug01-cutoff-ramp-triangle-low.bundle.json",
+      "scenarioId": "bug01-cutoff-ramp-triangle-low",
+      "title": "BUG-01 Cutoff ramp — triangle @ low (110.0Hz)",
+      "durationUs": 16950000,
+      "noteOns": 1,
+      "settingsEvents": 41
+    },
+    {
+      "file": "bug01-cutoff-ramp-triangle-high.bundle.json",
+      "scenarioId": "bug01-cutoff-ramp-triangle-high",
+      "title": "BUG-01 Cutoff ramp — triangle @ high (1760.0Hz)",
+      "durationUs": 16950000,
+      "noteOns": 1,
+      "settingsEvents": 41
+    },
+    {
+      "file": "bug01b-cutoff-jitter-saw.bundle.json",
+      "scenarioId": "bug01b-cutoff-jitter-saw",
+      "title": "BUG-01b Cutoff jitter pops — saw",
+      "durationUs": 4620000,
+      "noteOns": 1,
+      "settingsEvents": 16
+    },
+    {
+      "file": "bug01b-cutoff-jitter-square.bundle.json",
+      "scenarioId": "bug01b-cutoff-jitter-square",
+      "title": "BUG-01b Cutoff jitter pops — square",
+      "durationUs": 4620000,
+      "noteOns": 1,
+      "settingsEvents": 16
+    },
+    {
+      "file": "bug02-dividers-on-evidence.bundle.json",
+      "scenarioId": "bug02-dividers-on-evidence",
+      "title": "BUG-02 Dividers ON — snapshot evidence (not preset IO)",
+      "durationUs": 9500000,
+      "noteOns": 4,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug03-polyphony-sine-1to8.bundle.json",
+      "scenarioId": "bug03-polyphony-sine-1to8",
+      "title": "BUG-03 Clean polyphony — sine 1..8",
+      "durationUs": 21300000,
+      "noteOns": 8,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug03-polyphony-square-1to8.bundle.json",
+      "scenarioId": "bug03-polyphony-square-1to8",
+      "title": "BUG-03 Clean polyphony — square 1..8",
+      "durationUs": 21300000,
+      "noteOns": 8,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug03-polyphony-triangle-1to8.bundle.json",
+      "scenarioId": "bug03-polyphony-triangle-1to8",
+      "title": "BUG-03 Clean polyphony — triangle 1..8",
+      "durationUs": 21300000,
+      "noteOns": 8,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug03-polyphony-saw-1to8.bundle.json",
+      "scenarioId": "bug03-polyphony-saw-1to8",
+      "title": "BUG-03 Clean polyphony — saw 1..8",
+      "durationUs": 21300000,
+      "noteOns": 8,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug04-detune-drive100-sine-1to8.bundle.json",
+      "scenarioId": "bug04-detune-drive100-sine-1to8",
+      "title": "BUG-04 Detune+Drive100% — sine 1..8",
+      "durationUs": 21300000,
+      "noteOns": 8,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug04-detune-drive100-square-1to6.bundle.json",
+      "scenarioId": "bug04-detune-drive100-square-1to6",
+      "title": "BUG-04 Detune+Drive100% — square 1..6",
+      "durationUs": 17200000,
+      "noteOns": 6,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug04-detune-drive100-triangle-1to7.bundle.json",
+      "scenarioId": "bug04-detune-drive100-triangle-1to7",
+      "title": "BUG-04 Detune+Drive100% — triangle 1..7",
+      "durationUs": 19250000,
+      "noteOns": 7,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug04-detune-drive100-saw-1to7.bundle.json",
+      "scenarioId": "bug04-detune-drive100-saw-1to7",
+      "title": "BUG-04 Detune+Drive100% — saw 1..7",
+      "durationUs": 19250000,
+      "noteOns": 7,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug05-fullstack-sine-1to7.bundle.json",
+      "scenarioId": "bug05-fullstack-sine-1to7",
+      "title": "BUG-05 Detune+Drive100+Sub+Warm — sine 1..7",
+      "durationUs": 19250000,
+      "noteOns": 7,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug05-fullstack-square-1to5.bundle.json",
+      "scenarioId": "bug05-fullstack-square-1to5",
+      "title": "BUG-05 Detune+Drive100+Sub+Warm — square 1..5",
+      "durationUs": 15150000,
+      "noteOns": 5,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug05-fullstack-triangle-1to6.bundle.json",
+      "scenarioId": "bug05-fullstack-triangle-1to6",
+      "title": "BUG-05 Detune+Drive100+Sub+Warm — triangle 1..6",
+      "durationUs": 17200000,
+      "noteOns": 6,
+      "settingsEvents": 0
+    },
+    {
+      "file": "bug05-fullstack-saw-1to6.bundle.json",
+      "scenarioId": "bug05-fullstack-saw-1to6",
+      "title": "BUG-05 Detune+Drive100+Sub+Warm — saw 1..6",
+      "durationUs": 17200000,
+      "noteOns": 6,
+      "settingsEvents": 0
+    },
+    {
+      "file": "rq1-voice-ceiling-saw-clean.bundle.json",
+      "scenarioId": "rq1-voice-ceiling-saw-clean",
+      "title": "RQ1 Voice ceiling — Saw clean climb",
+      "durationUs": 21300000,
+      "noteOns": 8,
+      "settingsEvents": 0
+    },
+    {
+      "file": "rq2-cutoff-move-saw.bundle.json",
+      "scenarioId": "rq2-cutoff-move-saw",
+      "title": "RQ2 Cutoff move — Saw jitter",
+      "durationUs": 4620000,
+      "noteOns": 1,
+      "settingsEvents": 16
+    }
+  ]
+}
