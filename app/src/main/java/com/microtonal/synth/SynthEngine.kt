@@ -1217,11 +1217,17 @@ class SynthEngine(private val context: Context) {
                     reverbMix = reverbMix
                 )
                 for (i in 0 until bufferSize) {
-                    // E5 R1.1 §10: N = absoluteRenderFrame; observe BEFORE render N.
-                    // Discovery reserves center N; ring supplies only N-32..N-1.
-                    // Center is NOT captured here (discovery ≠ center capture).
-                    val e5FrameN = e5.absoluteRenderFrame
-                    e5.observeEventsAtFrameStart(noteSlots, maxVoices)
+                    // E5 OFF = truly OFF: one volatile enable check; no observation,
+                    // ring writes, window updates, or frame++ when inactive.
+                    val e5SessionOn = e5.isSessionActive()
+                    var e5FrameN = 0L
+                    if (e5SessionOn) {
+                        // E5 R1.1 §10: N = absoluteRenderFrame; observe BEFORE render N.
+                        // Discovery reserves center N; ring supplies only N-32..N-1.
+                        // Center is NOT captured here (discovery ≠ center capture).
+                        e5FrameN = e5.absoluteRenderFrame
+                        e5.observeEventsAtFrameStart(noteSlots, maxVoices)
+                    }
 
                     // Diagnostic timing is sampled at 1/128 audio samples.
                     // Keeping the gate here prevents the profiler itself from
@@ -1446,8 +1452,10 @@ class SynthEngine(private val context: Context) {
                     // E5 R1.1 §10/§17/§23: primary artifact = final PCM16 pair
                     // just assigned to output ShortArray. Write ring + pending
                     // windows (including center N for newly opened windows).
-                    e5.onFinalPcm16Produced(e5FrameN, shortL, shortR)
-                    e5.incrementRenderFrame()
+                    if (e5SessionOn) {
+                        e5.onFinalPcm16Produced(e5FrameN, shortL, shortR)
+                        e5.incrementRenderFrame()
+                    }
 
                     if ((i and 7) == 0) {
                         liveVisualizerBuffer[visRing] = frame.liveSample
@@ -1552,10 +1560,20 @@ class SynthEngine(private val context: Context) {
     fun hasE5ExportableData(): Boolean = e5.hasExportableData()
 
     /**
-     * E5 offline export. Never classifies BUG. Never runs on AudioThread.
-     * Safe while session is still active (exports live buffers without stopping).
+     * E5 offline export to a File. Prefer exportE5Diagnostics(OutputStream) with
+     * SAF CreateDocument so the user chooses folder + filename.
+     * Never classifies BUG. Never runs on AudioThread.
      */
     fun exportE5Diagnostics(file: java.io.File): Boolean = e5.exportToFile(file)
+
+    /**
+     * E5 offline export to an OutputStream (SAF Uri via ContentResolver).
+     * Never classifies BUG. Never runs on AudioThread.
+     */
+    fun exportE5Diagnostics(output: java.io.OutputStream): Boolean =
+        e5.exportToOutputStream(output)
+
+    fun buildE5ExportJson(): String = e5.buildExportJsonString()
 
     fun refreshHeadphoneState() {
         try {

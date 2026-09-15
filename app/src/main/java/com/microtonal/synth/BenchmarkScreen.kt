@@ -40,8 +40,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.core.content.FileProvider
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -149,6 +147,59 @@ fun BenchmarkScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // E5 JSON: Android System Save dialog (SAF CreateDocument). User picks folder+name.
+    val exportE5Launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri == null) {
+            e5ExportBusy = false
+            e5Msg = "Export cancelled"
+            return@rememberLauncherForActivityResult
+        }
+        e5ExportBusy = true
+        e5Msg = "Exporting…"
+        scope.launch(Dispatchers.IO) {
+            val result = try {
+                // Preferred lifecycle: STOP then EXPORT (finalize incomplete first)
+                if (engine.isE5SessionActive()) {
+                    engine.stopE5Session()
+                }
+                val ok = context.contentResolver.openOutputStream(uri)?.use { os ->
+                    engine.exportE5Diagnostics(os)
+                } ?: false
+                val name = uri.lastPathSegment ?: uri.toString()
+                Triple(ok, name, null as String?)
+            } catch (t: Throwable) {
+                Triple(false, t.message ?: "export failed", null as String?)
+            }
+            withContext(Dispatchers.Main) {
+                val (ok, pathOrErr, _) = result
+                e5Running = engine.isE5SessionActive()
+                e5HasData = engine.hasE5ExportableData()
+                e5Status = if (e5Running) "E5 RUNNING" else "E5 IDLE"
+                if (ok) {
+                    e5LastExportPath = pathOrErr
+                    e5Msg = "Saved via system picker: $pathOrErr"
+                    // Optional share of the user-chosen Uri (not a forced /files path)
+                    try {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/json"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            putExtra(Intent.EXTRA_SUBJECT, pathOrErr)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(send, "Share E5 JSON"))
+                    } catch (t: Throwable) {
+                        e5Msg = "Saved via system picker: $pathOrErr (share unavailable: ${t.message})"
+                    }
+                } else {
+                    e5Msg = "EXPORT failed: $pathOrErr"
+                }
+                e5ExportBusy = false
             }
         }
     }
@@ -443,49 +494,19 @@ fun BenchmarkScreen(
             OutlinedButton(
                 onClick = {
                     if (e5ExportBusy) return@OutlinedButton
-                    e5ExportBusy = true
-                    e5Msg = "Exporting…"
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            try {
-                                val base = context.getExternalFilesDir(null) ?: context.filesDir
-                                val dir = File(base, "e5")
-                                if (!dir.exists()) dir.mkdirs()
-                                val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                                val file = File(dir, "e5_diagnostics_$stamp.json")
-                                val ok = engine.exportE5Diagnostics(file)
-                                Triple(ok, file.absolutePath, file)
-                            } catch (t: Throwable) {
-                                Triple(false, t.message ?: "export failed", null as File?)
-                            }
-                        }
-                        val (ok, pathOrErr, file) = result
-                        if (ok && file != null) {
-                            e5LastExportPath = pathOrErr
-                            e5HasData = engine.hasE5ExportableData()
-                            e5Msg = "Saved: $pathOrErr"
-                            // Offer Share via FileProvider (added for E5)
-                            try {
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    context.packageName + ".fileprovider",
-                                    file
-                                )
-                                val send = Intent(Intent.ACTION_SEND).apply {
-                                    type = "application/json"
-                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                    putExtra(Intent.EXTRA_SUBJECT, file.name)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(Intent.createChooser(send, "Share E5 JSON"))
-                            } catch (t: Throwable) {
-                                e5Msg = "Saved: $pathOrErr (share unavailable: ${t.message})"
-                            }
-                        } else {
-                            e5Msg = "EXPORT failed: $pathOrErr"
-                        }
-                        e5ExportBusy = false
+                    // Preferred lifecycle: STOP then EXPORT (finalize incomplete first)
+                    if (engine.isE5SessionActive()) {
+                        engine.stopE5Session()
+                        e5Running = false
+                        e5Status = "E5 IDLE"
+                        e5Msg = "E5 stopped for export — choose save location"
+                    } else {
+                        e5Msg = "Choose save location…"
                     }
+                    e5HasData = engine.hasE5ExportableData()
+                    e5ExportBusy = true
+                    val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                    exportE5Launcher.launch("e5_diagnostics_$stamp.json")
                 },
                 enabled = !e5ExportBusy && (e5Running || e5HasData),
                 modifier = Modifier.weight(1f).height(32.dp),

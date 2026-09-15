@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.OutputStream
 
 /**
  * E5 R1.1 diagnostic instrumentation — observational only.
@@ -45,6 +46,29 @@ object E5Constants {
     const val STATE_FUTURE_CAPTURE = 3
     const val STATE_COMPLETE = 4
     const val STATE_INCOMPLETE = 5
+}
+
+
+/**
+ * JSONObject rejects NaN/±Infinity. Put finite numbers as-is; non-finite become
+ * JSON null with companion metadata (never substitute 0).
+ */
+fun putJsonNumber(obj: JSONObject, key: String, value: Double, nonFinite: JSONObject) {
+    if (value.isFinite()) {
+        obj.put(key, value)
+    } else {
+        obj.put(key, JSONObject.NULL)
+        val label = when {
+            value.isNaN() -> "NaN"
+            value > 0.0 -> "Infinity"
+            else -> "-Infinity"
+        }
+        nonFinite.put(key, label)
+    }
+}
+
+fun putJsonNumber(obj: JSONObject, key: String, value: Float, nonFinite: JSONObject) {
+    putJsonNumber(obj, key, value.toDouble(), nonFinite)
 }
 
 /**
@@ -96,50 +120,56 @@ data class E5NoteSlotSnapshot(
     val zdfH: Double,
     val zdfCoeffHold: Int
 ) {
-    fun toJson(): JSONObject = JSONObject().apply {
-        put("active", active)
-        put("isLooperNote", isLooperNote)
-        put("waveform", waveform)
-        put("baseFreq", baseFreq.toDouble())
-        put("targetFreq", targetFreq.toDouble())
-        put("currentFreq", currentFreq.toDouble())
-        put("envelopeVolume", envelopeVolume)
-        put("isReleasing", isReleasing)
-        put("envState", envState)
-        put("hammerEnv", hammerEnv)
-        put("attackCoeff", attackCoeff)
-        put("decayCoeff", decayCoeff)
-        put("releaseCoeff", releaseCoeff)
-        put("frozenAttack", frozenAttack.toDouble())
-        put("frozenDecay", frozenDecay.toDouble())
-        put("frozenSustain", frozenSustain.toDouble())
-        put("frozenRelease", frozenRelease.toDouble())
-        put("phase", phase)
-        put("phase2", phase2)
-        put("phaseSub", phaseSub)
-        put("phaseP2", phaseP2)
-        put("phaseP3", phaseP3)
-        put("phaseP4", phaseP4)
-        put("phase2P2", phase2P2)
-        put("phase2P3", phase2P3)
-        put("phase2P4", phase2P4)
-        put("prevFund", prevFund)
-        put("div2", div2)
-        put("div3", div3)
-        put("div4", div4)
-        put("zcCount", zcCount)
-        put("frozenCutoff", frozenCutoff.toDouble())
-        put("frozenRes", frozenRes.toDouble())
-        put("zdfState1", zdfState1)
-        put("zdfState2", zdfState2)
-        put("smoothedCutoff", smoothedCutoff.toDouble())
-        put("smoothedRes", smoothedRes.toDouble())
-        put("zdfCachedCutoff", zdfCachedCutoff.toDouble())
-        put("zdfCachedRes", zdfCachedRes.toDouble())
-        put("zdfG", zdfG)
-        put("zdfK", zdfK)
-        put("zdfH", zdfH)
-        put("zdfCoeffHold", zdfCoeffHold)
+    fun toJson(): JSONObject {
+        val nonFinite = JSONObject()
+        val o = JSONObject()
+        o.put("active", active)
+        o.put("isLooperNote", isLooperNote)
+        o.put("waveform", waveform)
+        putJsonNumber(o, "baseFreq", baseFreq, nonFinite)
+        putJsonNumber(o, "targetFreq", targetFreq, nonFinite)
+        putJsonNumber(o, "currentFreq", currentFreq, nonFinite)
+        putJsonNumber(o, "envelopeVolume", envelopeVolume, nonFinite)
+        o.put("isReleasing", isReleasing)
+        o.put("envState", envState)
+        putJsonNumber(o, "hammerEnv", hammerEnv, nonFinite)
+        putJsonNumber(o, "attackCoeff", attackCoeff, nonFinite)
+        putJsonNumber(o, "decayCoeff", decayCoeff, nonFinite)
+        putJsonNumber(o, "releaseCoeff", releaseCoeff, nonFinite)
+        putJsonNumber(o, "frozenAttack", frozenAttack, nonFinite)
+        putJsonNumber(o, "frozenDecay", frozenDecay, nonFinite)
+        putJsonNumber(o, "frozenSustain", frozenSustain, nonFinite)
+        putJsonNumber(o, "frozenRelease", frozenRelease, nonFinite)
+        putJsonNumber(o, "phase", phase, nonFinite)
+        putJsonNumber(o, "phase2", phase2, nonFinite)
+        putJsonNumber(o, "phaseSub", phaseSub, nonFinite)
+        putJsonNumber(o, "phaseP2", phaseP2, nonFinite)
+        putJsonNumber(o, "phaseP3", phaseP3, nonFinite)
+        putJsonNumber(o, "phaseP4", phaseP4, nonFinite)
+        putJsonNumber(o, "phase2P2", phase2P2, nonFinite)
+        putJsonNumber(o, "phase2P3", phase2P3, nonFinite)
+        putJsonNumber(o, "phase2P4", phase2P4, nonFinite)
+        putJsonNumber(o, "prevFund", prevFund, nonFinite)
+        putJsonNumber(o, "div2", div2, nonFinite)
+        putJsonNumber(o, "div3", div3, nonFinite)
+        putJsonNumber(o, "div4", div4, nonFinite)
+        o.put("zcCount", zcCount)
+        putJsonNumber(o, "frozenCutoff", frozenCutoff, nonFinite)
+        putJsonNumber(o, "frozenRes", frozenRes, nonFinite)
+        putJsonNumber(o, "zdfState1", zdfState1, nonFinite)
+        putJsonNumber(o, "zdfState2", zdfState2, nonFinite)
+        putJsonNumber(o, "smoothedCutoff", smoothedCutoff, nonFinite)
+        putJsonNumber(o, "smoothedRes", smoothedRes, nonFinite)
+        putJsonNumber(o, "zdfCachedCutoff", zdfCachedCutoff, nonFinite)
+        putJsonNumber(o, "zdfCachedRes", zdfCachedRes, nonFinite)
+        putJsonNumber(o, "zdfG", zdfG, nonFinite)
+        putJsonNumber(o, "zdfK", zdfK, nonFinite)
+        putJsonNumber(o, "zdfH", zdfH, nonFinite)
+        o.put("zdfCoeffHold", zdfCoeffHold)
+        if (nonFinite.length() > 0) {
+            o.put("nonFiniteValues", nonFinite)
+        }
+        return o
     }
 }
 
@@ -282,7 +312,9 @@ class E5Diagnostics(private val maxVoices: Int) {
     private val evRight = ShortArray(E5Constants.MAX_E5_PENDING_WINDOWS * E5Constants.E5_WINDOW_FRAMES)
     private val evCaptured = BooleanArray(E5Constants.MAX_E5_PENDING_WINDOWS * E5Constants.E5_WINDOW_FRAMES)
     private var winAllocCursor = 0
-    private var winActiveCount = 0
+    /** Active (in-flight) pending-window indices — iterate this, never full capacity, on RT. */
+    private val activeWindowIdx = IntArray(E5Constants.MAX_E5_PENDING_WINDOWS)
+    private var activeWindowCount = 0
 
     // --- Audio observations (join metadata) ---
     private val obsEventId = LongArray(E5Constants.MAX_E5_AUDIO_OBSERVATIONS)
@@ -311,7 +343,7 @@ class E5Diagnostics(private val maxVoices: Int) {
             ringRight[i] = 0
         }
         winAllocCursor = 0
-        winActiveCount = 0
+        activeWindowCount = 0
         for (w in 0 until E5Constants.MAX_E5_PENDING_WINDOWS) {
             winState[w] = E5Constants.STATE_FREE
             winEventId[w] = 0L
@@ -460,7 +492,9 @@ class E5Diagnostics(private val maxVoices: Int) {
         winCapturedCount[w] = captured
         // State: PAST_CAPTURED — center reserved, not captured
         winState[w] = E5Constants.STATE_PAST_CAPTURED
-        winActiveCount++
+        // Push onto active pending-window index list (capacity ≠ per-sample work)
+        activeWindowIdx[activeWindowCount] = w
+        activeWindowCount++
     }
 
     private fun allocWindow(): Int {
@@ -520,21 +554,24 @@ class E5Diagnostics(private val maxVoices: Int) {
         if (ringCount < E5Constants.E5_PAST_RING_FRAMES) ringCount++
         ringLastFrame = f
 
-        // 2–3. Pending windows
-        var w = 0
-        while (w < E5Constants.MAX_E5_PENDING_WINDOWS) {
+        // 2–3. Pending windows — iterate ONLY active indices (typically tiny)
+        var ai = 0
+        while (ai < activeWindowCount) {
+            val w = activeWindowIdx[ai]
             val state = winState[w]
+            // Defensive: skip any non-in-flight entry that slipped in
             if (state == E5Constants.STATE_FREE ||
                 state == E5Constants.STATE_COMPLETE ||
                 state == E5Constants.STATE_INCOMPLETE
             ) {
-                w++
+                activeWindowCount--
+                activeWindowIdx[ai] = activeWindowIdx[activeWindowCount]
                 continue
             }
             val n = winAppliedFrame[w]
             val index = f - n + E5Constants.E5_CENTER_INDEX // F - N + 32
             if (index < 0 || index > 64) {
-                w++
+                ai++
                 continue
             }
             val ei = w * E5Constants.E5_WINDOW_FRAMES + index.toInt()
@@ -565,8 +602,12 @@ class E5Diagnostics(private val maxVoices: Int) {
                     evCaptured[w * E5Constants.E5_WINDOW_FRAMES + 64] &&
                     evFrameIndex[w * E5Constants.E5_WINDOW_FRAMES + 64] == n + E5Constants.E5_FUTURE_FRAMES
                 winState[w] = if (allOk) E5Constants.STATE_COMPLETE else E5Constants.STATE_INCOMPLETE
+                // Remove from active list (swap-remove); do not advance ai
+                activeWindowCount--
+                activeWindowIdx[ai] = activeWindowIdx[activeWindowCount]
+                continue
             }
-            w++
+            ai++
         }
     }
 
@@ -581,8 +622,10 @@ class E5Diagnostics(private val maxVoices: Int) {
      * Call outside RT after AudioThread stopped. Does not serialize.
      */
     fun markIncompleteOnShutdown() {
-        var w = 0
-        while (w < E5Constants.MAX_E5_PENDING_WINDOWS) {
+        // Off-RT: mark every in-flight window INCOMPLETE and clear active list.
+        var ai = 0
+        while (ai < activeWindowCount) {
+            val w = activeWindowIdx[ai]
             val state = winState[w]
             if (state == E5Constants.STATE_PAST_CAPTURED ||
                 state == E5Constants.STATE_CENTER_CAPTURED ||
@@ -590,8 +633,9 @@ class E5Diagnostics(private val maxVoices: Int) {
             ) {
                 winState[w] = E5Constants.STATE_INCOMPLETE
             }
-            w++
+            ai++
         }
+        activeWindowCount = 0
     }
 
     // ========== Offline export / verification (NOT on AudioThread) ==========
@@ -717,10 +761,10 @@ class E5Diagnostics(private val maxVoices: Int) {
     }
 
     /**
-     * Export all E5 evidence to JSON file. MUST be called outside AudioThread / after stop.
-     * Never classifies BUG.
+     * Build export JSONObject. MUST be called outside AudioThread.
+     * Never classifies BUG. Non-finite floats become null + nonFiniteValues metadata.
      */
-    fun exportToFile(file: File): Boolean {
+    fun buildExportJson(): JSONObject {
         // STOP owns incomplete marking. While session is still active, export
         // current buffers as-is (in-flight windows keep their live states).
         if (!sessionActive) {
@@ -729,6 +773,7 @@ class E5Diagnostics(private val maxVoices: Int) {
         val root = JSONObject()
         root.put("e5Version", "R1.1")
         root.put("absoluteRenderFrame", absoluteRenderFrame)
+        root.put("sessionActive", sessionActive)
         root.put("e5ControlOverflowCount", e5ControlOverflowCount.get())
         root.put("e5WindowOverflowCount", e5WindowOverflowCount.get())
         root.put("e5AudioObservationOverflowCount", e5AudioObservationOverflowCount.get())
@@ -796,9 +841,136 @@ class E5Diagnostics(private val maxVoices: Int) {
         for (line in verifyInvariants()) invariants.put(line)
         root.put("invariantChecks", invariants)
 
-        file.parentFile?.mkdirs()
-        file.writeText(root.toString(2))
-        return true
+        return root
+    }
+
+    fun buildExportJsonString(indent: Int = 2): String = buildExportJson().toString(indent)
+
+    /**
+     * Write export JSON to an OutputStream (e.g. SAF ContentResolver Uri).
+     * MUST be called outside AudioThread. Returns false on IO failure.
+     */
+    fun exportToOutputStream(output: OutputStream): Boolean {
+        return try {
+            val bytes = buildExportJsonString().toByteArray(Charsets.UTF_8)
+            output.write(bytes)
+            output.flush()
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Export all E5 evidence to JSON file. MUST be called outside AudioThread / after stop.
+     * Prefer SAF CreateDocument + exportToOutputStream for user-chosen location.
+     */
+    fun exportToFile(file: File): Boolean {
+        return try {
+            file.parentFile?.mkdirs()
+            file.writeText(buildExportJsonString())
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Offline unit-style check: snapshot with NaN serializes to null (not 0)
+     * and remains parseable JSON. Returns list of PASS/FAIL lines.
+     */
+    fun selfTestNanExport(): List<String> {
+        val results = mutableListOf<String>()
+        val snap = E5NoteSlotSnapshot(
+            active = true,
+            isLooperNote = false,
+            waveform = 0,
+            baseFreq = 440f,
+            targetFreq = 440f,
+            currentFreq = 440f,
+            envelopeVolume = 1.0,
+            isReleasing = false,
+            envState = 0,
+            hammerEnv = 0.0,
+            attackCoeff = 0.0,
+            decayCoeff = 0.0,
+            releaseCoeff = 0.0,
+            frozenAttack = 0f,
+            frozenDecay = 0f,
+            frozenSustain = 0f,
+            frozenRelease = 0f,
+            phase = 0.0,
+            phase2 = 0.0,
+            phaseSub = 0.0,
+            phaseP2 = 0.0,
+            phaseP3 = 0.0,
+            phaseP4 = 0.0,
+            phase2P2 = 0.0,
+            phase2P3 = 0.0,
+            phase2P4 = 0.0,
+            prevFund = 0.0,
+            div2 = 0.0,
+            div3 = 0.0,
+            div4 = 0.0,
+            zcCount = 0,
+            frozenCutoff = 1000f,
+            frozenRes = 0.5f,
+            zdfState1 = 0.0,
+            zdfState2 = 0.0,
+            smoothedCutoff = 1000f,
+            smoothedRes = 0.5f,
+            zdfCachedCutoff = Float.NaN,
+            zdfCachedRes = Float.POSITIVE_INFINITY,
+            zdfG = Double.NEGATIVE_INFINITY,
+            zdfK = 0.0,
+            zdfH = 0.0,
+            zdfCoeffHold = 0
+        )
+        val json = snap.toJson()
+        val text = json.toString()
+        results.add(
+            if (!text.contains("NaN") && !text.contains("Infinity"))
+                "PASS: no raw NaN/Infinity tokens in JSON text"
+            else "FAIL: raw non-finite token leaked into JSON"
+        )
+        val cutoff = json.opt("zdfCachedCutoff")
+        results.add(
+            if (cutoff == JSONObject.NULL) "PASS: zdfCachedCutoff is JSON null (not 0)"
+            else "FAIL: zdfCachedCutoff=$cutoff (expected null)"
+        )
+        val res = json.opt("zdfCachedRes")
+        results.add(
+            if (res == JSONObject.NULL) "PASS: zdfCachedRes is JSON null"
+            else "FAIL: zdfCachedRes=$res"
+        )
+        val g = json.opt("zdfG")
+        results.add(
+            if (g == JSONObject.NULL) "PASS: zdfG is JSON null"
+            else "FAIL: zdfG=$g"
+        )
+        // Must not have substituted 0 for those fields
+        results.add(
+            if (cutoff != 0 && cutoff != 0.0 && res != 0 && res != 0.0 && g != 0 && g != 0.0)
+                "PASS: non-finite fields were not replaced with 0"
+            else "FAIL: non-finite field became 0"
+        )
+        val meta = json.optJSONObject("nonFiniteValues")
+        results.add(
+            if (meta != null &&
+                meta.optString("zdfCachedCutoff") == "NaN" &&
+                meta.optString("zdfCachedRes") == "Infinity" &&
+                meta.optString("zdfG") == "-Infinity"
+            ) "PASS: nonFiniteValues metadata preserves NaN/Infinity/-Infinity"
+            else "FAIL: nonFiniteValues metadata missing or wrong: $meta"
+        )
+        // Parse round-trip
+        try {
+            JSONObject(text)
+            results.add("PASS: export string parses as JSONObject")
+        } catch (t: Throwable) {
+            results.add("FAIL: parse error ${t.message}")
+        }
+        return results
     }
 
     // --- Test hooks (offline / harness; not used on AudioThread) ---
