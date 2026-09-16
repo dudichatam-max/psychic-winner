@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "session_id": "2026-09-16_e40627e_ref-C_dsp-profile",
+  "recorded_at": "2026-09-16",
+  "timezone": "Asia/Jerusalem",
+  "commit": "e40627ee2cd29a642161c7a5f1220f47bb480a73",
+  "commit_short": "e40627e",
+  "pr_or_agent_ref": "#681",
+  "compare_baseline_commit": "982bee72860d9f090c6adda14031545c35070e11",
+  "compare_baseline_ref": "#661",
+  "compare_baseline_status": "compared",
+  "app": "L STUDIO",
+  "app_version": "1.0",
+  "device": "2409BRN2CY",
+  "android": "14",
+  "audio": {
+    "sample_rate_hz": 48000,
+    "buffer_size": 512,
+    "deadline_ms": 10.667
+  },
+  "scenario": {
+    "name": "reference_C_fixed_playback",
+    "profile": "DSP",
+    "polyphony": "Dynamic 1–8",
+    "max_simultaneous_voices": 8,
+    "reference_replay": "recorded settings/events",
+    "looper_replay": "OFF",
+    "drums_replay": "OFF",
+    "reference_bpm": 70.54,
+    "wave": 1,
+    "warm_up": "none",
+    "measurement_duration_s": 48.25
+  },
+  "runs": [
+    {
+      "run": 1,
+      "result": "FAIL",
+      "score": 8,
+      "processing_ms": {
+        "average": 11.805,
+        "p50": 11.063,
+        "p95": 14.711,
+        "p99": 16.238,
+        "max": 32.221
+      },
+      "deadline_misses": 3509,
+      "miss_rate_pct": 86.0049,
+      "underruns_delta": 867,
+      "cpu_pct": {
+        "average": 180.65,
+        "peak": 196.41
+      },
+      "dsp_ms": {
+        "sampled_points": 16320,
+        "voice": 7.306,
+        "osc": 3.931,
+        "main_osc": 0.0,
+        "piano": 0.315,
+        "sub": 0.427,
+        "detune": 0.423,
+        "vibe": 0.402,
+        "div_core": 9.387,
+        "div2_contrib": 3.704,
+        "div3_contrib": 1.269,
+        "div4_contrib": 1.322,
+        "warm": 0.442,
+        "rip": 0.352,
+        "fuzz": 0.457,
+        "phaz": 0.54,
+        "key_bus_wah": 1.55,
+        "key_bus_oct": 3.245,
+        "key_bus_cho": 1.363,
+        "pad_wah": 0.0,
+        "pad_oct": 0.0,
+        "pad_cho": 0.0,
+        "reverb": 0.669,
+        "delay": 0.287,
+        "drive": 0.464
+      },
+      "source_images": [
+        "80f421af229d4cc6bd5ba0741de3922df22cfe0563a14ef09778c19dab3aae4d.jpg",
+        "78d7126717ef4cdc5eae7d5d7f239ce68a44c189781a20f7e7efad3a80a83548.jpg"
+      ]
+    },
+    {
+      "run": 2,
+      "result": "FAIL",
+      "score": 7,
+      "processing_ms": {
+        "average": 11.771,
+        "p50": 10.992,
+        "p95": 14.7,
+        "p99": 16.897,
+        "max": 51.732
+      },
+      "deadline_misses": 3507,
+      "miss_rate_pct": 85.6619,
+      "underruns_delta": 820,
+      "cpu_pct": {
+        "average": 181.86,
+        "peak": 200.8
+      },
+      "dsp_ms": {
+        "sampled_points": 16376,
+        "voice": 6.962,
+        "osc": 3.763,
+        "main_osc": 0.0,
+        "piano": 0.307,
+        "sub": 0.39,
+        "detune": 0.402,
+        "vibe": 0.39,
+        "div_core": 9.227,
+        "div2_contrib": 2.589,
+        "div3_contrib": 1.172,
+        "div4_contrib": 1.241,
+        "warm": 0.421,
+        "rip": 0.308,
+        "fuzz": 0.43,
+        "phaz": 0.502,
+        "key_bus_wah": 1.485,
+        "key_bus_oct": 1.859,
+        "key_bus_cho": 1.291,
+        "pad_wah": 0.0,
+        "pad_oct": 0.0,
+        "pad_cho": 0.0,
+        "reverb": 0.625,
+        "delay": 0.269,
+        "drive": 0.445
+      },
+      "source_images": [
+        "8634bb65cc5c172b2fc359472f0d7ea1068b27ecbbd0962c1e7f855c9e277cef.jpg",
+        "fa4ffda900b068041cc778137026c4e25a1d80ec25e5428c6541425431f04a77.jpg"
+      ]
+    },
+    {
+      "run": 3,
+      "result": "FAIL",
+      "score": 10,
+      "processing_ms": {
+        "average": 11.526,
+        "p50": 10.826,
+        "p95": 14.188,
+        "p99": 15.843,
+        "max": 23.634
+      },
+      "deadline_misses": 2715,
+      "miss_rate_pct": 64.9677,
+      "underruns_delta": 682,
+      "cpu_pct": {
+        "average": 183.01,
+        "peak": 199.3
+      },
+      "dsp_ms": {
+        "sampled_points": 16716,
+        "voice": 6.74,
+        "osc": 3.699,
+        "main_osc": 0.0,
+        "piano": 0.293,
+        "sub": 0.367,
+        "detune": 0.377,
+        "vibe": 0.37,
+        "div_core": 9.506,
+        "div2_contrib": 1.739,
+        "div3_contrib": 1.019,
+        "div4_contrib": 1.132,
+        "warm": 0.392,
+        "rip": 0.322,
+        "fuzz": 0.386,
+        "phaz": 0.488,
+        "key_bus_wah": 1.438,
+        "key_bus_oct": 0.921,
+        "key_bus_cho": 1.281,
+        "pad_wah": 0.0,
+        "pad_oct": 0.0,
+        "pad_cho": 0.0,
+        "reverb": 0.649,
+        "delay": 0.258,
+        "drive": 0.43
+      },
+      "source_images": [
+        "731488a33ce20e5363771175ac7c7e38ac241e76dedc8bd2a98cca17fea405cf.jpg",
+        "c224f4c31b57953f10a66f001e4de501bd0f3086d56c2077233973710570dd6e.jpg"
+      ]
+    }
+  ],
+  "aggregate": {
+    "n": 3,
+    "all_fail": true,
+    "score": {
+      "min": 7,
+      "max": 10,
+      "mean": 8.333
+    },
+    "avg_ms": {
+      "min": 11.526,
+      "max": 11.805,
+      "mean": 11.701
+    },
+    "miss_rate_pct": {
+      "min": 64.9677,
+      "max": 86.0049,
+      "mean": 78.8782
+    },
+    "underruns_delta": {
+      "min": 682,
+      "max": 867,
+      "mean": 789.667
+    },
+    "cpu_avg_pct": {
+      "min": 180.65,
+      "max": 183.01,
+      "mean": 181.84
+    },
+    "hotspots_mean_ms": {
+      "div_core": 9.373,
+      "voice": 7.003,
+      "osc": 3.798,
+      "key_bus_oct": 2.008,
+      "div2_contrib": 2.677,
+      "key_bus_wah": 1.491,
+      "key_bus_cho": 1.312
+    }
+  },
+  "notes_he": [
+    "שלוש ריצות DSP Profile על רפרנס נגינה קבוע C, ללא warm-up.",
+    "כל הריצות FAIL: ממוצע עיבוד מעל הדדליין 10.667ms.",
+    "ריצה 3 טובה יחסית (miss ~65%, score 10) מול ריצות 1–2 (miss ~86%).",
+    "צווארי בקבוק עיקריים: Div core, Voice, Osc, ואז Key-bus (Oct/Wah/Cho).",
+    "הושווה ל־982bee7 (#661): שיפור ב־avg/miss/underruns/hotspots; עדיין FAIL. ראה comparisons/982bee7-vs-e40627e_ref-C_dsp-profile.md"
+  ]
+}
