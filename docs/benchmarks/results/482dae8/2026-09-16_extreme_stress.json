@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "session_id": "2026-09-16_482dae8_extreme_stress",
+  "recorded_at": "2026-09-16",
+  "timezone": "Asia/Jerusalem",
+  "commit": "482dae8e5cfd0f3d1f4825f2f975015ac3e35d94",
+  "commit_short": "482dae8",
+  "pr_or_agent_ref": "Copy button tip / working baseline",
+  "audio_code_equivalent_commit": "e40627ee2cd29a642161c7a5f1220f47bb480a73",
+  "app": "L STUDIO",
+  "app_version": "1.0",
+  "device": "2409BRN2CY",
+  "android": "14",
+  "audio": {
+    "sample_rate_hz": 48000,
+    "buffer_size": 512,
+    "deadline_ms": 10.667
+  },
+  "scenario": {
+    "name": "extreme_stress",
+    "profile": "reduced / limited (no DSP profile available for stress on this build)",
+    "polyphony": "Dynamic 1–8",
+    "max_simultaneous_voices": 8,
+    "stress_workload": "generated benchmark",
+    "looper_drums_he": "סשן Extreme — בכוונה לופר+תופים פעילים לפי תכנון הבדיקה; פלט Copy מדווח Stress workload generated benchmark בלי DSP DIAGNOSTIC.",
+    "warm_up": "3s",
+    "measurement_duration_s": 30
+  },
+  "runs": [
+    {
+      "run": 1,
+      "result": "FAIL",
+      "score": 0,
+      "processing_ms": {
+        "average": 22.69,
+        "p50": 23.291,
+        "p95": 31.311,
+        "p99": 33.524,
+        "max": 58.287
+      },
+      "deadline_misses": 1262,
+      "miss_rate_pct": 95.5337,
+      "underruns_delta": 1528,
+      "cpu_pct": {
+        "average": 192.62,
+        "peak": 203.88
+      },
+      "dsp_ms": null,
+      "source": "clipboard_copy"
+    },
+    {
+      "run": 2,
+      "result": "FAIL",
+      "score": 0,
+      "processing_ms": {
+        "average": 22.367,
+        "p50": 22.842,
+        "p95": 31.343,
+        "p99": 31.75,
+        "max": 32.801
+      },
+      "deadline_misses": 1281,
+      "miss_rate_pct": 95.597,
+      "underruns_delta": 1559,
+      "cpu_pct": {
+        "average": 192.56,
+        "peak": 201.59
+      },
+      "dsp_ms": null,
+      "source": "clipboard_copy"
+    },
+    {
+      "run": 3,
+      "result": "FAIL",
+      "score": 0,
+      "processing_ms": {
+        "average": 22.526,
+        "p50": 23.196,
+        "p95": 31.588,
+        "p99": 32.036,
+        "max": 36.688
+      },
+      "deadline_misses": 1272,
+      "miss_rate_pct": 95.5672,
+      "underruns_delta": 1503,
+      "cpu_pct": {
+        "average": 192.51,
+        "peak": 202.89
+      },
+      "dsp_ms": null,
+      "source": "clipboard_copy"
+    }
+  ],
+  "aggregate": {
+    "n": 3,
+    "all_fail": true,
+    "score": {
+      "min": 0,
+      "max": 0,
+      "mean": 0
+    },
+    "avg_ms": {
+      "min": 22.367,
+      "max": 22.69,
+      "mean": 22.528
+    },
+    "miss_rate_pct": {
+      "min": 95.5337,
+      "max": 95.597,
+      "mean": 95.566
+    },
+    "underruns_delta": {
+      "min": 1503,
+      "max": 1559,
+      "mean": 1530
+    },
+    "cpu_avg_pct": {
+      "min": 192.51,
+      "max": 192.62,
+      "mean": 192.563
+    },
+    "hotspots_mean_ms": null
+  },
+  "notes_he": [
+    "מקור: Copy. פרופיל מצומצם — אין בלוק DSP DIAGNOSTIC בפלט.",
+    "שלוש ריצות FAIL זהות ב־score 0; avg ~22.5 ms (~2.1× דדליין); miss ~95.6%; underruns ~1500–1560.",
+    "יציבות גבוהה בין ריצות — תקרת עומס ברורה.",
+    "המלצה לעתיד: פרופיל DSP (או diagnostic מלא) גם לסטרס להשוואה מול ABC.",
+    "ב־ABC תווית Looper/Drums ב־Copy היא UI בלבד; רק Extreme אמור להפעיל אותם באמת."
+  ]
+}

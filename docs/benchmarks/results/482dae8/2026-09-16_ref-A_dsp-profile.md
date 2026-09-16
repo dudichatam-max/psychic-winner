@@ -11,6 +11,8 @@
 | תרחיש | רפרנס נגינה קבוע **A** · DSP · polyphony Dynamic 1–8 · BPM 70.54 · wave 1 · warm-up none · 48.25s · looper/drums OFF |
 | מקור | **Copy** clipboard (לא צילומים) |
 
+> **ABC:** תווית Looper/Drums ב־Copy **לא** אומרת שהם פעלו — הכפתורים מקושרים ל־Extreme בלבד. ב־A/B/C הלופר והתופים OFF בפועל.
+
 ## שלוש הריצות
 
 | Run | Result | Score | Avg | P50 | P95 | P99 | Max | Misses | Miss % | Underruns | CPU avg | CPU peak |

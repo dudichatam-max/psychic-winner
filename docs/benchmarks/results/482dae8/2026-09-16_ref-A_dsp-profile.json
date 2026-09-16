@@ -22,8 +22,8 @@
     "polyphony": "Dynamic 1–8",
     "max_simultaneous_voices": 8,
     "reference_replay": "recorded settings/events",
-    "looper_replay": "OFF",
-    "drums_replay": "OFF",
+    "looper_replay": "OFF (not active in ABC; Extreme-only controls)",
+    "drums_replay": "OFF (not active in ABC; Extreme-only controls)",
     "reference_bpm": 70.54,
     "wave": 1,
     "warm_up": "none",
@@ -211,6 +211,7 @@
     }
   },
   "notes_he": [
+    "ב־ABC: Looper/Drums ב־Copy הם תווית UI בלבד (מקושרים ל־Extreme); לא פעלו בפועל.",
     "מקור: כפתור Copy (לא צילומי מסך).",
     "שלוש ריצות WARNING יציבות — score 67 בכל ריצה; underruns 0.",
     "ממוצע עיבוד ≈10.631 ms — מעט מתחת לדדליין 10.667 ms; miss rate עדיין ~44%.",

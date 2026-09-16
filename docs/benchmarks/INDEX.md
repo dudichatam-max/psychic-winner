@@ -6,12 +6,14 @@ Tip נוכחי לבניית בסיס עבודה. פירוט: [results/482dae8/RE
 
 | Scenario | Commit | n | Profile | Looper/Drums | סטטוס |
 |----------|--------|---|--------|--------------|--------|
-| Reference **A** | `482dae8` | 3 | DSP | OFF / OFF | **WARNING** score **67** · avg **10.631** · miss **44.5%** · underruns **0** — [פירוט](results/482dae8/2026-09-16_ref-A_dsp-profile.md) |
-| Reference **B** | `482dae8` | 3 | DSP | OFF / OFF | ממתין |
-| Reference **C** | `482dae8` | 3 | DSP | OFF / OFF | ממתין |
-| **Extreme** | `482dae8` | 3 | DSP | **ON / ON** (רפרנס extreme קבוע) | ממתין |
+| Reference **A** | `482dae8` | 3 | DSP | OFF (UI-only in ABC) | **WARNING** score **67** · avg **10.631** · miss **44.5%** · underruns **0** — [פירוט](results/482dae8/2026-09-16_ref-A_dsp-profile.md) |
+| Reference **B** | `482dae8` | 3 | DSP | OFF (UI-only in ABC) | **FAIL** score ≈**20.7** · avg **10.753** · miss **50.5%** · underruns ≈**86** — [פירוט](results/482dae8/2026-09-16_ref-B_dsp-profile.md) |
+| Reference **C** | `482dae8` | 3 | DSP | OFF (UI-only in ABC) | **FAIL** score ≈**12.7** · avg **11.407** · miss **74.8%** · underruns ≈**588** — [פירוט](results/482dae8/2026-09-16_ref-C_dsp-profile.md) |
+| **Extreme** | `482dae8` | 3 | limited (לא DSP) | Stress generated | **FAIL** score **0** · avg **22.528** · miss **95.6%** · underruns ≈**1530** — [פירוט](results/482dae8/2026-09-16_extreme_stress.md) |
 
-אחרי מילוי: כל סשן כ־JSON+MD תחת `results/482dae8/`, ואז שורת סיכום כאן.
+בסיס מלא: [סיכום ABC+Extreme](comparisons/482dae8_ABC-Extreme_summary.md). קבצים תחת `results/482dae8/`.
+
+> **ABC:** תווית Looper/Drums ב־Copy **לא משקפת הפעלה** — הכפתורים מקושרים ל־Extreme בלבד. רק בסשן Extreme הלופר והתופים באמת ON.
 
 ---
 

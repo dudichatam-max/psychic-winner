@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "session_id": "2026-09-16_482dae8_ref-C_dsp-profile",
+  "recorded_at": "2026-09-16",
+  "timezone": "Asia/Jerusalem",
+  "commit": "482dae8e5cfd0f3d1f4825f2f975015ac3e35d94",
+  "commit_short": "482dae8",
+  "pr_or_agent_ref": "Copy button tip / working baseline",
+  "audio_code_equivalent_commit": "e40627ee2cd29a642161c7a5f1220f47bb480a73",
+  "app": "L STUDIO",
+  "app_version": "1.0",
+  "device": "2409BRN2CY",
+  "android": "14",
+  "audio": {
+    "sample_rate_hz": 48000,
+    "buffer_size": 512,
+    "deadline_ms": 10.667
+  },
+  "scenario": {
+    "name": "reference_C_fixed_playback",
+    "profile": "DSP",
+    "polyphony": "Dynamic 1–8",
+    "max_simultaneous_voices": 8,
+    "reference_replay": "recorded settings/events",
+    "looper_replay": "OFF (UI may show ON; not active in ABC — Extreme-only controls)",
+    "drums_replay": "OFF (UI may show ON; not active in ABC — Extreme-only controls)",
+    "reference_bpm": 70.54,
+    "wave": 1,
+    "warm_up": "none",
+    "measurement_duration_s": 48.25,
+    "caveat_he": "בסשני ABC כפתורי Looper/Drums מקושרים רק לבדיקת Extreme. גם אם Copy מציג ON — בפועל לא פעלו ברפרנס A/B/C. C2–C3 הראו Looper/Drums ON בטקסט Copy; אין לפרש כהפעלה אמיתית."
+  },
+  "runs": [
+    {
+      "run": 1,
+      "result": "FAIL",
+      "score": 12,
+      "processing_ms": {
+        "average": 11.395,
+        "p50": 10.773,
+        "p95": 14.099,
+        "p99": 14.382,
+        "max": 21.138
+      },
+      "deadline_misses": 3079,
+      "miss_rate_pct": 72.738,
+      "underruns_delta": 583,
+      "cpu_pct": {
+        "average": 184.09,
+        "peak": 198.1
+      },
+      "looper_replay": "OFF (UI label only; not active in ABC)",
+      "drums_replay": "OFF (UI label only; not active in ABC)",
+      "dsp_ms": {
+        "sampled_points": 16932,
+        "voice": 7.3,
+        "osc": 4.181,
+        "main_osc": 0.0,
+        "piano": 0.285,
+        "sub": 0.378,
+        "detune": 0.42,
+        "vibe": 0.355,
+        "div_core": 11.279,
+        "div2_contrib": 1.354,
+        "div3_contrib": 1.113,
+        "div4_contrib": 1.116,
+        "warm": 0.449,
+        "rip": 0.299,
+        "fuzz": 0.424,
+        "phaz": 0.507,
+        "key_bus_wah": 1.195,
+        "key_bus_oct": 0.807,
+        "key_bus_cho": 0.879,
+        "pad_wah": 0.0,
+        "pad_oct": 0.0,
+        "pad_cho": 0.0,
+        "reverb": 0.648,
+        "delay": 0.292,
+        "drive": 0.435
+      },
+      "source": "clipboard_copy",
+      "ui_reported_looper_drums": [
+        "OFF",
+        "OFF"
+      ]
+    },
+    {
+      "run": 2,
+      "result": "FAIL",
+      "score": 13,
+      "processing_ms": {
+        "average": 11.409,
+        "p50": 10.78,
+        "p95": 14.074,
+        "p99": 14.321,
+        "max": 29.682
+      },
+      "deadline_misses": 3174,
+      "miss_rate_pct": 75.0887,
+      "underruns_delta": 588,
+      "cpu_pct": {
+        "average": 183.08,
+        "peak": 199.2
+      },
+      "looper_replay": "OFF (UI label only; not active in ABC)",
+      "drums_replay": "OFF (UI label only; not active in ABC)",
+      "dsp_ms": {
+        "sampled_points": 16908,
+        "voice": 7.846,
+        "osc": 4.529,
+        "main_osc": 0.0,
+        "piano": 0.317,
+        "sub": 0.421,
+        "detune": 0.481,
+        "vibe": 0.374,
+        "div_core": 11.916,
+        "div2_contrib": 3.776,
+        "div3_contrib": 1.177,
+        "div4_contrib": 1.104,
+        "warm": 0.492,
+        "rip": 0.325,
+        "fuzz": 0.464,
+        "phaz": 0.554,
+        "key_bus_wah": 1.272,
+        "key_bus_oct": 0.822,
+        "key_bus_cho": 0.924,
+        "pad_wah": 0.0,
+        "pad_oct": 0.0,
+        "pad_cho": 0.0,
+        "reverb": 0.693,
+        "delay": 0.321,
+        "drive": 0.464
+      },
+      "source": "clipboard_copy",
+      "ui_reported_looper_drums": [
+        "ON",
+        "ON"
+      ]
+    },
+    {
+      "run": 3,
+      "result": "FAIL",
+      "score": 13,
+      "processing_ms": {
+        "average": 11.416,
+        "p50": 10.785,
+        "p95": 14.101,
+        "p99": 14.319,
+        "max": 27.494
+      },
+      "deadline_misses": 3235,
+      "miss_rate_pct": 76.568,
+      "underruns_delta": 594,
+      "cpu_pct": {
+        "average": 182.22,
+        "peak": 197.41
+      },
+      "looper_replay": "OFF (UI label only; not active in ABC)",
+      "drums_replay": "OFF (UI label only; not active in ABC)",
+      "dsp_ms": {
+        "sampled_points": 16900,
+        "voice": 7.858,
+        "osc": 4.531,
+        "main_osc": 0.0,
+        "piano": 0.307,
+        "sub": 0.42,
+        "detune": 0.487,
+        "vibe": 0.376,
+        "div_core": 11.895,
+        "div2_contrib": 6.457,
+        "div3_contrib": 1.163,
+        "div4_contrib": 1.114,
+        "warm": 0.491,
+        "rip": 0.331,
+        "fuzz": 0.466,
+        "phaz": 0.564,
+        "key_bus_wah": 1.295,
+        "key_bus_oct": 0.888,
+        "key_bus_cho": 0.933,
+        "pad_wah": 0.0,
+        "pad_oct": 0.0,
+        "pad_cho": 0.0,
+        "reverb": 0.71,
+        "delay": 0.325,
+        "drive": 0.465
+      },
+      "source": "clipboard_copy",
+      "ui_reported_looper_drums": [
+        "ON",
+        "ON"
+      ]
+    }
+  ],
+  "aggregate": {
+    "n": 3,
+    "all_fail": true,
+    "score": {
+      "min": 12,
+      "max": 13,
+      "mean": 12.667
+    },
+    "avg_ms": {
+      "min": 11.395,
+      "max": 11.416,
+      "mean": 11.407
+    },
+    "miss_rate_pct": {
+      "min": 72.738,
+      "max": 76.568,
+      "mean": 74.798
+    },
+    "underruns_delta": {
+      "min": 583,
+      "max": 594,
+      "mean": 588.333
+    },
+    "cpu_avg_pct": {
+      "min": 182.22,
+      "max": 184.09,
+      "mean": 183.13
+    },
+    "hotspots_mean_ms": {
+      "div_core": 11.697,
+      "voice": 7.668,
+      "osc": 4.414,
+      "div2_contrib": 3.862,
+      "key_bus_wah": 1.254,
+      "div3_contrib": 1.151,
+      "div4_contrib": 1.111,
+      "key_bus_cho": 0.912,
+      "key_bus_oct": 0.839,
+      "reverb": 0.684
+    }
+  },
+  "notes_he": [
+    "מקור: Copy. מקומי עד push מאוחד אחרי Extreme.",
+    "שלוש ריצות FAIL — score 12/13/13; underruns ~583–594; miss ~72–77%.",
+    "חשוב: Looper/Drums ב־ABC לא פעילים בפועל — הכפתורים מקושרים רק ל־Extreme. Copy עלול להציג ON (כמו ב־C2–C3) בלי שזה ישפיע על הסשן.",
+    "צוואר בקבוק: Div core ~11.7 ms (מעל דדליין לבדו) + Voice/Osc.",
+    "חלק מ־ABC+Extreme על tip 482dae8."
+  ]
+}

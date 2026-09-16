@@ -24,9 +24,9 @@ This tip is the **working baseline** for ABC + Extreme sessions. Paste Copy text
 | Scenario | Looper | Drums | Reference | Status | File |
 |----------|--------|-------|-----------|--------|------|
 | **A** · DSP | OFF | OFF | recorded A (fixed) | **done** WARNING score 67 · avg 10.631 · underruns 0 | [`2026-09-16_ref-A_dsp-profile.json`](2026-09-16_ref-A_dsp-profile.json) |
-| **B** · DSP | OFF | OFF | recorded B (fixed) | pending | `YYYY-MM-DD_ref-B_dsp-profile.json` |
-| **C** · DSP | OFF | OFF | recorded C (fixed) | pending | `YYYY-MM-DD_ref-C_dsp-profile.json` |
-| **Extreme** · DSP | **ON** | **ON** | system fixed **extreme** | pending | `YYYY-MM-DD_extreme_dsp-profile.json` |
+| **B** · DSP | OFF | OFF | recorded B (fixed) | **done** FAIL score ~20.7 · avg 10.753 · underruns ~86 | [`2026-09-16_ref-B_dsp-profile.json`](2026-09-16_ref-B_dsp-profile.json) |
+| **C** · DSP | OFF (UI may show ON) | OFF | recorded C (fixed) | **done** FAIL score ~12.7 · avg 11.407 · underruns ~588 | [`2026-09-16_ref-C_dsp-profile.json`](2026-09-16_ref-C_dsp-profile.json) |
+| **Extreme** · limited | intended ON | intended ON | stress generated benchmark | **done** FAIL score 0 · avg 22.528 · underruns ~1530 | [`2026-09-16_extreme_stress.json`](2026-09-16_extreme_stress.json) |
 
 ## How to add a session
 
@@ -35,3 +35,11 @@ This tip is the **working baseline** for ABC + Extreme sessions. Paste Copy text
 3. Files land under this folder; update `docs/benchmarks/INDEX.md`.
 
 Older tips (`982bee7`, `e40627e`, `d99c18d`) stay as history under `docs/benchmarks/results/`.
+
+## ABC vs Extreme — Looper / Drums
+
+בסשני **A / B / C** כפתורי Looper ו־Drums **מקושרים רק לבדיקת Extreme**. גם אם טקסט Copy מציג `Looper replay: ON` / `Drums replay: ON`, **הם לא פעלו בפועל** בסשן ABC. אין לפרש את התווית כעומס לופר/תופים. רק בסשן **Extreme** הלופר והתופים פעילים באמת (רפרנס extreme קבוע במערכת).
+
+## סיכום
+
+[ABC + Extreme summary](../../comparisons/482dae8_ABC-Extreme_summary.md)
