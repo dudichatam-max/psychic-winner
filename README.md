@@ -16,7 +16,9 @@ Project Status
 - Application: "L Studio"
 - Application ID: "com.microtonal.synth"
 - Root project: "MicroScaleSynth"
-- Main branch: "main"
+- Main branch: "main" (current tip includes E5 at commit "e40627e")
+- Stable tip focus: E5 reference/scenario tooling + integrated benchmark
+- On-device benchmark log: "docs/benchmarks/"
 - Compile / Target SDK: 34
 - Minimum SDK: 24
 - Java: 17
@@ -99,6 +101,10 @@ Component| Responsibility
 "AudioBenchmark"| Real-time audio performance measurement
 "BenchmarkReference"| Controlled/reference benchmark workload
 "BenchmarkScreen"| Benchmark UI and results
+"E5TestController"| E5 lifecycle (start/stop/export) over the benchmark path
+"E5TestReference" / "E5TestReferenceJson"| Import, validate and assert E5 reference JSON
+"E5Scenario" / "E5ScenarioJson"| Auto-scenario timeline replay via the Benchmark player
+"E5Diagnostics"| On-device E5 diagnostics helpers
 "PresetManager"| Presets and persistent configuration
 "SessionSupport"| Session serialization/restoration
 "MidiExporter"| MIDI export
@@ -296,6 +302,23 @@ MIDI export is separate from the real-time PCM audio path.
 
 ---
 
+E5 Reference and Auto-Scenario
+
+E5 is the current regression/evidence layer for reproducible on-device audio checks.
+
+It builds on the existing Benchmark player rather than a separate audio path:
+
+- E5 Reference JSON — import/validate/assert expected musical and diagnostic outcomes
+- E5 Auto-Scenario — JSON timeline of settings/events replayed through BenchmarkReference
+- Offline checkers under "tools/" ("e5_reference_offline_check.py", "e5_scenario_offline_check.py")
+- Packaged cases under "tools/e5_references/" and "tools/e5_scenarios/" (including "research_v2")
+
+Hebrew operator notes live next to the packs ("README_HE.md"). Planning notes: "tools/E5-Auto-Scenario-PLAN.md".
+
+The current stable E5 tip on "main" is commit "e40627e" (Import NaN fix for missing padWah/padOct/padCho).
+
+---
+
 Real-Time Performance Benchmark
 
 The project contains an integrated benchmark specifically for measuring the audio callback.
@@ -343,9 +366,22 @@ Current Performance Investigation
 
 Recent profiling showed that the realtime problem is primarily inside the DSP/audio path rather than being solved by UI restructuring.
 
-In the controlled benchmark configuration, the audio callback budget is only 10.667 ms, while the measured workload was operating very close to or beyond that limit.
+In the controlled benchmark configuration, the audio callback budget is only 10.667 ms, while the measured workload was operating beyond that limit.
 
-The strongest measured DSP hotspot was the area identified as Div core, which consumed approximately 8.8–9.3 ms in the diagnostic runs. That represents roughly 83–87% of the entire callback budget.
+Tracked on-device DSP-profile sessions (fixed reference C, same device 2409BRN2CY / Android 14, n=3 each):
+
+- Baseline "982bee7" (#661): mean score ~2.3, avg ~12.76 ms, miss ~86%, underruns ~1473 — FAIL
+- Current tip "e40627e" (#681): mean score ~8.3, avg ~11.70 ms, miss ~78.9%, underruns ~790 — FAIL, relative improvement
+
+"e40627e" is relatively better (about −1.05 ms average callback time and roughly half the underruns) but still fails the deadline. Both sessions remain FAIL.
+
+Strongest DSP hotspots on the current tip (mean across runs): Div core ~9.4 ms, Voice ~7.0 ms, Osc ~3.8 ms, then Key-bus (Oct/Wah/Cho).
+
+Session JSON/Markdown and the side-by-side comparison live under:
+
+docs/benchmarks/
+docs/benchmarks/INDEX.md
+docs/benchmarks/comparisons/982bee7-vs-e40627e_ref-C_dsp-profile.md
 
 This makes DSP optimization the primary performance target.
 
@@ -423,20 +459,22 @@ When modifying the project:
 1. Protect the realtime audio path.
 2. Avoid allocations and unnecessary synchronization inside the audio callback.
 3. Do not change DSP behavior without an audio-quality comparison.
-4. Benchmark performance-sensitive changes using a controlled workload.
-5. Change one major DSP factor at a time when investigating performance.
-6. Treat UI architectural changes as potentially relevant to realtime behavior.
-7. Prefer measured evidence over assumptions.
-8. Do not optimize based solely on a benchmark score.
-9. Preserve the existing sound and interaction model unless a change explicitly targets them.
+4. Benchmark performance-sensitive changes using a controlled workload (prefer the fixed reference-C DSP profile logged under "docs/benchmarks/").
+5. Record new on-device sessions under "docs/benchmarks/results/<commit>/" and update "docs/benchmarks/INDEX.md".
+6. Change one major DSP factor at a time when investigating performance.
+7. Treat UI architectural changes as potentially relevant to realtime behavior.
+8. Prefer measured evidence over assumptions.
+9. Do not optimize based solely on a benchmark score.
+10. Preserve the existing sound and interaction model unless a change explicitly targets them.
+11. Keep E5 reference/scenario packs and offline checkers in sync when changing Benchmark/E5 APIs.
 
 ---
 
 Current Architectural Direction
 
-The current "main" branch intentionally favors a stable integrated UI + dedicated realtime audio engine over further UI decomposition.
+The current "main" branch intentionally favors a stable integrated UI + dedicated realtime audio engine over further UI decomposition, with E5 reference/scenario tooling as the regression harness.
 
-The next performance work should focus on reducing the cost of the DSP/audio callback and creating real execution headroom below the callback deadline.
+The next performance work should focus on reducing the cost of the DSP/audio callback (especially Div core / Voice / Osc) and creating real execution headroom below the callback deadline, using the logged workloads in "docs/benchmarks/".
 
 The objective is not simply to make the application benchmark faster.
 
