@@ -36,3 +36,13 @@ docs/benchmarks/
 ## תרחיש נוכחי
 
 רפרנס נגינה קבוע **C**, פרופיל **DSP**, ללא warm-up — בסיס להשוואת גרסאות.
+
+
+## Working baseline (current)
+
+Tip **`482dae8`** (Benchmark Copy button) is the active baseline for:
+
+- Reference **A / B / C** — DSP profile, looper/drums OFF, 3 runs each
+- **Extreme** — DSP profile, looper + drums ON, system fixed extreme reference, 3 runs
+
+See `results/482dae8/README.md` and `INDEX.md`. Prefer pasting **Copy** text over screenshots.

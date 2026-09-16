@@ -19,13 +19,13 @@
     "deadline_ms": 10.667
   },
   "scenario": {
-    "name": "reference_C_fixed_playback",
+    "name": "reference_A|B|C_fixed_playback | extreme_fixed",
     "profile": "DSP",
     "polyphony": "Dynamic 1–8",
     "max_simultaneous_voices": 8,
     "reference_replay": "recorded settings/events",
-    "looper_replay": "OFF",
-    "drums_replay": "OFF",
+    "looper_replay": "OFF | ON (extreme)",
+    "drums_replay": "OFF | ON (extreme)",
     "reference_bpm": 70.54,
     "wave": 1,
     "warm_up": "none",
@@ -33,5 +33,7 @@
   },
   "runs": [],
   "aggregate": {},
-  "notes_he": []
+  "notes_he": [
+    "הדבק כאן טקסט Copy מהאפליקציה לכל ריצה."
+  ]
 }
