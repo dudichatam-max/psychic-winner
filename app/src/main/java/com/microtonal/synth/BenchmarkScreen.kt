@@ -1,5 +1,7 @@
 package com.microtonal.synth
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -680,16 +682,16 @@ fun BenchmarkScreen(
             Text("Result: ${r.verdict.name}", color = verdictColor(r.verdict), fontSize = 14.sp, fontWeight = FontWeight.Bold)
             Text("SCORE: ${r.score}/100", color = verdictColor(r.verdict), fontSize = 18.sp, fontWeight = FontWeight.Bold)
             ReportBlock(r)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
                     onClick = {
                         statusMsg = if (bench.saveAsBefore(context)) "Saved as BEFORE" else "Save BEFORE failed"
                     },
                     enabled = r.verdict != BenchVerdict.ERROR,
                     colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
-                    modifier = Modifier.weight(1f).height(30.dp),
+                    modifier = Modifier.weight(1f).height(26.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
-                ) { Text("Save as Before", color = gold, fontSize = 9.sp) }
+                ) { Text("Save as Before", color = gold, fontSize = 8.sp) }
                 Button(
                     onClick = {
                         val before = bench.loadBefore(context)
@@ -703,9 +705,20 @@ fun BenchmarkScreen(
                     },
                     enabled = r.verdict != BenchVerdict.ERROR,
                     colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
-                    modifier = Modifier.weight(1f).height(30.dp),
+                    modifier = Modifier.weight(1f).height(26.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
-                ) { Text("Compare", color = gold, fontSize = 9.sp) }
+                ) { Text("Compare", color = gold, fontSize = 8.sp) }
+                Button(
+                    onClick = {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("benchmark", formatReport(r)))
+                        statusMsg = "Copied"
+                    },
+                    enabled = r.verdict != BenchVerdict.ERROR,
+                    colors = ButtonDefaults.buttonColors(containerColor = panelBg2),
+                    modifier = Modifier.weight(1f).height(26.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                ) { Text("Copy", color = gold, fontSize = 8.sp) }
             }
             if (compareText.isNotEmpty()) {
                 Text(compareText, color = Color.White, fontSize = 10.sp)
@@ -783,6 +796,66 @@ private fun verdictColor(v: BenchVerdict): Color = when (v) {
     BenchVerdict.WARNING -> Color(0xFFFFE082)
     BenchVerdict.FAIL -> Color(0xFFFF8A80)
     BenchVerdict.ERROR -> Color(0xFFFF8A80)
+}
+
+private fun formatReport(r: BenchReport): String {
+    return buildString {
+        appendLine("BENCHMARK COMPLETE")
+        appendLine("Result: ${r.verdict.name}")
+        appendLine("SCORE: ${r.score}/100")
+        appendLine("Device: ${r.device}")
+        appendLine("Android: ${r.androidVersion}")
+        appendLine("App version: ${r.appVersion}")
+        appendLine("Sample Rate: ${r.sampleRate}")
+        appendLine("Buffer: ${r.bufferFrames}")
+        appendLine("Deadline: ${nsToMs(r.deadlineNs)}")
+        appendLine("Polyphony: Dynamic 1–8")
+        appendLine("Maximum simultaneous voices: 8")
+        if (r.referenceDurationMs > 0L) {
+            appendLine("Reference replay: recorded settings/events")
+            appendLine("Looper replay: ${onOff(r.includeLooper)}   Drums replay: ${onOff(r.includeDrums)}")
+            appendLine("Reference BPM: ${String.format("%.2f", r.bpm)}   Wave: ${r.waveformType}")
+            appendLine("Warm-up: none   Measurement: ${String.format("%.2fs", r.referenceDurationMs / 1000.0)}")
+        } else {
+            appendLine("Stress workload: generated benchmark")
+            appendLine("Warm-up: 3s   Measurement: ${AudioBenchmark.MEASURE_MS / 1000}s")
+        }
+        appendLine()
+        appendLine("Processing Time")
+        appendLine("Average: ${nsToMs(r.avgNs)}")
+        appendLine("P50: ${nsToMs(r.p50Ns)}")
+        appendLine("P95: ${nsToMs(r.p95Ns)}")
+        appendLine("P99: ${nsToMs(r.p99Ns)}")
+        appendLine("Max: ${nsToMs(r.maxNs)}")
+        appendLine("Deadline misses: ${r.misses}")
+        appendLine("Miss rate: ${String.format("%.4f", r.missRate * 100.0)}%")
+        appendLine("Score: ${r.score}/100")
+        appendLine()
+        appendLine("Realtime")
+        appendLine(
+            if (r.underrunsAvailable) "Underruns delta: ${r.deltaUnderruns}" else "Underruns: n/a"
+        )
+        appendLine()
+        appendLine("CPU (process-level estimate)")
+        appendLine("Average: ${String.format("%.2f", r.cpuAvgPct)}%")
+        appendLine("Peak: ${String.format("%.2f", r.cpuPeakPct)}%")
+        if (r.deepProfiled) {
+            appendLine()
+            appendLine("DSP DIAGNOSTIC — sampled execution estimate")
+            appendLine("Sampled DSP points: ${r.profileSamples} (1/128 audio samples)")
+            appendLine("Voice: ${nsToMs(r.profileVoiceAvgNs)}   Osc: ${nsToMs(r.profileOscillatorAvgNs)}")
+            appendLine("Main Osc: ${nsToMs(r.profileOscMainAvgNs)}   Piano: ${nsToMs(r.profileOscPianoAvgNs)}")
+            appendLine("Sub: ${nsToMs(r.profileOscSubAvgNs)}   Detune: ${nsToMs(r.profileOscDetuneAvgNs)}   Vibe: ${nsToMs(r.profileVibeAvgNs)}")
+            appendLine("Div core: ${nsToMs(r.profileOscDividersAvgNs)}   Div2 contrib: ${nsToMs(r.profileOscDiv2AvgNs)}   Div3 contrib: ${nsToMs(r.profileOscDiv3AvgNs)}")
+            appendLine("Div4 contrib: ${nsToMs(r.profileOscDiv4AvgNs)}")
+            appendLine("Warm: ${nsToMs(r.profileWarmAvgNs)}   Rip: ${nsToMs(r.profileRipAvgNs)}   Fuzz: ${nsToMs(r.profileFuzzAvgNs)}")
+            appendLine("Phaz: ${nsToMs(r.profilePhazAvgNs)}   Key-bus Wah: ${nsToMs(r.profileWahAvgNs)}   Key-bus Oct: ${nsToMs(r.profileOctAvgNs)}")
+            appendLine("Key-bus Cho: ${nsToMs(r.profileChoAvgNs)}")
+            appendLine("Pad Wah: ${nsToMs(r.profilePadWahAvgNs)}   Pad Oct: ${nsToMs(r.profilePadOctAvgNs)}   Pad Cho: ${nsToMs(r.profilePadChoAvgNs)}")
+            appendLine("Reverb: ${nsToMs(r.profileReverbAvgNs)}   Delay: ${nsToMs(r.profileDelayAvgNs)}   Drive: ${nsToMs(r.profileDriveAvgNs)}")
+            append("Method: sampled execution timing, 1/128 audio samples; Pad effects are extrapolated from observed active stems; not CPU-cycle measurement")
+        }
+    }
 }
 
 private fun formatCompare(before: BenchReport, after: BenchReport): String {
