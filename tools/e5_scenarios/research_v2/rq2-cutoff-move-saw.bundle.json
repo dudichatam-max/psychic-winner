@@ -1,0 +1,228 @@
+{
+  "schema": "e5-bundle",
+  "schemaVersion": 1,
+  "scenario": {
+    "schema": "e5-scenario",
+    "schemaVersion": 1,
+    "scenarioId": "rq2-cutoff-move-saw",
+    "title": "RQ2 Cutoff move — Saw jitter",
+    "description": "RESEARCH RQ2: Why cutoff movement distorts? Rapid SETTINGS while held Saw note. Align clicks to SETTINGS times in EXPORT.",
+    "durationUs": 4620000,
+    "initialSettings": {
+      "waveform": 3,
+      "volume": 0.55,
+      "attack": 10.0,
+      "decay": 40.0,
+      "sustain": 0.85,
+      "release": 120.0,
+      "drive": 0.0,
+      "reverb": 0.0,
+      "cutoff": 300.0,
+      "resonance": 0.4,
+      "echo": 0.0,
+      "glide": 0.0,
+      "octave": 0,
+      "detune": false,
+      "sub": false,
+      "warm": false,
+      "vibe": false,
+      "rip": false,
+      "fuzz": false,
+      "phaz": false,
+      "piano": false,
+      "div2": false,
+      "div3": false,
+      "div4": false
+    },
+    "events": [
+      {
+        "timeUs": 300000,
+        "type": "NOTE_ON",
+        "freq": 440.0
+      },
+      {
+        "timeUs": 700000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 300.0
+        }
+      },
+      {
+        "timeUs": 820000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 2500.0
+        }
+      },
+      {
+        "timeUs": 940000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 800.0
+        }
+      },
+      {
+        "timeUs": 1060000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 6000.0
+        }
+      },
+      {
+        "timeUs": 1180000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 400.0
+        }
+      },
+      {
+        "timeUs": 1300000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 7500.0
+        }
+      },
+      {
+        "timeUs": 1420000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 1000.0
+        }
+      },
+      {
+        "timeUs": 1540000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 9000.0
+        }
+      },
+      {
+        "timeUs": 1660000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 500.0
+        }
+      },
+      {
+        "timeUs": 1780000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 4000.0
+        }
+      },
+      {
+        "timeUs": 1900000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 200.0
+        }
+      },
+      {
+        "timeUs": 2020000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 8500.0
+        }
+      },
+      {
+        "timeUs": 2140000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 1500.0
+        }
+      },
+      {
+        "timeUs": 2260000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 7000.0
+        }
+      },
+      {
+        "timeUs": 2380000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 600.0
+        }
+      },
+      {
+        "timeUs": 2500000,
+        "type": "SETTINGS",
+        "settings": {
+          "cutoff": 5500.0
+        }
+      },
+      {
+        "timeUs": 4120000,
+        "type": "NOTE_OFF",
+        "freq": 440.0
+      }
+    ]
+  },
+  "reference": {
+    "schema": "e5-test-reference",
+    "schemaVersion": 1,
+    "testId": "rq2-cutoff-move-saw-assert",
+    "title": "RQ2 Cutoff move — Saw jitter — assertions",
+    "description": "Rapid SETTINGS while note held. Offline: scan evidence windows for discontinuities aligned to SETTINGS times. RESEARCH RQ2: Why cutoff movement distorts? Rapid SETTINGS while held Saw note. Align clicks to SETTINGS times in EXPORT.",
+    "session": {
+      "durationMs": 4620
+    },
+    "assertions": [
+      {
+        "id": "session-off",
+        "path": "e5.sessionActive",
+        "operator": "equals",
+        "expected": false
+      },
+      {
+        "id": "exportable",
+        "path": "e5.hasExportableData",
+        "operator": "equals",
+        "expected": true
+      },
+      {
+        "id": "controls-min",
+        "path": "e5.controlRecordCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 1
+      },
+      {
+        "id": "obs-min",
+        "path": "e5.audioObservationCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 1
+      },
+      {
+        "id": "windows-nonneg",
+        "path": "e5.pendingWindowCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 0
+      },
+      {
+        "id": "frames-advanced",
+        "path": "e5.absoluteRenderFrame",
+        "operator": "greaterThan",
+        "expected": 0
+      },
+      {
+        "id": "no-c-ovf",
+        "path": "e5.controlOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      },
+      {
+        "id": "no-w-ovf",
+        "path": "e5.windowOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      },
+      {
+        "id": "no-a-ovf",
+        "path": "e5.audioObservationOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      }
+    ]
+  }
+}

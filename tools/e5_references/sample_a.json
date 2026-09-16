@@ -1,0 +1,42 @@
+{
+  "schema": "e5-test-reference",
+  "schemaVersion": 1,
+  "testId": "sample-a",
+  "title": "Sample A — idle/exportable gates",
+  "description": "On-device: IMPORT → START → play optionally → STOP → check assertions → EXPORT. durationMs is metadata only.",
+  "session": {
+    "durationMs": 5000
+  },
+  "assertions": [
+    {
+      "id": "session-inactive-after-stop",
+      "path": "e5.sessionActive",
+      "operator": "equals",
+      "expected": false
+    },
+    {
+      "id": "no-control-overflow",
+      "path": "e5.controlOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-window-overflow",
+      "path": "e5.windowOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-audio-obs-overflow",
+      "path": "e5.audioObservationOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "frame-non-negative",
+      "path": "e5.absoluteRenderFrame",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    }
+  ]
+}

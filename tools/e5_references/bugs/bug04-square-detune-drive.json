@@ -1,0 +1,66 @@
+{
+  "schema": "e5-test-reference",
+  "schemaVersion": 1,
+  "testId": "bug04-square-detune-drive",
+  "title": "BUG-04 Square focus — Detune+Drive100",
+  "description": "PROTOCOL: Wave=Square, Detune ON, Drive 100%. START E5. Add voices through 5–6. STOP+EXPORT at first clear distortion. min 5 noteOns.",
+  "session": {
+    "durationMs": 45000
+  },
+  "assertions": [
+    {
+      "id": "after-stop-session-off",
+      "path": "e5.sessionActive",
+      "operator": "equals",
+      "expected": false
+    },
+    {
+      "id": "has-exportable-data",
+      "path": "e5.hasExportableData",
+      "operator": "equals",
+      "expected": true
+    },
+    {
+      "id": "control-records-min",
+      "path": "e5.controlRecordCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 5
+    },
+    {
+      "id": "audio-obs-min",
+      "path": "e5.audioObservationCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 5
+    },
+    {
+      "id": "pending-windows-nonneg",
+      "path": "e5.pendingWindowCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    },
+    {
+      "id": "frames-advanced",
+      "path": "e5.absoluteRenderFrame",
+      "operator": "greaterThan",
+      "expected": 0
+    },
+    {
+      "id": "no-control-overflow",
+      "path": "e5.controlOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-window-overflow",
+      "path": "e5.windowOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-audio-obs-overflow",
+      "path": "e5.audioObservationOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    }
+  ]
+}

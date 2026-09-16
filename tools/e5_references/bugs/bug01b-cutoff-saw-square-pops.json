@@ -1,0 +1,66 @@
+{
+  "schema": "e5-test-reference",
+  "schemaVersion": 1,
+  "testId": "bug01b-cutoff-saw-square-pops",
+  "title": "BUG-01b Cutoff pops — Saw/Square while moving",
+  "description": "PROTOCOL: Wave=Saw, then Square. START E5. Hold note(s). Move Cutoff in realtime listening for pops/clicks while knob moving (intermittent). Also note UI row sideways drift if visible. STOP+EXPORT. Assertions verify capture health only; acoustic pops diagnosed from exported PCM windows.",
+  "session": {
+    "durationMs": 45000
+  },
+  "assertions": [
+    {
+      "id": "after-stop-session-off",
+      "path": "e5.sessionActive",
+      "operator": "equals",
+      "expected": false
+    },
+    {
+      "id": "has-exportable-data",
+      "path": "e5.hasExportableData",
+      "operator": "equals",
+      "expected": true
+    },
+    {
+      "id": "control-records-min",
+      "path": "e5.controlRecordCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 2
+    },
+    {
+      "id": "audio-obs-min",
+      "path": "e5.audioObservationCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 2
+    },
+    {
+      "id": "pending-windows-nonneg",
+      "path": "e5.pendingWindowCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    },
+    {
+      "id": "frames-advanced",
+      "path": "e5.absoluteRenderFrame",
+      "operator": "greaterThan",
+      "expected": 0
+    },
+    {
+      "id": "no-control-overflow",
+      "path": "e5.controlOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-window-overflow",
+      "path": "e5.windowOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-audio-obs-overflow",
+      "path": "e5.audioObservationOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    }
+  ]
+}

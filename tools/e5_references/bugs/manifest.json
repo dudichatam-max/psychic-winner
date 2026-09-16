@@ -1,0 +1,86 @@
+{
+  "package": "e5-bug-references-v1",
+  "schema": "e5-test-reference",
+  "schemaVersion": 1,
+  "branch": "E5-Reference-JSON",
+  "important": [
+    "Assertions can ONLY use the 9 approved e5.* paths — they validate evidence capture health, NOT acoustic PASS/FAIL of bugs.",
+    "Acoustic diagnosis = EXPORT diagnostics JSON after each run.",
+    "durationMs is metadata only — always STOP manually.",
+    "Build APK from branch E5-Reference-JSON before IMPORT works."
+  ],
+  "files": [
+    {
+      "file": "bug01-cutoff-sine-triangle.json",
+      "testId": "bug01-cutoff-sine-triangle",
+      "title": "BUG-01 Cutoff realtime — Sine/Triangle",
+      "bug": "bug01"
+    },
+    {
+      "file": "bug01b-cutoff-saw-square-pops.json",
+      "testId": "bug01b-cutoff-saw-square-pops",
+      "title": "BUG-01b Cutoff pops — Saw/Square while moving",
+      "bug": "bug01b"
+    },
+    {
+      "file": "bug02-dividers-preset-scope-note.json",
+      "testId": "bug02-dividers-preset-scope-note",
+      "title": "BUG-02 Dividers 2/3/4 not saved in presets",
+      "bug": "bug02"
+    },
+    {
+      "file": "bug03-polyphony-clean-baseline.json",
+      "testId": "bug03-polyphony-clean-baseline",
+      "title": "BUG-03 Polyphony ceiling — no Drive/Detune/FX",
+      "bug": "bug03"
+    },
+    {
+      "file": "bug03-wave-sine-stress.json",
+      "testId": "bug03-wave-sine-stress",
+      "title": "BUG-03 Wave Sine — high polyphony evidence",
+      "bug": "bug03"
+    },
+    {
+      "file": "bug03-wave-square-stress.json",
+      "testId": "bug03-wave-square-stress",
+      "title": "BUG-03 Wave Square — distortion ~7 voices",
+      "bug": "bug03"
+    },
+    {
+      "file": "bug04-detune-drive100.json",
+      "testId": "bug04-detune-drive100",
+      "title": "BUG-04 Detune ON + Drive 100%",
+      "bug": "bug04"
+    },
+    {
+      "file": "bug04-square-detune-drive.json",
+      "testId": "bug04-square-detune-drive",
+      "title": "BUG-04 Square focus — Detune+Drive100",
+      "bug": "bug04"
+    },
+    {
+      "file": "bug05-detune-drive-sub-warm.json",
+      "testId": "bug05-detune-drive-sub-warm",
+      "title": "BUG-05 Detune+Drive100+Sub+Warm",
+      "bug": "bug05"
+    },
+    {
+      "file": "bug05-square-full-stack.json",
+      "testId": "bug05-square-full-stack",
+      "title": "BUG-05 Square full stack — earliest ceiling",
+      "bug": "bug05"
+    },
+    {
+      "file": "rq1-voice-ceiling-evidence.json",
+      "testId": "rq1-voice-ceiling-evidence",
+      "title": "RQ1 Why clicks near max voices?",
+      "bug": "rq1"
+    },
+    {
+      "file": "rq2-cutoff-move-evidence.json",
+      "testId": "rq2-cutoff-move-evidence",
+      "title": "RQ2 Why cutoff move causes distortion?",
+      "bug": "rq2"
+    }
+  ]
+}

@@ -79,22 +79,28 @@ fun BenchmarkScreen(
     var finalizingReference by remember { mutableStateOf(false) }
     var deletingReference by remember { mutableStateOf(false) }
 
-    // E5 diagnostic session UI (independent of benchmark stress `running`)
-    var e5Running by remember { mutableStateOf(engine.isE5SessionActive()) }
-    var e5Status by remember { mutableStateOf(if (engine.isE5SessionActive()) "E5 RUNNING" else "E5 IDLE") }
+    // E5 Reference JSON + diagnostics UI (Active Reference lives in E5TestController singleton)
+    var e5Phase by remember { mutableStateOf(E5TestController.getPhase()) }
+    var e5ActiveRef by remember { mutableStateOf(E5TestController.getActiveReference()) }
+    var e5ActiveScenario by remember { mutableStateOf(E5TestController.getActiveScenario()) }
+    var e5LastResult by remember { mutableStateOf(E5TestController.getLastResult()) }
     var e5LastExportPath by remember { mutableStateOf("") }
     var e5ExportBusy by remember { mutableStateOf(false) }
     var e5Msg by remember { mutableStateOf("") }
     var e5HasData by remember { mutableStateOf(engine.hasE5ExportableData()) }
+    var e5ResultFlash by remember { mutableStateOf("") }
+
+    fun refreshE5UiFromController() {
+        e5Phase = E5TestController.getPhase()
+        e5ActiveRef = E5TestController.getActiveReference()
+        e5ActiveScenario = E5TestController.getActiveScenario()
+        e5LastResult = E5TestController.getLastResult()
+        e5HasData = engine.hasE5ExportableData()
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
-            val active = engine.isE5SessionActive()
-            e5Running = active
-            e5HasData = engine.hasE5ExportableData()
-            if (!e5ExportBusy) {
-                e5Status = if (active) "E5 RUNNING" else "E5 IDLE"
-            }
+            refreshE5UiFromController()
             delay(200)
         }
     }
@@ -178,9 +184,8 @@ fun BenchmarkScreen(
             }
             withContext(Dispatchers.Main) {
                 val (ok, pathOrErr, _) = result
-                e5Running = engine.isE5SessionActive()
+                refreshE5UiFromController()
                 e5HasData = engine.hasE5ExportableData()
-                e5Status = if (e5Running) "E5 RUNNING" else "E5 IDLE"
                 if (ok) {
                     e5LastExportPath = pathOrErr
                     e5Msg = "Saved via system picker: $pathOrErr"
@@ -200,6 +205,43 @@ fun BenchmarkScreen(
                     e5Msg = "EXPORT failed: $pathOrErr"
                 }
                 e5ExportBusy = false
+            }
+        }
+    }
+
+    val importE5ReferenceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) {
+            e5Msg = "Import cancelled"
+            return@rememberLauncherForActivityResult
+        }
+        if (!E5TestController.canImport()) {
+            e5Msg = "Import disabled while RUNNING"
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch(Dispatchers.IO) {
+            val outcome = try {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: return@launch withContext(Dispatchers.Main) {
+                        e5Msg = "Import failed: could not read file"
+                    }
+                E5TestController.importReference(bytes)
+            } catch (t: Throwable) {
+                E5ImportResult.Rejected(t.message ?: "import failed")
+            }
+            withContext(Dispatchers.Main) {
+                refreshE5UiFromController()
+                e5Msg = when (outcome) {
+                    is E5ImportResult.Success -> {
+                        val parts = mutableListOf<String>()
+                        outcome.scenario?.let { parts += "scenario ${it.scenarioId} — ${it.title}" }
+                        outcome.reference?.let { parts += "ref ${it.testId} — ${it.title}" }
+                        if (parts.isEmpty()) "Imported (empty)" else "Imported: ${parts.joinToString(" | ")}"
+                    }
+                    is E5ImportResult.Rejected ->
+                        "Import rejected (active unchanged): ${outcome.reason}"
+                }
             }
         }
     }
@@ -447,58 +489,107 @@ fun BenchmarkScreen(
             )
         }
 
-        // ---- E5 DIAGNOSTICS (observational; does not start/alter benchmark) ----
-        Text("E5 DIAGNOSTICS", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        // ---- E5 REFERENCE JSON + DIAGNOSTICS (observational; no 5th RUN button) ----
+        Text("E5 REFERENCE / SCENARIO", color = gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Text(
-            "Capture noteOn ↔ render-frame evidence without changing audio or benchmark.",
-            color = Color.LightGray, fontSize = 9.sp
+            "IMPORT scenario and/or assertions → START auto-replays when scenario loaded → STOP/EXPORT.",
+            color = Color.LightGray, fontSize = 8.sp
         )
+        val e5Running = e5Phase == E5ControllerPhase.RUNNING
+        val e5HasScenario = e5ActiveScenario != null
         Text(
-            e5Status,
+            when (e5Phase) {
+                E5ControllerPhase.NO_REFERENCE -> "NO REFERENCE"
+                E5ControllerPhase.REFERENCE_READY ->
+                    if (e5HasScenario) "SCENARIO READY" else "REFERENCE READY"
+                E5ControllerPhase.RUNNING ->
+                    if (e5HasScenario) "SCENARIO RUNNING…" else "RUNNING"
+                E5ControllerPhase.RESULT_READY -> "RESULT READY"
+            },
             color = if (e5Running) Color(0xFF81C784) else Color.White,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold
         )
+        val scen = e5ActiveScenario
+        if (scen != null) {
+            Text(
+                "Scenario: ${scen.scenarioId} — ${scen.title}",
+                color = Color(0xFF80CBC4),
+                fontSize = 8.sp
+            )
+        }
+        val ref = e5ActiveRef
+        if (ref != null) {
+            Text(
+                "Reference: ${ref.testId} — ${ref.title}",
+                color = Color(0xFFB0BEC5),
+                fontSize = 8.sp
+            )
+        } else if (scen == null) {
+            Text("Active: (none)", color = Color.DarkGray, fontSize = 8.sp)
+        }
+        if (e5ResultFlash.isNotEmpty()) {
+            Text(e5ResultFlash, color = Color(0xFFFFE082), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        }
         Row(
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Button(
                 onClick = {
-                    engine.startE5Session()
-                    e5Running = true
-                    e5Status = "E5 RUNNING"
-                    e5Msg = "E5 session started"
+                    val ok = E5TestController.start(engine)
+                    refreshE5UiFromController()
+                    e5Msg = when {
+                        !ok -> "START rejected (need scenario or reference READY)"
+                        e5ActiveScenario != null -> "SCENARIO RUNNING… (auto-replay)"
+                        else -> "E5 session started (manual play)"
+                    }
                     e5LastExportPath = ""
+                    e5ResultFlash = ""
                 },
-                enabled = !e5Running && !e5ExportBusy,
+                enabled = E5TestController.canStart() && !e5ExportBusy,
                 colors = ButtonDefaults.buttonColors(containerColor = gold),
-                modifier = Modifier.weight(1f).height(32.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                modifier = Modifier.weight(1f).height(28.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 0.dp)
             ) {
-                Text("START E5", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                Text("START", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 8.sp)
             }
             OutlinedButton(
                 onClick = {
-                    engine.stopE5Session()
-                    e5Running = false
-                    e5Status = "E5 IDLE"
+                    val result = E5TestController.stop(engine)
+                    refreshE5UiFromController()
                     e5Msg = "E5 session stopped"
+                    e5ResultFlash = result?.summaryLine() ?: ""
                 },
-                enabled = e5Running && !e5ExportBusy,
-                modifier = Modifier.weight(1f).height(32.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                enabled = E5TestController.canStop() && !e5ExportBusy,
+                modifier = Modifier.weight(1f).height(28.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 0.dp)
             ) {
-                Text("STOP E5", color = gold, fontSize = 9.sp)
+                Text("STOP", color = gold, fontSize = 8.sp)
+            }
+            OutlinedButton(
+                onClick = {
+                    if (!E5TestController.canImport()) {
+                        e5Msg = "Import disabled while RUNNING"
+                        return@OutlinedButton
+                    }
+                    importE5ReferenceLauncher.launch(
+                        arrayOf("application/json", "application/octet-stream", "*/*")
+                    )
+                },
+                enabled = E5TestController.canImport() && !e5ExportBusy,
+                modifier = Modifier.weight(1f).height(28.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 0.dp)
+            ) {
+                Text("IMPORT", color = gold, fontSize = 8.sp)
             }
             OutlinedButton(
                 onClick = {
                     if (e5ExportBusy) return@OutlinedButton
-                    // Preferred lifecycle: STOP then EXPORT (finalize incomplete first)
-                    if (engine.isE5SessionActive()) {
-                        engine.stopE5Session()
-                        e5Running = false
-                        e5Status = "E5 IDLE"
+                    // Existing EXPORT meaning: CreateDocument + exportE5Diagnostics
+                    if (engine.isE5SessionActive() || e5Phase == E5ControllerPhase.RUNNING) {
+                        E5TestController.stop(engine)
+                        refreshE5UiFromController()
                         e5Msg = "E5 stopped for export — choose save location"
                     } else {
                         e5Msg = "Choose save location…"
@@ -508,18 +599,18 @@ fun BenchmarkScreen(
                     val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                     exportE5Launcher.launch("e5_diagnostics_$stamp.json")
                 },
-                enabled = !e5ExportBusy && (e5Running || e5HasData),
-                modifier = Modifier.weight(1f).height(32.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                enabled = !e5ExportBusy && (e5Running || e5HasData || e5Phase == E5ControllerPhase.RESULT_READY),
+                modifier = Modifier.weight(1f).height(28.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 0.dp)
             ) {
-                Text(if (e5ExportBusy) "…" else "EXPORT E5 JSON", color = gold, fontSize = 8.sp)
+                Text(if (e5ExportBusy) "…" else "EXPORT", color = gold, fontSize = 8.sp)
             }
         }
         if (e5LastExportPath.isNotEmpty()) {
-            Text("Last file: $e5LastExportPath", color = Color(0xFFB0BEC5), fontSize = 8.sp)
+            Text("Last file: $e5LastExportPath", color = Color(0xFFB0BEC5), fontSize = 7.sp)
         }
         if (e5Msg.isNotEmpty()) {
-            Text(e5Msg, color = Color(0xFFCE93D8), fontSize = 9.sp)
+            Text(e5Msg, color = Color(0xFFCE93D8), fontSize = 8.sp)
         }
 
         Text("EXTREME STRESS", color = gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)

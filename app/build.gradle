@@ -34,6 +34,9 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion '1.5.4'
     }
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
 }
 
 android.applicationVariants.all { variant ->
@@ -51,4 +54,8 @@ dependencies {
     implementation 'androidx.compose.ui:ui-graphics'
     implementation 'androidx.compose.ui:ui-tooling-preview'
     implementation 'androidx.compose.material3:material3'
+
+    // E5 Reference JSON unit tests (org.json mirrors Android platform API)
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }

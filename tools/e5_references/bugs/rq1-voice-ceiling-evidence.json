@@ -1,0 +1,66 @@
+{
+  "schema": "e5-test-reference",
+  "schemaVersion": 1,
+  "testId": "rq1-voice-ceiling-evidence",
+  "title": "RQ1 Why clicks near max voices?",
+  "description": "RESEARCH: Same as clean polyphony climb 1..8 with FX off, Wave=Saw (sensitive). START E5, climb, STOP+EXPORT. Offline: join control eventId to windows; inspect PCM around appliedFrame N±32 vs rising controlRecordCount. Assertions ensure rich evidence (>=8 events).",
+  "session": {
+    "durationMs": 90000
+  },
+  "assertions": [
+    {
+      "id": "after-stop-session-off",
+      "path": "e5.sessionActive",
+      "operator": "equals",
+      "expected": false
+    },
+    {
+      "id": "has-exportable-data",
+      "path": "e5.hasExportableData",
+      "operator": "equals",
+      "expected": true
+    },
+    {
+      "id": "control-records-min",
+      "path": "e5.controlRecordCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 8
+    },
+    {
+      "id": "audio-obs-min",
+      "path": "e5.audioObservationCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 8
+    },
+    {
+      "id": "pending-windows-nonneg",
+      "path": "e5.pendingWindowCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    },
+    {
+      "id": "frames-advanced",
+      "path": "e5.absoluteRenderFrame",
+      "operator": "greaterThan",
+      "expected": 0
+    },
+    {
+      "id": "no-control-overflow",
+      "path": "e5.controlOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-window-overflow",
+      "path": "e5.windowOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-audio-obs-overflow",
+      "path": "e5.audioObservationOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    }
+  ]
+}

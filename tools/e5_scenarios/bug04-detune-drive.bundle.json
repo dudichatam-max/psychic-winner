@@ -1,0 +1,144 @@
+{
+  "schema": "e5-bundle",
+  "schemaVersion": 1,
+  "scenario": {
+    "schema": "e5-scenario",
+    "schemaVersion": 1,
+    "scenarioId": "bug04-detune-drive-voices",
+    "title": "BUG-04 Detune+Drive100 5 voices (auto)",
+    "description": "Auto: Detune ON, Drive=1.0, 5 staggered voices. ~15s.",
+    "durationUs": 15000000,
+    "initialSettings": {
+      "waveform": 1,
+      "volume": 0.5,
+      "attack": 15.0,
+      "decay": 50.0,
+      "sustain": 0.8,
+      "release": 200.0,
+      "drive": 1.0,
+      "reverb": 0.0,
+      "cutoff": 5000.0,
+      "resonance": 0.3,
+      "echo": 0.0,
+      "glide": 0.0,
+      "octave": 0,
+      "detune": true,
+      "sub": false,
+      "warm": false,
+      "vibe": false,
+      "rip": false,
+      "fuzz": false,
+      "phaz": false,
+      "piano": false,
+      "div2": false,
+      "div3": false,
+      "div4": false
+    },
+    "events": [
+      {
+        "timeUs": 500000,
+        "type": "NOTE_ON",
+        "freq": 261.63
+      },
+      {
+        "timeUs": 2000000,
+        "type": "NOTE_ON",
+        "freq": 293.66
+      },
+      {
+        "timeUs": 3500000,
+        "type": "NOTE_ON",
+        "freq": 329.63
+      },
+      {
+        "timeUs": 5000000,
+        "type": "NOTE_ON",
+        "freq": 349.23
+      },
+      {
+        "timeUs": 6500000,
+        "type": "NOTE_ON",
+        "freq": 392.0
+      },
+      {
+        "timeUs": 12000000,
+        "type": "NOTE_OFF",
+        "freq": 261.63
+      },
+      {
+        "timeUs": 12400000,
+        "type": "NOTE_OFF",
+        "freq": 293.66
+      },
+      {
+        "timeUs": 12800000,
+        "type": "NOTE_OFF",
+        "freq": 329.63
+      },
+      {
+        "timeUs": 13200000,
+        "type": "NOTE_OFF",
+        "freq": 349.23
+      },
+      {
+        "timeUs": 13600000,
+        "type": "NOTE_OFF",
+        "freq": 392.0
+      }
+    ]
+  },
+  "reference": {
+    "schema": "e5-test-reference",
+    "schemaVersion": 1,
+    "testId": "bug04-detune-drive-assert",
+    "title": "BUG-04 auto assertions (5 noteOns)",
+    "description": "Paired with auto scenario; controlRecordCount >= 5.",
+    "session": {
+      "durationMs": 15000
+    },
+    "assertions": [
+      {
+        "id": "after-stop-session-off",
+        "path": "e5.sessionActive",
+        "operator": "equals",
+        "expected": false
+      },
+      {
+        "id": "has-exportable-data",
+        "path": "e5.hasExportableData",
+        "operator": "equals",
+        "expected": true
+      },
+      {
+        "id": "control-records-min",
+        "path": "e5.controlRecordCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 5
+      },
+      {
+        "id": "audio-obs-min",
+        "path": "e5.audioObservationCount",
+        "operator": "greaterThanOrEqual",
+        "expected": 5
+      },
+      {
+        "id": "no-control-overflow",
+        "path": "e5.controlOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      },
+      {
+        "id": "no-window-overflow",
+        "path": "e5.windowOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      },
+      {
+        "id": "no-audio-obs-overflow",
+        "path": "e5.audioObservationOverflowCount",
+        "operator": "equals",
+        "expected": 0
+      }
+    ]
+  }
+}

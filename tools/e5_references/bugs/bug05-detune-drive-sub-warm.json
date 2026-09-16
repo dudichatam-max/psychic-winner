@@ -1,0 +1,66 @@
+{
+  "schema": "e5-test-reference",
+  "schemaVersion": 1,
+  "testId": "bug05-detune-drive-sub-warm",
+  "title": "BUG-05 Detune+Drive100+Sub+Warm",
+  "description": "PROTOCOL: Detune ON, Drive 100%, Sub ON, Warm ON. START E5. Expect earlier failure: Sine~6, Square after ~4, Triangle/Saw ~5. Run Square worst-case to >=4 noteOns. STOP+EXPORT.",
+  "session": {
+    "durationMs": 60000
+  },
+  "assertions": [
+    {
+      "id": "after-stop-session-off",
+      "path": "e5.sessionActive",
+      "operator": "equals",
+      "expected": false
+    },
+    {
+      "id": "has-exportable-data",
+      "path": "e5.hasExportableData",
+      "operator": "equals",
+      "expected": true
+    },
+    {
+      "id": "control-records-min",
+      "path": "e5.controlRecordCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 4
+    },
+    {
+      "id": "audio-obs-min",
+      "path": "e5.audioObservationCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 4
+    },
+    {
+      "id": "pending-windows-nonneg",
+      "path": "e5.pendingWindowCount",
+      "operator": "greaterThanOrEqual",
+      "expected": 0
+    },
+    {
+      "id": "frames-advanced",
+      "path": "e5.absoluteRenderFrame",
+      "operator": "greaterThan",
+      "expected": 0
+    },
+    {
+      "id": "no-control-overflow",
+      "path": "e5.controlOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-window-overflow",
+      "path": "e5.windowOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    },
+    {
+      "id": "no-audio-obs-overflow",
+      "path": "e5.audioObservationOverflowCount",
+      "operator": "equals",
+      "expected": 0
+    }
+  ]
+}
