@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "session_id": "YYYY-MM-DD_<commit_short>_<scenario>",
+  "recorded_at": "YYYY-MM-DD",
+  "timezone": "Asia/Jerusalem",
+  "commit": "",
+  "commit_short": "",
+  "pr_or_agent_ref": "",
+  "compare_baseline_commit": "",
+  "compare_baseline_ref": "",
+  "compare_baseline_status": "pending_results",
+  "app": "L STUDIO",
+  "app_version": "1.0",
+  "device": "",
+  "android": "",
+  "audio": {
+    "sample_rate_hz": 48000,
+    "buffer_size": 512,
+    "deadline_ms": 10.667
+  },
+  "scenario": {
+    "name": "reference_C_fixed_playback",
+    "profile": "DSP",
+    "polyphony": "Dynamic 1–8",
+    "max_simultaneous_voices": 8,
+    "reference_replay": "recorded settings/events",
+    "looper_replay": "OFF",
+    "drums_replay": "OFF",
+    "reference_bpm": 70.54,
+    "wave": 1,
+    "warm_up": "none",
+    "measurement_duration_s": 48.25
+  },
+  "runs": [],
+  "aggregate": {},
+  "notes_he": []
+}
