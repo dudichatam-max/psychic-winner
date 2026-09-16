@@ -23,7 +23,7 @@ This tip is the **working baseline** for ABC + Extreme sessions. Paste Copy text
 
 | Scenario | Looper | Drums | Reference | Status | File |
 |----------|--------|-------|-----------|--------|------|
-| **A** · DSP | OFF | OFF | recorded A (fixed) | pending | `YYYY-MM-DD_ref-A_dsp-profile.json` |
+| **A** · DSP | OFF | OFF | recorded A (fixed) | **done** WARNING score 67 · avg 10.631 · underruns 0 | [`2026-09-16_ref-A_dsp-profile.json`](2026-09-16_ref-A_dsp-profile.json) |
 | **B** · DSP | OFF | OFF | recorded B (fixed) | pending | `YYYY-MM-DD_ref-B_dsp-profile.json` |
 | **C** · DSP | OFF | OFF | recorded C (fixed) | pending | `YYYY-MM-DD_ref-C_dsp-profile.json` |
 | **Extreme** · DSP | **ON** | **ON** | system fixed **extreme** | pending | `YYYY-MM-DD_extreme_dsp-profile.json` |

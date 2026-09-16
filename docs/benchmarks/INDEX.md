@@ -6,7 +6,7 @@ Tip נוכחי לבניית בסיס עבודה. פירוט: [results/482dae8/RE
 
 | Scenario | Commit | n | Profile | Looper/Drums | סטטוס |
 |----------|--------|---|--------|--------------|--------|
-| Reference **A** | `482dae8` | 3 | DSP | OFF / OFF | ממתין |
+| Reference **A** | `482dae8` | 3 | DSP | OFF / OFF | **WARNING** score **67** · avg **10.631** · miss **44.5%** · underruns **0** — [פירוט](results/482dae8/2026-09-16_ref-A_dsp-profile.md) |
 | Reference **B** | `482dae8` | 3 | DSP | OFF / OFF | ממתין |
 | Reference **C** | `482dae8` | 3 | DSP | OFF / OFF | ממתין |
 | **Extreme** | `482dae8` | 3 | DSP | **ON / ON** (רפרנס extreme קבוע) | ממתין |
